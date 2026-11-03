@@ -1,10 +1,10 @@
 # Web app
 
-React 19 + TypeScript + Vite, served at `/app`. The design system and accessibility contract are in [DESIGN.md](DESIGN.md).
+React 19 + TypeScript + Vite, served at the site root; the REST API is under `/api` and the MCP server at `/mcp`. The design system and accessibility contract are in [DESIGN.md](DESIGN.md).
 
 ## Run it
 
-Everything at once: `docker compose up --build` at the repo root serves the built app at http://localhost:8000/app/. For development with hot reload:
+Everything at once: `docker compose up --build` at the repo root serves the built app at http://localhost:8000/. For development with hot reload:
 
 ```sh
 # terminal 1: the API in mock mode (no keys needed)
@@ -12,7 +12,7 @@ MODE=mock PUBLIC_BASE_URL=http://localhost:5173 uv run uvicorn app.main:app --po
 
 # terminal 2: the web app, proxying API paths to it
 cd web && npm install && MDE_API=http://localhost:8765 npm run dev
-# open http://localhost:5173/app/
+# open http://localhost:5173/
 ```
 
 The app is the same in every mode: it talks to the real API. Mock mode only swaps PayPal and email for stand-ins.
@@ -20,7 +20,7 @@ The app is the same in every mode: it talks to the real API. Mock mode only swap
 - **Sign-in and invitation links** show on screen instead of being emailed.
 - **PayPal approval, onboarding and invoice pages** are local stand-ins.
 
-Everything demo-only lives at **`/app/demo`** (mock mode only):
+Everything demo-only lives at **`/demo`** (mock mode only):
 - loading a ready-made grant with a funder, a grantee and a reviewer signed in
 - one-click "act as" for each
 - sample evidence files
@@ -28,7 +28,7 @@ Everything demo-only lives at **`/app/demo`** (mock mode only):
 
 `PUBLIC_BASE_URL` points at Vite so PayPal's (mock) redirects come back through the same origin.
 
-In production, `npm run build` writes `web/dist`, and FastAPI serves it at `/app` (`app/api/spa.py`) on the same origin as the API.
+In production, `npm run build` writes `web/dist`, and the server serves it at `/` (`app/api/spa.py`) on the same origin as the API (`/api`) and the MCP server (`/mcp`).
 
 ## Scripts
 
@@ -54,4 +54,4 @@ src/
 e2e/          Playwright: money flows, accessibility
 ```
 
-Every org-scoped URL carries the org: `/app/o/:orgId/a/:agreementId/m/:milestoneId`. That org is sent as `X-Org-Id`, so a person who sits on several parties of one agreement is never ambiguous.
+Every org-scoped URL carries the org: `/o/:orgId/a/:agreementId/m/:milestoneId`. That org is sent as `X-Org-Id`, so a person who sits on several parties of one agreement is never ambiguous.

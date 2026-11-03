@@ -116,8 +116,8 @@ def _component_fn(route: Any, component: Any) -> None:
     component.meta = {**(component.meta or {}), "securitySchemes": SECURITY_SCHEMES}
 
 
-def build_mcp(app: FastAPI, base_url: str) -> tuple[FastMCP, DatabaseOAuthProvider]:
-    oauth = DatabaseOAuthProvider(base_url=base_url, state=app.state)
+def build_mcp(app: FastAPI, base_url: str, api_base_url: str | None = None) -> tuple[FastMCP, DatabaseOAuthProvider]:
+    oauth = DatabaseOAuthProvider(base_url=base_url, state=app.state, consent_base_url=api_base_url)
     auth = MultiAuth(server=oauth, verifiers=[ApiKeyVerifier(app.state, oauth.resource_url)])
     mcp = FastMCP.from_fastapi(
         app,

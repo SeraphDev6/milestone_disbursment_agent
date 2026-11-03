@@ -5,30 +5,12 @@ import { defineConfig } from "vite";
 
 const API = process.env.MDE_API ?? "http://localhost:8000";
 
-// API path prefixes proxied to FastAPI in dev, so the browser sees one origin and no CORS is needed.
-// "/app" is the SPA itself and is never proxied.
-const API_PREFIXES = [
-  "/auth/magic-link",
-  "/auth/sso",
-  "/auth/sign-out",
-  "/me",
-  "/orgs",
-  "/invitations/accept",
-  "/agreements",
-  "/milestones",
-  "/evidence",
-  "/criteria",
-  "/health",
-  "/mock",
-  "/paypal",
-  "/pay/",
-  "/webhooks",
-  "/openapi.json",
-  "/docs",
-];
+// Proxied to the backend in dev, so the browser sees one origin and no CORS is needed: the REST API under
+// /api, and the MCP server with its OAuth endpoints at the root. Everything else is the SPA.
+const API_PREFIXES = ["/api", "/mcp", "/.well-known", "/authorize", "/token", "/register", "/revoke"];
 
 export default defineConfig({
-  base: "/app/",
+  base: "/",
   plugins: [react()],
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   server: {

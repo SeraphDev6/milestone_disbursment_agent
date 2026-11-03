@@ -213,9 +213,12 @@ original per-agreement party keys.
   issuer, audience, expiry and nonce are checked, and its email must be in a verified domain. People are added
   to the org on first sign-in (default role member, never owner). With "enforce SSO" on, magic links are
   refused for those domains.
-- **Web app hand-offs:** with `PUBLIC_APP_URL` set, emailed sign-in and invitation links open the web app
-  (`/auth/verify?token=`, `/invitations/accept?token=`), which exchanges them through the API; MCP consent
-  sign-in keeps the API's own pages. SSO started with `to_app` returns to `/auth/sso#token=…` (the fragment never
+- **One host, three apps:** the web app at `/`, the REST API under `/api` (its docs at `/api/docs`; PayPal
+  returns, pay links and webhooks live there) and the MCP server at `/mcp` with its OAuth endpoints at the root,
+  where clients look for them. A small ASGI dispatcher in `app/main.py` routes between them.
+- **Web app hand-offs:** emailed sign-in and invitation links open the web app (`/auth/verify?token=`,
+  `/invitations/accept?token=`), which exchanges them through the API; MCP consent sign-in keeps the API's own
+  pages. `PUBLIC_APP_URL` is only for the dev split. SSO started with `to_app` returns to `/auth/sso#token=…` (the fragment never
   reaches a server). A signed-in invitee can accept from their inbox with `POST /invitations/{id}/accept`; the
   signed-in email must match the invitation, which is what the emailed token proves.
 

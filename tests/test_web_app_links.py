@@ -14,7 +14,7 @@ APP = "http://web.test/app"
 
 @pytest.fixture
 def app_client(client):
-    client.app.state.settings.public_app_url = APP
+    client.app.state.app_url = APP  # as create_app sets it from PUBLIC_APP_URL (or a web build)
     return client
 
 

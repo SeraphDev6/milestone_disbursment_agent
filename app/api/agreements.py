@@ -154,7 +154,7 @@ def create_agreement(
     session.add(row)
     session.flush()
     record_audit(session, row.id, actor, "agreement_created", to_status=row.status)
-    base, links, invitations = request.app.state.settings.public_base_url, {}, []
+    base, links, invitations = request.app.state.settings.api_base_url, {}, []
     invitees = [(draft.counterparty_email, InvitationKind.counterparty)] + [
         (e, InvitationKind.reviewer) for e in draft.reviewer_emails
     ]
@@ -166,7 +166,7 @@ def create_agreement(
             email=email,
             actor=actor,
             base_url=base,
-            app_url=request.app.state.settings.public_app_url,
+            app_url=request.app.state.app_url,
             agreement=row,
             commit=False,
         )
@@ -213,8 +213,8 @@ def invite_to_agreement(
         kind=kind,
         email=body.email,
         actor=access.actor,
-        base_url=request.app.state.settings.public_base_url,
-        app_url=request.app.state.settings.public_app_url,
+        base_url=request.app.state.settings.api_base_url,
+        app_url=request.app.state.app_url,
         agreement=a,
     )
     return InvitationSent(invitation=invitation_read(session, inv), dev_link=link if show_links(request) else None)

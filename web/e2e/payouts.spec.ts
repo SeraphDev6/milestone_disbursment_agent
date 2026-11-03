@@ -15,7 +15,7 @@ test("demo page: dispute window, the reviewer contests, the payee accepts and th
   await (await popup).close();
 
   // Demo shortcut: mark it verified, then release it from the tranche page.
-  await page.goto("/app/demo");
+  await page.goto("/demo");
   const row = page.getByRole("listitem").filter({ hasText: "spring workshops" });
   await expect(row.getByText(/^Held/)).toBeVisible();
   await row.getByRole("button", { name: /Mark verified/ }).click();

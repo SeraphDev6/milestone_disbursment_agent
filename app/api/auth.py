@@ -70,7 +70,7 @@ def request_link(body: MagicLinkRequest, session: SessionDep, request: Request) 
     rate_limit(request, "magic_link", client_ip(request))
     rate_limit(request, "magic_link", "email:" + body.email.strip().lower())
     link = identity.request_magic_link(
-        session, mailer(request), body.email, settings.public_base_url, app_url=settings.public_app_url
+        session, mailer(request), body.email, settings.api_base_url, app_url=request.app.state.app_url
     )
     return MagicLinkSent(dev_link=link if show_links(request) else None)
 

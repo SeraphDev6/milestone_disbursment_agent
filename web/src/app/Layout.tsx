@@ -27,7 +27,7 @@ function Footer() {
     <footer className={s.footer}>
       <div className={s.footerInner}>
         <span>Milestone Disbursement Engine · AGPL-3.0</span>
-        <a href="/docs">API reference</a>
+        <a href="/api/docs">API reference</a>
         <NavLink to="/design">Design system</NavLink>
       </div>
     </footer>

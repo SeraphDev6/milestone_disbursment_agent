@@ -19,9 +19,7 @@ router = APIRouter(tags=["paypal"])
 def connect(org_id: str, principal: PrincipalDep, session: SessionDep, request: Request) -> PayPalConnectStarted:
     principal.require_org(org_id, OrgRole.admin)
     org = session.get(Organization, org_id)
-    url = payee_accounts.start(
-        session, gateway(request), org, principal.actor, request.app.state.settings.public_base_url
-    )
+    url = payee_accounts.start(session, gateway(request), org, principal.actor, request.app.state.settings.api_base_url)
     return PayPalConnectStarted(onboarding_url=url)
 
 

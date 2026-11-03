@@ -82,6 +82,7 @@ def hermetic_settings(**overrides) -> Settings:
             "database_url": "sqlite://",
             "outbound_interval_seconds": 0,
             "payouts_interval_seconds": 0,
+            "web_app_built": False,  # links go to the API's own pages unless a test sets public_app_url
             **overrides,
         }
     )

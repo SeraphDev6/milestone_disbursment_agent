@@ -105,8 +105,9 @@ def main() -> int:
             if missing:
                 fail("webhook events", "not subscribed: " + ", ".join(missing))
                 failures += 1
-            if not str(hook.get("url", "")).startswith(settings.public_base_url):
-                print(f"  note webhook URL {hook.get('url')} is not under PUBLIC_BASE_URL {settings.public_base_url}")
+            expected = f"{settings.api_base_url}/webhooks/paypal"
+            if str(hook.get("url", "")).rstrip("/") != expected:
+                print(f"  note webhook URL {hook.get('url')} should be {expected}")
         except PayPalError as e:
             fail("webhook", str(e))
             failures += 1
@@ -122,8 +123,8 @@ def main() -> int:
                 amount=Decimal("1.00"),
                 currency="USD",
                 payee_merchant_id=None,
-                return_url=f"{settings.public_base_url}/paypal/return",
-                cancel_url=f"{settings.public_base_url}/paypal/cancel",
+                return_url=f"{settings.api_base_url}/paypal/return",
+                cancel_url=f"{settings.api_base_url}/paypal/cancel",
                 request_id=f"sandbox-check-{uuid.uuid4().hex[:12]}",
             )
             ok("authorize order", f"{order.order_id}; approve at {order.approve_url}")

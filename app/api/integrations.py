@@ -83,7 +83,7 @@ def register_github(
         session.flush()
         record_audit(session, a.id, access.actor, "github_connected", detail={"repo": body.repo})
         session.commit()
-    base = request.app.state.settings.public_base_url
+    base = request.app.state.settings.api_base_url
     return GitHubIntegration(
         integration_id=row.id,
         repo=row.target,

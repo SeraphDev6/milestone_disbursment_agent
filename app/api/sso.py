@@ -29,7 +29,7 @@ APP_RETURN = "app:"  # stored as the login state's next_path: finish in the web 
 def _start_next(request: Request, to_app: bool) -> str | None:
     if not to_app:
         return None
-    if not request.app.state.settings.public_app_url:
+    if not request.app.state.app_url:
         raise ServiceError("this server has no web app configured (PUBLIC_APP_URL)", 422)
     return APP_RETURN
 
@@ -39,7 +39,7 @@ class SSORedirect(SQLModel):
 
 
 def _base(request: Request) -> str:
-    return request.app.state.settings.public_base_url
+    return request.app.state.settings.api_base_url
 
 
 def _connection(session, org_id: str) -> SSOConnection:
@@ -112,7 +112,7 @@ def callback(code: str, state: str, session: SessionDep, request: Request) -> Re
         session, code, state, app_state.oidc, app_state.secrets, _base(request), browser_bound=bound
     )
     if next_path == APP_RETURN:  # the web app is bearer-only: hand it the token in the fragment (never sent on)
-        app_url = app_state.settings.public_app_url.rstrip("/")
+        app_url = app_state.app_url.rstrip("/")
         return RedirectResponse(f"{app_url}/auth/sso#token={token}", status_code=303)
     if next_path:  # a browser flow (e.g. MCP consent): continue there, signed in
         response = RedirectResponse(safe_next(next_path), status_code=303)

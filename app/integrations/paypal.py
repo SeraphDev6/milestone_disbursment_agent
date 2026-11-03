@@ -1020,7 +1020,7 @@ def make_gateway(settings) -> PayPalGateway:
     from app.config import Mode
 
     if settings.mode is Mode.mock:
-        return MockPayPal(base_url=settings.public_base_url)
+        return MockPayPal(base_url=settings.api_base_url)
     return SandboxPayPal(
         client_id=settings.paypal_client_id,
         client_secret=settings.paypal_client_secret.get_secret_value(),

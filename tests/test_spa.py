@@ -1,7 +1,10 @@
-from fastapi import FastAPI
+"""The web build at the site root, the API under /api and the MCP server at /mcp, through the Site dispatcher."""
+
 from fastapi.testclient import TestClient
 
-from app.api.spa import mount_spa
+from app.api.spa import make_spa
+from app.main import Site, create_app, create_site
+from tests.conftest import hermetic_settings
 
 
 def make(tmp_path):
@@ -9,41 +12,82 @@ def make(tmp_path):
     (tmp_path / "assets" / "app.js").write_text("console.log(1)")
     (tmp_path / "favicon.svg").write_text("<svg/>")
     (tmp_path / "index.html").write_text("<!doctype html><div id=root></div>")
-    app = FastAPI()
-    assert mount_spa(app, tmp_path)
-    return TestClient(app)
+    return TestClient(make_spa(tmp_path))
 
 
 def test_client_routes_fall_back_to_index(tmp_path):
     c = make(tmp_path)
-    for path in ("/app/", "/app/o/123/a/456/m/789", "/app/sign-in"):
+    for path in ("/", "/o/123/a/456/m/789", "/sign-in", "/demo"):
         r = c.get(path)
         assert r.status_code == 200 and "id=root" in r.text, path
-    assert c.get("/app", follow_redirects=False).status_code == 308
+    assert c.get("/app/o/1", follow_redirects=False).headers["location"] == "/o/1"  # the old prefix
 
 
 def test_files_are_served_and_missing_assets_404(tmp_path):
     c = make(tmp_path)
-    assert c.get("/app/assets/app.js").text == "console.log(1)"
-    assert c.get("/app/favicon.svg").text == "<svg/>"
-    assert c.get("/app/assets/missing.js").status_code == 404
+    assert c.get("/assets/app.js").text == "console.log(1)"
+    assert c.get("/favicon.svg").text == "<svg/>"
+    assert c.get("/assets/missing.js").status_code == 404
 
 
 def test_no_escape_from_dist(tmp_path):
     c = make(tmp_path)
     (tmp_path.parent / "secret.txt").write_text("nope")
-    assert "nope" not in c.get("/app/../secret.txt").text
-    assert "nope" not in c.get("/app/%2e%2e/secret.txt").text
+    assert "nope" not in c.get("/../secret.txt").text
+    assert "nope" not in c.get("/%2e%2e/secret.txt").text
 
 
-def test_no_build_mounts_nothing(tmp_path):
-    assert mount_spa(FastAPI(), tmp_path / "missing") is False
+def test_without_a_build_the_root_points_at_the_docs(tmp_path):
+    c = TestClient(make_spa(tmp_path / "missing"))
+    assert c.get("/", follow_redirects=False).headers["location"] == "/api/docs"
+    assert c.get("/o/1").status_code == 404
 
 
-def test_root_redirects_to_the_web_app_or_the_docs(client):
-    r = client.get("/", follow_redirects=False)
-    assert r.status_code == 307
-    assert r.headers["location"] == ("/app/" if client.app.state.spa else "/docs")
-    client.app.state.spa = not client.app.state.spa
-    r = client.get("/", follow_redirects=False)
-    assert r.headers["location"] == ("/app/" if client.app.state.spa else "/docs")
+def test_site_routes_api_mcp_and_app(tmp_path):
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "index.html").write_text("<!doctype html><div id=root></div>")
+    api = create_app(hermetic_settings(PUBLIC_BASE_URL="http://localhost"))
+    with TestClient(Site(api, make_spa(tmp_path)), base_url="http://localhost") as c:
+        assert c.get("/api/health").json()["status"] == "ok"
+        assert c.get("/health").status_code == 200 and "id=root" in c.get("/health").text  # not an API path
+        docs = c.get("/api/docs")
+        assert (
+            docs.status_code == 200
+            and "/api/openapi.json" in docs.text
+            and "content-security-policy" not in docs.headers
+        )
+        assert c.get("/api/openapi.json").json()["servers"] == [{"url": "/api"}]
+        prm = c.get("/.well-known/oauth-protected-resource/mcp").json()
+        assert prm["resource"] == "http://localhost/mcp"
+        assert c.post("/mcp", json={}).status_code in (400, 401, 406)  # the MCP server answered, not the app
+        assert "id=root" in c.get("/o/1/a/2/m/3").text
+        # the API's own browser pages, and the links it builds, carry the prefix
+        link = c.post("/api/auth/magic-link", json={"email": "pat@example.org"}).json()["dev_link"]
+        assert link.startswith("http://localhost/api/auth/magic-link/verify?token=")
+        page = c.get(link)
+        assert page.status_code == 200 and "action='/api/auth/magic-link/complete'" in page.text
+        gw = api.state.paypal
+        inv = gw.create_and_send_invoice(
+            recipient_email="p@x.example",
+            item_name="i",
+            amount=1,
+            currency="USD",
+            note="n",
+            reference="r",
+            request_id="k",
+        )
+        assert inv.payer_view_url.startswith("http://localhost/api/mock/paypal/invoices/")
+        page = c.get(inv.payer_view_url)
+        assert page.status_code == 200 and "action='/api/mock/paypal/invoices/" in page.text
+
+
+def test_create_site_serves_the_build_when_configured():
+    site = create_site(hermetic_settings(web_app_built=True))
+    with TestClient(site) as c:
+        assert c.get("/api/health").status_code == 200
+        r = c.get("/", follow_redirects=False)
+        assert (
+            r.status_code == 200
+            and "x-content-type-options" in r.headers
+            and "content-security-policy" not in r.headers
+        )

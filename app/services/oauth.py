@@ -110,7 +110,9 @@ class CIMDClient(OAuthClientInformationFull):
 
 
 class DatabaseOAuthProvider(OAuthProvider):
-    def __init__(self, *, base_url: str, state):
+    def __init__(self, *, base_url: str, state, consent_base_url: str | None = None):
+        """base_url: the host root, where the MCP server and its OAuth endpoints are; consent_base_url: where
+        the REST API's browser pages (the consent screen) are, when the API lives under a prefix."""
         super().__init__(
             base_url=base_url,
             issuer_url=base_url,
@@ -122,6 +124,7 @@ class DatabaseOAuthProvider(OAuthProvider):
         )
         self._state = state  # app.state: sessionmaker exists only once the app has started
         self.base_url_str = base_url.rstrip("/")
+        self.consent_base_url = (consent_base_url or base_url).rstrip("/")
         self.resource_url = f"{self.base_url_str}/mcp"
         self.cimd_fetcher = CIMDFetcher()  # SSRF-safe (https only, no private IPs, size/time limits, no redirects)
 
@@ -198,7 +201,7 @@ class DatabaseOAuthProvider(OAuthProvider):
             )
             s.add(pending)
             s.commit()
-            return f"{self.base_url_str}/oauth/consent?request={pending.id}"
+            return f"{self.consent_base_url}/oauth/consent?request={pending.id}"
 
     def issue_code(self, session: Session, pending: OAuthPendingAuthorization, user_id: str, org_id: str) -> str:
         """Called by the consent page on approval. Returns the raw one-time code."""

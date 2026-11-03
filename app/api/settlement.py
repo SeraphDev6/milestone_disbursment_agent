@@ -27,7 +27,7 @@ def fund(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep, reque
     access, m = auth
     access.require(Action.fund)
     order = settlement.start_funding(
-        session, gateway(request), m, access.actor, request.app.state.settings.public_base_url, utcnow()
+        session, gateway(request), m, access.actor, request.app.state.settings.api_base_url, utcnow()
     )
     return FundingStarted(order_id=order.order_id, approve_url=order.approve_url)
 
@@ -61,7 +61,7 @@ def release(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep, re
 
 def settlement_read(s, m, request: Request) -> SettlementRead:
     path = settlement.pay_path(s)
-    base = request.app.state.settings.public_base_url
+    base = request.app.state.settings.api_base_url
     return SettlementRead.model_validate(
         s, update={"milestone_status": m.status, "pay_url": f"{base}{path}" if path else None}
     )
@@ -72,9 +72,7 @@ def pay(settlement_id: str, session: SessionDep, request: Request) -> Response:
     """The payer's link for an invoice-mode tranche: a fresh PayPal order (or the PayPal invoice) each visit."""
     try:
         rate_limit(request, "pay_link", client_ip(request))
-        url = settlement.payment_link(
-            session, gateway(request), settlement_id, request.app.state.settings.public_base_url
-        )
+        url = settlement.payment_link(session, gateway(request), settlement_id, request.app.state.settings.api_base_url)
     except ServiceError as e:
         return html_page("Nothing to pay", e.message, e.status_code)
     return RedirectResponse(url, status_code=303)

@@ -142,10 +142,10 @@ test("a stale signature is refused and the new criteria are shown", async ({ pag
   const funder = await page.evaluate(() => JSON.parse(localStorage.getItem("mde.sessions")!).find((s: { user: { email: string } }) => s.user.email.startsWith("officer+")).token);
   const aid = agreement.split("/a/")[1]!.split("/")[0]!;
   const org = agreement.split("/o/")[1]!.split("/")[0]!;
-  const a = await (await page.request.get(`/agreements/${aid}`, { headers: { Authorization: `Bearer ${funder}`, "X-Org-Id": org } })).json();
+  const a = await (await page.request.get(`/api/agreements/${aid}`, { headers: { Authorization: `Bearer ${funder}`, "X-Org-Id": org } })).json();
   const ms = a.milestones.map((m: { title: string; amount: string; due_date: string; criteria: unknown[] }) => ({ title: m.title, amount: m.amount, due_date: m.due_date, criteria: m.criteria }));
   ms[1].title = "Tranche 2: final outcomes report";
-  const put = await page.request.put(`/agreements/${aid}/milestones`, { headers: { Authorization: `Bearer ${funder}`, "X-Org-Id": org }, data: { milestones: ms } });
+  const put = await page.request.put(`/api/agreements/${aid}/milestones`, { headers: { Authorization: `Bearer ${funder}`, "X-Org-Id": org }, data: { milestones: ms } });
   expect(put.ok()).toBe(true);
 
   await page.getByRole("button", { name: "Sign the criteria" }).click();

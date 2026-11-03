@@ -5,6 +5,10 @@ from typing import Literal
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# One host serves three things: the web app at /, the MCP server at /mcp (with its OAuth endpoints at the root,
+# where clients look for them), and the REST API under this prefix.
+API_PREFIX = "/api"
+
 
 class Mode(str, Enum):
     mock = "mock"  # no keys needed: fake PayPal ids, canned verifier
@@ -47,9 +51,11 @@ class Settings(BaseSettings):
     public_base_url: str = Field(
         "http://localhost:8000", validation_alias=AliasChoices("PUBLIC_BASE_URL", "RENDER_EXTERNAL_URL")
     )
-    # Where the web app lives (e.g. https://host/app). When set, emailed sign-in and invitation links open the web
-    # app (/auth/verify, /invitations/accept) instead of the API's pages, and SSO started from the app returns there.
+    # Where the web app lives. Unset: at PUBLIC_BASE_URL when a web build is present (production), otherwise
+    # emailed links open the API's own pages. Set it for the dev split (Vite on 5173, the API on 8000).
     public_app_url: str | None = None
+    # Serve the web build (web/dist) at the root and point emailed links at it. Unset: whenever the build exists.
+    web_app_built: bool | None = None
 
     # Outgoing email. console: log only (mock mode returns links in responses instead). resend: Resend's API.
     # smtp: any SMTP server (STARTTLS when the server offers it).
@@ -108,6 +114,12 @@ class Settings(BaseSettings):
     @property
     def is_mock(self) -> bool:
         return self.mode is Mode.mock
+
+    @property
+    def api_base_url(self) -> str:
+        """Where the REST API's own pages and callbacks live (PayPal returns, pay links, sign-in and consent pages,
+        webhooks): the public URL plus the API prefix."""
+        return self.public_base_url.rstrip("/") + API_PREFIX
 
 
 def use_claude(settings: Settings) -> bool:

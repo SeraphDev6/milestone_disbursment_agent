@@ -9,6 +9,7 @@ deliver-webhooks  send due outbound webhooks once (when the in-process loop is t
 import logging
 import sys
 
+from app.api.spa import has_build
 from app.config import get_settings
 from app.db import make_engine, make_sessionmaker, migrate, utcnow
 from app.integrations.email import make_mailer
@@ -32,7 +33,9 @@ def main(argv: list[str]) -> int:
     if argv[0] == "migrate":
         print("database is at the latest migration")
         return 0
-    notifier = Notifier(make_mailer(settings), settings.public_base_url, settings.public_app_url)
+    built = has_build() if settings.web_app_built is None else settings.web_app_built
+    app_url = settings.public_app_url or (settings.public_base_url if built else None)
+    notifier = Notifier(make_mailer(settings), settings.api_base_url, app_url)
     with make_sessionmaker(engine, info={NOTIFIER: notifier})() as session:
         now = utcnow()
         if argv[0] == "daily":

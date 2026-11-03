@@ -23,7 +23,10 @@ const auth: Middleware = {
   },
 };
 
-export const api = createClient<paths>({ baseUrl: "" });
+/** The REST API lives under this prefix on the same host (the MCP server is at /mcp, the app at /). */
+export const API_BASE = "/api";
+
+export const api = createClient<paths>({ baseUrl: API_BASE });
 api.use(auth);
 
 type Result<T> = { data?: T; error?: unknown; response: Response };
@@ -57,7 +60,7 @@ export async function download(path: string, fallbackName: string, orgId?: strin
   if (orgId) headers["X-Org-Id"] = orgId;
   let res: Response;
   try {
-    res = await fetch(path, { headers });
+    res = await fetch(API_BASE + path, { headers });
   } catch {
     throw new ApiError(0, null);
   }

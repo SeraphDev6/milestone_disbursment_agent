@@ -8,7 +8,7 @@ import { useTitle } from "@/app/RouteAnnouncer";
 import { Busy, ButtonLink, Callout, layout, PageHeader } from "@/design/components";
 
 /**
- * Where the identity provider's round trip ends: /app/auth/sso#token=…. The token is in the fragment (never
+ * Where the identity provider's round trip ends: /auth/sso#token=…. The token is in the fragment (never
  * sent to a server or logged); it's read once and removed from the address bar immediately.
  */
 export function SSODone() {

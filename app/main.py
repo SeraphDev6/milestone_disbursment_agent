@@ -9,8 +9,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.ai.agents import claude_runtime, mock_runtime
 from app.api import api_router, browser, mock_router
 from app.api.mcp import build_mcp
-from app.api.spa import mount_spa
-from app.config import Mode, Settings, get_settings, use_claude
+from app.api.spa import DIST, has_build, make_spa
+from app.config import API_PREFIX, Mode, Settings, get_settings, use_claude
 from app.db import make_engine, make_sessionmaker, migrate
 from app.integrations.crypto import SecretBox
 from app.integrations.email import make_mailer
@@ -27,11 +27,12 @@ log = logging.getLogger("mde.app")
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Browser hardening for the few HTML pages (sign-in, consent, PayPal returns) and the served web app."""
+    """Browser hardening for the API's own HTML pages (sign-in, consent, PayPal returns) and the served web app."""
 
-    def __init__(self, app, *, https: bool):
+    def __init__(self, app, *, https: bool, csp: bool = True):
         super().__init__(app)
         self.https = https
+        self.csp = csp  # the API's own pages are static forms; the web app sets its own policy
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -42,10 +43,40 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         if self.https:
             h.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-        if response.headers.get("content-type", "").startswith("text/html") and not request.url.path.startswith("/app"):
-            # The API's own pages are static forms: no scripts, no outside resources. The web app sets its own.
+        if (
+            self.csp
+            and response.headers.get("content-type", "").startswith("text/html")
+            and not request.url.path.endswith(("/docs", "/redoc", "/docs/oauth2-redirect"))  # Swagger has scripts
+        ):
+            # Static forms: no scripts, no outside resources.
             h.setdefault("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'")
         return response
+
+
+MCP_PATHS = ("/authorize", "/token", "/register", "/revoke")  # the MCP server's OAuth endpoints, at the root
+
+
+def is_mcp_path(path: str) -> bool:
+    return path == "/mcp" or path.startswith(("/mcp/", "/.well-known/")) or path in MCP_PATHS
+
+
+class Site:
+    """One host, three apps: the REST API under API_PREFIX, the MCP server (and its OAuth endpoints) at the root,
+    and the web app for everything else. Lifespan belongs to the API app, which also runs the MCP server's."""
+
+    def __init__(self, api: FastAPI, spa, prefix: str = API_PREFIX):
+        self.api, self.spa, self.prefix = api, spa, prefix
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.api(scope, receive, send)
+        path = scope.get("path", "")
+        if path == self.prefix or path.startswith(self.prefix + "/"):
+            # Starlette strips root_path from the path when routing, so the API sees its own paths.
+            return await self.api({**scope, "root_path": scope.get("root_path", "") + self.prefix}, receive, send)
+        if is_mcp_path(path):
+            return await self.api(scope, receive, send)
+        return await self.spa(scope, receive, send)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -90,6 +121,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = settings
+    # Deployed behind the Site dispatcher at API_PREFIX. Setting it here (rather than on the server) makes the docs
+    # and OpenAPI self-describe correctly and lets the app accept prefixed paths directly too (tests, TestClient).
+    app.root_path = API_PREFIX
     # Bearer-token API (no cookies cross-origin), so any origin may call it. Browser-based MCP clients
     # (e.g. MCP Inspector) need preflight answers and these headers exposed.
     app.add_middleware(
@@ -108,7 +142,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.github = GitHubClient(token=settings.github_token)
     app.state.resolve = resolve_host
     app.state.mailer = make_mailer(settings)
-    app.state.notifier = Notifier(app.state.mailer, settings.public_base_url, settings.public_app_url)
+    # Emailed links open the web app when there is one (or PUBLIC_APP_URL names a separate one), else the API's pages.
+    app.state.app_url = settings.public_app_url or (settings.public_base_url if _web_built(settings) else None)
+    app.state.notifier = Notifier(app.state.mailer, settings.api_base_url, app.state.app_url)
     app.state.ratelimiter = RateLimiter()
     app.state.oidc = OIDCClient(allow_local=settings.is_mock, resolve=resolve_host)
     app.state.txt_lookup = lookup_txt
@@ -123,14 +159,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(browser.router)
     if settings.mode is Mode.mock:
         app.include_router(mock_router)
-    app.state.spa = mount_spa(app)  # the web app at /app, when web/dist has been built
 
     # MCP (tools generated from the routes above) and its OAuth endpoints. Mounted last at "/" so every
     # FastAPI route matches first; it serves /mcp, /.well-known/*, /authorize, /token, /register, /revoke.
-    mcp, app.state.oauth = build_mcp(app, settings.public_base_url)
+    mcp, app.state.oauth = build_mcp(app, settings.public_base_url, settings.api_base_url)
     app.state.mcp_app = mcp.http_app(path="/mcp", stateless_http=True, json_response=True)
     app.mount("/", app.state.mcp_app)
     return app
+
+
+def create_site(settings: Settings | None = None) -> Site:
+    """What uvicorn serves: the API, the MCP server and the web app on one host (see Site)."""
+    settings = settings or get_settings()
+    api = create_app(settings)
+    spa = make_spa() if _web_built(settings) else make_spa(DIST / "missing")
+    return Site(api, SecurityHeadersMiddleware(spa, https=settings.public_base_url.startswith("https://"), csp=False))
+
+
+def _web_built(settings: Settings) -> bool:
+    return has_build() if settings.web_app_built is None else settings.web_app_built
 
 
 def _startup_warnings(settings: Settings) -> None:
@@ -156,4 +203,4 @@ def _startup_warnings(settings: Settings) -> None:
         )
 
 
-app = create_app()
+app = create_site()

@@ -146,8 +146,8 @@ def invite_member(
         kind=InvitationKind.member,
         email=body.email,
         actor=principal.actor,
-        base_url=request.app.state.settings.public_base_url,
-        app_url=request.app.state.settings.public_app_url,
+        base_url=request.app.state.settings.api_base_url,
+        app_url=request.app.state.app_url,
         org=org,
         org_role=body.role,
     )

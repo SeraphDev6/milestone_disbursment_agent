@@ -25,9 +25,9 @@ async function routes(page: Page): Promise<string[]> {
     `${agreement}/integrations`,
     `${agreement}/packet`,
     tranche,
-    "/app/account",
-    "/app/design",
-    "/app/demo",
+    "/account",
+    "/design",
+    "/demo",
   ];
 }
 

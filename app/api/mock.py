@@ -5,6 +5,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from app.api.browser import api_path
 from app.api.deps import MilestoneAccessDep, SessionDep
 from app.api.views import agreement_read, html_page
 from app.db import utcnow
@@ -44,7 +45,8 @@ def invoice_page(invoice_id: str, request: Request) -> HTMLResponse:
         f"<!doctype html><meta charset=utf-8><title>Mock PayPal invoice</title>"
         f"<body style='font-family:system-ui;max-width:32rem;margin:4rem auto'><h1>Invoice {invoice_id}</h1>"
         f"<p>{inv['currency']} {inv['amount']} from {inv['invoicer']}: {inv['status']}</p>"
-        f"<form method=post action='/mock/paypal/invoices/{invoice_id}/pay'><button>Pay invoice</button></form>"
+        f"<form method=post action='{api_path(request, f'/mock/paypal/invoices/{invoice_id}/pay')}'>"
+        "<button>Pay invoice</button></form>"
     )
 
 
@@ -62,7 +64,7 @@ def pay_invoice(invoice_id: str, request: Request, session: SessionDep) -> Redir
             "resource": {"id": invoice_id},
         }
         settlement.handle_webhook(session, event, utcnow(), request.app.state.paypal)
-    return RedirectResponse(f"/mock/paypal/invoices/{invoice_id}", status_code=303)
+    return RedirectResponse(api_path(request, f"/mock/paypal/invoices/{invoice_id}"), status_code=303)
 
 
 @router.post("/milestones/{milestone_id}/mark-verified", summary="Mock mode only: mark a tranche verified")

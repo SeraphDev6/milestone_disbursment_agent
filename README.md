@@ -14,7 +14,7 @@ The whole app (Postgres, the API and the web app) with Docker. Mock mode needs n
 
 ```sh
 docker compose up --build
-# open http://localhost:8000/app/  (try /app/demo; API docs at /docs)
+# open http://localhost:8000/  (try /demo; API docs at /api/docs; MCP server at /mcp)
 ```
 
 Compose reads `.env` if there is one: set `MODE=sandbox` plus the PayPal keys and `SECRET_KEY` there for the PayPal sandbox and Claude. Use `APP_PORT=8080 docker compose up` if port 8000 is taken. Data lives in the `pgdata` volume (`docker compose down -v` resets it).
@@ -24,7 +24,7 @@ To develop on the host instead, you need [uv](https://docs.astral.sh/uv/):
 ```sh
 uv sync
 uv run uvicorn app.main:app --reload
-# open http://localhost:8000/docs
+# open http://localhost:8000/api/docs  (the web app is served at / once `cd web && npm run build` has run)
 ```
 
 By default it uses SQLite at `./local.db`. For Postgres:
@@ -41,10 +41,10 @@ Copy `.env.example` to `.env` to set `MODE=sandbox` and PayPal sandbox credentia
 A React app for every side of an agreement (funder, grantee, reviewer) lives in [`web/`](web/README.md). Its design system, *Ledger & Stamp*, is WCAG 2.2 AA with its checks automated: [`web/DESIGN.md`](web/DESIGN.md).
 
 ```sh
-cd web && npm install && MDE_API=http://localhost:8000 npm run dev   # http://localhost:5173/app/
+cd web && npm install && MDE_API=http://localhost:8000 npm run dev   # http://localhost:5173/
 ```
 
-Run the API with `PUBLIC_BASE_URL=http://localhost:5173` so mock PayPal redirects return through the dev server. After `npm run build`, the API serves the app itself at `/app`.
+Run the API with `PUBLIC_BASE_URL=http://localhost:5173` so mock PayPal redirects return through the dev server (it proxies `/api` and the MCP paths). After `npm run build`, the server serves the app itself at `/`, the API under `/api` and the MCP server at `/mcp`.
 
 ## Try the flow
 
@@ -95,7 +95,7 @@ app/
   integrations/    PayPal gateway (mock; PayPal Server SDK for orders and payments, REST for the rest), email
                    (console, Resend, SMTP), GitHub, OIDC, file uploads
 scripts/           paypal_sandbox_check.py: verify PayPal credentials and webhook setup from .env
-web/               React app (Vite, React Aria, AG Grid); served at /app from web/dist
+web/               React app (Vite, React Aria, AG Grid); served at / from web/dist (API under /api, MCP at /mcp)
 ```
 
 ## Develop
@@ -123,7 +123,7 @@ uv run alembic upgrade head && uv run alembic check
 
 ## Deploy
 
-`render.yaml` is a Render Blueprint: the web service, a Postgres database and two cron jobs (`payouts` hourly, `daily` each morning), sharing one environment group. After the first deploy set the secrets marked `sync: false` in the dashboard (`PUBLIC_BASE_URL`, `PUBLIC_APP_URL`, the PayPal keys, `PAYPAL_WEBHOOK_ID`, `PAYPAL_PARTNER_MERCHANT_ID`, `ANTHROPIC_API_KEY`, an email provider) and switch `MODE` to `sandbox`. Point the PayPal app's webhook at `<PUBLIC_BASE_URL>/webhooks/paypal` and subscribe it to the authorization, capture, payouts, referenced-payout, invoicing, merchant and customer-dispute events (`scripts/paypal_sandbox_check.py` lists any missing). The database is on the smallest paid plan because Render deletes free databases after 30 days.
+`render.yaml` is a Render Blueprint: the web service, a Postgres database and two cron jobs (`payouts` hourly, `daily` each morning), sharing one environment group. After the first deploy set the secrets marked `sync: false` in the dashboard (`PUBLIC_BASE_URL`, the PayPal keys, `PAYPAL_WEBHOOK_ID`, `PAYPAL_PARTNER_MERCHANT_ID`, `ANTHROPIC_API_KEY`, an email provider) and switch `MODE` to `sandbox`. Point the PayPal app's webhook at `<PUBLIC_BASE_URL>/api/webhooks/paypal` and subscribe it to the authorization, capture, payouts, referenced-payout, invoicing, merchant and customer-dispute events (`scripts/paypal_sandbox_check.py` lists any missing). The database is on the smallest paid plan because Render deletes free databases after 30 days.
 
 ## License
 

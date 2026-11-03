@@ -11,16 +11,16 @@ export function watchErrors(page: Page): string[] {
 }
 
 export async function signIn(page: Page, email: string) {
-  await page.goto("/app/sign-in");
+  await page.goto("/sign-in");
   await page.getByLabel("Email").fill(email);
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Open the sign-in link" }).click();
   await expect(page).not.toHaveURL(/sign-in|verify/);
 }
 
-/** Load the demo grant from /app/demo (mock mode; no sign-in needed). Lands on the agreement as the funder. */
+/** Load the demo grant from /demo (mock mode; no sign-in needed). Lands on the agreement as the funder. */
 export async function loadDemo(page: Page, start: "Signed and active" | "Before signing" = "Signed and active", windowDays = 0) {
-  await page.goto("/app/demo");
+  await page.goto("/demo");
   await expect(page.getByRole("heading", { level: 1, name: "Try the whole loop in three minutes" })).toBeVisible();
   await page.getByText(start, { exact: true }).click();
   if (windowDays) await page.getByLabel("Dispute window").fill(String(windowDays));
@@ -41,7 +41,7 @@ export async function addFiles(page: Page, files: { name: string; mimeType: stri
 
 /** Act as one of the demo's people, from the demo page's cast. */
 export async function actAs(page: Page, role: "Payer" | "Payee" | "Reviewer") {
-  await page.goto("/app/demo");
+  await page.goto("/demo");
   const card = page.getByRole("listitem").filter({ has: page.getByText(role, { exact: true }) });
   await card.getByRole("button").click();
   await expect(page.getByRole("heading", { level: 1, name: "Riverside Literacy Grant 2027" })).toBeVisible();

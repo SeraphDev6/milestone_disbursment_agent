@@ -13,7 +13,7 @@ services:
     plan: free
     buildCommand: pip install uv && uv sync --frozen --no-dev && cd web && npm ci && npm run build
     startCommand: uv run --no-dev uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips '*'
-    healthCheckPath: /health
+    healthCheckPath: /api/health
     envVars:
       - fromGroup: milestone-engine-env
       - key: DATABASE_URL
@@ -26,8 +26,6 @@ services:
         value: "0"
       - key: PUBLIC_BASE_URL
         sync: false # e.g. https://app.milestone-ledger.com (unset: Render's own URL via RENDER_EXTERNAL_URL)
-      - key: PUBLIC_APP_URL
-        sync: false # PUBLIC_BASE_URL + /app
       - key: PAYPAL_CLIENT_ID
         sync: false
       - key: PAYPAL_CLIENT_SECRET
@@ -61,8 +59,6 @@ services:
         value: "false"
       - key: PUBLIC_BASE_URL
         sync: false
-      - key: PUBLIC_APP_URL
-        sync: false
       - key: PAYPAL_CLIENT_ID
         sync: false
       - key: PAYPAL_CLIENT_SECRET
@@ -90,8 +86,6 @@ services:
       - key: AUTO_MIGRATE
         value: "false"
       - key: PUBLIC_BASE_URL
-        sync: false
-      - key: PUBLIC_APP_URL
         sync: false
       - key: PAYPAL_CLIENT_ID
         sync: false

@@ -41,6 +41,11 @@ def safe_next(path: str | None) -> str:
     return path
 
 
+def api_path(request: Request, path: str) -> str:
+    """A root-relative path to one of the API's own pages, with the prefix the API is served under."""
+    return request.scope.get("root_path", "").rstrip("/") + path
+
+
 def _secure(request: Request) -> bool:
     return request.app.state.settings.public_base_url.startswith("https://")
 
@@ -100,7 +105,7 @@ def magic_link_page(request: Request, token: str, next: str | None = None) -> HT
     nonce = secrets.token_urlsafe(24)
     response = page(
         "Finish signing in",
-        "<form method=post action='/auth/magic-link/complete'>"
+        f"<form method=post action='{api_path(request, '/auth/magic-link/complete')}'>"
         f"<input type=hidden name=token value='{escape(token)}'><input type=hidden name=next value='{escape(safe_next(next))}'>"
         f"<input type=hidden name=nonce value='{nonce}'>"
         "<button style='font-size:1rem;padding:.5rem 1rem'>Sign in</button></form>",
@@ -144,13 +149,13 @@ def oauth_sign_in(
     except RateLimited as e:
         return page("Too many sign-in attempts", f"<p>Try again in {e.retry_after // 60 + 1} minutes.</p>", 429)
     if sso.connection_for_email(session, email) is not None:
-        url = sso.start(session, email, request.app.state.oidc, request.app.state.settings.public_base_url, target)
+        url = sso.start(session, email, request.app.state.oidc, request.app.state.settings.api_base_url, target)
         response = RedirectResponse(url, status_code=303)
         bind_browser(response, request, SSO_COOKIE, sso_binding(request, sso.state_of(url)))
         return response
     try:
         link = identity.request_magic_link(
-            session, mailer(request), email, request.app.state.settings.public_base_url, next_path=target
+            session, mailer(request), email, request.app.state.settings.api_base_url, next_path=target
         )
     except identity.IdentityError as e:
         return page("Can't sign in this way", f"<p>{escape(e.message)}</p>", e.status_code)
@@ -174,13 +179,13 @@ def consent(request: Request, session: SessionDep) -> Response:
     pending = _pending(session, request_id)
     if pending is None:
         return page("This request has expired", "<p>Go back to your app and connect again.</p>", 400)
-    here = f"/oauth/consent?request={quote(request_id)}"
+    here = api_path(request, f"/oauth/consent?request={quote(request_id)}")
     signed_in = browser_principal(request, session)
     if signed_in is None:
         return page(
             "Sign in to connect",
             "<p>An app wants to act for you. Sign in to review what it can do.</p>"
-            f"<form method=post action='/oauth/sign-in'><input type=hidden name=next value='{escape(here)}'>"
+            f"<form method=post action='{api_path(request, '/oauth/sign-in')}'><input type=hidden name=next value='{escape(here)}'>"
             "<input name=email type=email required placeholder='you@example.org' style='font-size:1rem;padding:.4rem'> "
             "<button style='font-size:1rem;padding:.4rem .8rem'>Continue</button></form>",
         )
@@ -217,7 +222,7 @@ def consent(request: Request, session: SessionDep) -> Response:
         + "<p>It can read agreements, criteria, evidence, verdicts and audit logs, draft agreements and submit "
         "evidence, with your role in the organization you pick. It can't confirm criteria, approve releases, "
         "fund, or dispute: those stay with people.</p>"
-        f"<form method=post action='/oauth/consent'><input type=hidden name=request value='{escape(request_id)}'>"
+        f"<form method=post action='{api_path(request, '/oauth/consent')}'><input type=hidden name=request value='{escape(request_id)}'>"
         f"<input type=hidden name=csrf value='{csrf}'><fieldset><legend>Act for</legend>{options}</fieldset><p>"
         "<button name=decision value=approve style='font-size:1rem;padding:.4rem .8rem'>Allow</button> "
         "<button name=decision value=deny style='font-size:1rem;padding:.4rem .8rem'>Deny</button></p></form>",

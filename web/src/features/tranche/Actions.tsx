@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { API_BASE } from "@/api/client";
 import { useNow } from "@/app/useNow";
 import type { AgreementRead, MilestoneRead, VerdictRead } from "@/api/types";
 import { errorMessage } from "@/api/errors";
@@ -82,7 +83,7 @@ export function Actions({ a, m, seat, verdict, acts, rejected }: { a: AgreementR
         )}
         {m.pay_path && m.status === "settling" && a.settlement_mode === "invoice_on_verify" && (
           seat.role === "payer" ? (
-            <Callout tone="info" title="Payment requested" actions={<ButtonLink external variant="primary" href={m.pay_path} target="_blank" icon="external">Pay this tranche</ButtonLink>}>
+            <Callout tone="info" title="Payment requested" actions={<ButtonLink external variant="primary" href={API_BASE + m.pay_path} target="_blank" icon="external">Pay this tranche</ButtonLink>}>
               <p>Pay {amt} in PayPal. The tranche settles when PayPal confirms it.</p>
             </Callout>
           ) : (

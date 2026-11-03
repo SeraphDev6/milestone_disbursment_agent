@@ -471,7 +471,7 @@ def test_magic_link_page_only_completes_in_the_browser_that_opened_it(client):
 
 
 def test_sso_browser_flow_only_completes_in_the_browser_that_started_it(client, idp):  # noqa: F811
-    client.app.state.settings.public_app_url = "http://web.test/app"
+    client.app.state.app_url = "http://web.test"
     setup_sso(client, idp)
     email = "pat@harbor.example.org"
     # the web-app flow: the start response binds this browser; the callback from the IdP completes here
