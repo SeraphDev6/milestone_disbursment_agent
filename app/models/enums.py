@@ -6,6 +6,19 @@ class SettlementMode(StrEnum):
     invoice_on_verify = "invoice_on_verify"
 
 
+class PayoutRoute(StrEnum):
+    """How a tranche's money reaches the payee."""
+
+    direct = "direct"  # payee connected PayPal (partner onboarding): the hold and capture are in the payee's name
+    platform = "platform"  # payee not connected: captured to the platform account, then sent with PayPal Payouts
+
+
+class DisbursementKind(StrEnum):
+    referenced_payout = "referenced_payout"  # release a delayed-disbursement capture to the connected payee
+    payout = "payout"  # PayPal Payouts to the payee's email (platform route)
+    refund = "refund"  # return a capture to the payer after a contest
+
+
 class Role(StrEnum):
     """An organization's role on one agreement. The same org can be payer on one agreement and payee on another."""
 
@@ -30,8 +43,12 @@ class MilestoneStatus(StrEnum):
     needs_review = "needs_review"
     verified = "verified"
     settling = "settling"
-    settled = "settled"
+    held = "held"  # captured from the payer; paid to the payee when the dispute window closes
+    contested = "contested"  # payer or reviewer objected during the dispute window; payout paused
+    settled = "settled"  # paid to the payee
+    refunded = "refunded"  # captured, then returned to the payer after a contest
     settlement_failed = "settlement_failed"
+    payout_failed = "payout_failed"  # captured, but paying the payee failed; release retries the payout
     disputed = "disputed"
     overdue = "overdue"
 

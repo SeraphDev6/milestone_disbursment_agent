@@ -31,6 +31,9 @@ class Action(StrEnum):
     compliance_packet = "compliance_packet"
     manage_subscriptions = "manage_subscriptions"
     assign = "assign"
+    contest = "contest"
+    resolve_for_payee = "resolve_for_payee"
+    resolve_for_payer = "resolve_for_payer"
 
 
 V, M, A = OrgRole.viewer, OrgRole.member, OrgRole.admin
@@ -53,6 +56,11 @@ RULES: dict[Action, dict[Role, OrgRole]] = {
     Action.compliance_packet: {P: M, R: M},
     Action.manage_subscriptions: {P: A, E: A, R: A},
     Action.assign: {P: M, E: M},
+    # A contest pauses a held tranche's payout. Each side can only concede: the payer withdraws it (pay the
+    # payee), the payee accepts it (refund the payer); a reviewer can decide either way.
+    Action.contest: {P: A, R: M},
+    Action.resolve_for_payee: {P: A, R: M},
+    Action.resolve_for_payer: {E: A, R: M},
 }
 
 

@@ -91,3 +91,12 @@ def create_active(client, draft: dict, auto_release: bool = False, **people) -> 
     r = confirm(client, aid, ctx["payee"])
     assert r.json()["status"] == "active", r.text
     return aid, mids, ctx
+
+
+def connect_paypal(client, ctx: dict) -> dict:
+    """The payee org's admin connects PayPal through (mock) partner onboarding. Returns the account status."""
+    r = client.post(f"/orgs/{ctx['payee_org']}/paypal/connect", headers=h(ctx["payee"]))
+    assert r.status_code == 200, r.text
+    page = client.get(r.json()["onboarding_url"])  # mock onboarding redirects to /paypal/onboarded
+    assert page.status_code == 200 and "PayPal connected" in page.text, page.text
+    return client.get(f"/orgs/{ctx['payee_org']}/paypal", headers=h(ctx["payee"])).json()

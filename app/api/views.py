@@ -8,7 +8,16 @@ from sqlalchemy.orm import object_session
 from sqlmodel import Field, SQLModel, select
 
 from app.domain.criteria import criteria_hash, lint_agreement
-from app.models import Agreement, AgreementRead, FundingSummary, LedgerEntry, MilestoneRead, MilestoneStatus, PartyRead
+from app.models import (
+    Agreement,
+    AgreementRead,
+    FundingSummary,
+    LedgerEntry,
+    MilestoneRead,
+    MilestoneStatus,
+    PartyRead,
+    Role,
+)
 
 
 class EvidenceAccepted(SQLModel):
@@ -30,15 +39,28 @@ def funding_summary(row: Agreement) -> FundingSummary:
         return by_kind.get(kind, Decimal(0))
 
     held = k("authorized") - k("captured") - k("voided") - k("expired")
+    in_window = k("captured") - k("disbursed") - k("refunded")
     invoiced = k("invoiced") - k("paid") - k("invoice_cancelled")
-    released = k("captured") + k("paid")
+    released = k("disbursed") + k("paid")
     cents = Decimal("0.01")
     return FundingSummary(
         held=held.quantize(cents),
+        in_dispute_window=in_window.quantize(cents),
         invoiced=invoiced.quantize(cents),
         released=released.quantize(cents),
-        unfunded=(row.total_amount - held - invoiced - released).quantize(cents),
+        refunded=k("refunded").quantize(cents),
+        unfunded=(row.total_amount - held - in_window - invoiced - released).quantize(cents),
     )
+
+
+def _paypal_connected(party) -> bool | None:
+    from app.services.payee_accounts import account_for
+
+    if party.role != Role.payee:
+        return None
+    session = object_session(party)
+    account = account_for(session, party.org_id) if session else None
+    return account is not None and account.ready
 
 
 def _pending(row: Agreement) -> list[str]:
@@ -56,7 +78,13 @@ def agreement_read(row: Agreement) -> AgreementRead:
             "criteria_hash": current,
             "locked": row.criteria_hash is not None,
             "parties": [
-                PartyRead.model_validate(p, update={"confirmed_current": p.confirmed_criteria_hash == current})
+                PartyRead.model_validate(
+                    p,
+                    update={
+                        "confirmed_current": p.confirmed_criteria_hash == current,
+                        "paypal_connected": _paypal_connected(p),
+                    },
+                )
                 for p in row.parties
             ],
             "milestones": [MilestoneRead.model_validate(m) for m in row.milestones],

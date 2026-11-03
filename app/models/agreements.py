@@ -16,12 +16,12 @@ from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.columns import PydanticJSON, enum_type, fk, id_field, timestamp
 from app.models.criteria import Criterion, LintReport
-from app.models.enums import AgreementStatus, MilestoneStatus, Role, SettlementMode
+from app.models.enums import AgreementStatus, MilestoneStatus, PayoutRoute, Role, SettlementMode
 from app.models.identity import EMAIL_PATTERN
 
 if TYPE_CHECKING:
     from app.models.evidence import Evidence, Verdict
-    from app.models.settlement import Settlement
+    from app.models.settlement import Disbursement, Settlement
 
 
 def _money(description: str) -> Any:
@@ -61,6 +61,11 @@ class PartyRead(PartyBase):
     id: str
     org_id: str
     confirmed_current: bool = Field(description="Whether this party has signed the current criteria hash.")
+    paypal_connected: bool | None = Field(
+        default=None,
+        description="Payee only: PayPal account connected and able to receive. False means tranches are paid "
+        "through the platform with PayPal Payouts.",
+    )
 
 
 # --- Milestone -------------------------------------------------------------------------
@@ -94,6 +99,12 @@ class Milestone(MilestoneBase, table=True):
     paypal_authorization_id: str | None = Field(default=None, max_length=64, index=True)  # current live hold
     funded_at: datetime | None = timestamp(optional=True)  # original authorization time
     reauthorized_at: datetime | None = timestamp(optional=True)
+    # Set when the funding order is created: the connected payee's merchant id (direct route), or None when the
+    # money goes through the platform account and PayPal Payouts.
+    payout_route: PayoutRoute | None = Field(default=None, sa_type=enum_type(PayoutRoute, 16))
+    payee_merchant_id: str | None = Field(default=None, max_length=32)
+    captured_at: datetime | None = timestamp(optional=True)
+    release_due_at: datetime | None = timestamp(optional=True)  # end of the dispute window
 
     agreement: "Agreement" = Relationship(back_populates="milestones")
     settlements: list["Settlement"] = Relationship(
@@ -105,6 +116,10 @@ class Milestone(MilestoneBase, table=True):
     )
     verdicts: list["Verdict"] = Relationship(
         sa_relationship_kwargs={"cascade": "all, delete-orphan", "order_by": "Verdict.created_at"}
+    )
+    disbursements: list["Disbursement"] = Relationship(
+        back_populates="milestone",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan", "order_by": "Disbursement.created_at"},
     )
 
 
@@ -120,6 +135,13 @@ class MilestoneRead(MilestoneBase):
     payer_assignee_id: str | None = None
     payee_assignee_id: str | None = None
     funded_at: datetime | None = Field(default=None, description="When the original hold was placed.")
+    payout_route: PayoutRoute | None = Field(
+        default=None, description="direct: paid into the payee's connected PayPal; platform: via PayPal Payouts."
+    )
+    captured_at: datetime | None = Field(default=None, description="When the payer's money was captured.")
+    release_due_at: datetime | None = Field(
+        default=None, description="When the dispute window closes and the payee is paid, unless contested."
+    )
 
 
 # --- Agreement -------------------------------------------------------------------------
@@ -144,6 +166,13 @@ class AgreementBase(SQLModel):
     )
     require_reviewer_approval: bool = Field(
         default=False, description="When on, only a reviewer's approval releases a tranche in review."
+    )
+    dispute_window_days: int = Field(
+        default=0,
+        ge=0,
+        le=14,
+        description="Escrow: days between capturing a verified tranche and paying the payee, during which the "
+        "payer or a reviewer can contest it. 0 pays at once.",
     )
 
 
@@ -189,9 +218,13 @@ class AgreementCreate(AgreementBase):
 
 class FundingSummary(SQLModel):
     held: Decimal = Field(description="Escrow: authorized on the payer's PayPal account, not yet captured.")
+    in_dispute_window: Decimal = Field(
+        default=Decimal("0.00"), description="Escrow: captured from the payer, not yet paid to the payee."
+    )
     invoiced: Decimal = Field(description="Invoice mode: invoices sent and not yet paid.")
-    released: Decimal = Field(description="Paid to the payee: captured holds plus paid invoices.")
-    unfunded: Decimal = Field(description="Total minus held, invoiced and released.")
+    released: Decimal = Field(description="Paid to the payee: disbursed captures plus paid invoices.")
+    refunded: Decimal = Field(default=Decimal("0.00"), description="Captured, then returned to the payer.")
+    unfunded: Decimal = Field(description="Total minus held, in the dispute window, invoiced and released.")
 
 
 class AgreementRead(AgreementBase):

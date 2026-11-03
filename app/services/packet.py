@@ -68,7 +68,7 @@ def milestone_section(session: Session, m: Milestone) -> dict:
         "reviews": [
             {"at": _iso(e.at), "actor": e.actor, "action": e.action, "note": (e.detail or {}).get("note")}
             for e in events
-            if e.action in ("review_approved", "review_rejected", "disputed")
+            if e.action in ("review_approved", "review_rejected", "disputed", "contested", "contest_resolved")
         ],
         "settlements": [
             {
@@ -81,6 +81,19 @@ def milestone_section(session: Session, m: Milestone) -> dict:
                 "at": _iso(s.updated_at),
             }
             for s in m.settlements
+        ],
+        "payout_route": m.payout_route,
+        "disbursements": [
+            {
+                "kind": d.kind,
+                "attempt": d.attempt,
+                "idempotency_key": d.idempotency_key,
+                "paypal_ref": d.paypal_ref,
+                "status": d.status,
+                "error": d.error,
+                "at": _iso(d.updated_at),
+            }
+            for d in m.disbursements
         ],
         "audit": [
             {
@@ -98,7 +111,7 @@ def milestone_section(session: Session, m: Milestone) -> dict:
 
 def build_packet(session: Session, a: Agreement) -> dict:
     ledger = session.exec(select(LedgerEntry).where(LedgerEntry.agreement_id == a.id).order_by(LedgerEntry.at)).all()
-    released = sum((e.amount for e in ledger if e.kind in ("captured", "paid")), start=Decimal(0))
+    released = sum((e.amount for e in ledger if e.kind in ("disbursed", "paid")), start=Decimal(0))
     return {
         "generated_at": datetime.now(UTC).isoformat(),
         "agreement": {
@@ -111,6 +124,7 @@ def build_packet(session: Session, a: Agreement) -> dict:
             "criteria_hash": a.criteria_hash,
             "auto_release_enabled": a.auto_release_enabled,
             "auto_release_threshold": a.auto_release_threshold,
+            "dispute_window_days": a.dispute_window_days,
             "released": str(released.quantize(Decimal("0.01"))),
         },
         "parties": [

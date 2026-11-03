@@ -29,11 +29,17 @@ class Settings(BaseSettings):
     auto_migrate: bool = True
     # How often the in-process loop delivers outbound webhooks; 0 turns it off (tests, or a separate worker).
     outbound_interval_seconds: float = 5.0
+    # How often the in-process loop pays tranches whose dispute window closed; 0 turns it off (use the
+    # `payouts` job instead).
+    payouts_interval_seconds: float = 300.0
     github_token: str | None = None  # optional; raises GitHub API rate limits and reads private repos
     paypal_client_id: str | None = None
     paypal_client_secret: str | None = None
     paypal_base_url: str = "https://api-m.sandbox.paypal.com"
     paypal_webhook_id: str | None = None  # from the sandbox app's webhook config; needed to verify webhooks
+    # The platform's own PayPal merchant id (for partner onboarding status calls). Looked up once when unset.
+    paypal_partner_merchant_id: str | None = None
+    paypal_bn_code: str | None = None  # partner attribution id, once PayPal issues one for a live partner app
     # Where PayPal sends the payer back after approving. Render sets RENDER_EXTERNAL_URL.
     public_base_url: str = Field(
         "http://localhost:8000", validation_alias=AliasChoices("PUBLIC_BASE_URL", "RENDER_EXTERNAL_URL")

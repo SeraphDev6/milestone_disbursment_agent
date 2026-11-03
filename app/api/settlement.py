@@ -1,6 +1,7 @@
 """Money movement: fund a tranche's hold, release it, void it, and PayPal's callbacks."""
 
 import json
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
@@ -9,7 +10,7 @@ from sqlmodel import Field, SQLModel
 from app.api.deps import MilestoneAccessDep, SessionDep, gateway
 from app.api.views import agreement_read, html_page
 from app.db import utcnow
-from app.models import AgreementRead, SettlementRead
+from app.models import AgreementRead, DisbursementRead, SettlementRead
 from app.services import ServiceError, settlement
 from app.services.access import Action
 
@@ -26,7 +27,7 @@ def fund(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep, reque
     access, m = auth
     access.require(Action.fund)
     order = settlement.start_funding(
-        session, gateway(request), m, access.actor, request.app.state.settings.public_base_url
+        session, gateway(request), m, access.actor, request.app.state.settings.public_base_url, utcnow()
     )
     return FundingStarted(order_id=order.order_id, approve_url=order.approve_url)
 
@@ -56,6 +57,53 @@ def release(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep, re
     access.require(Action.release)
     s = settlement.release(session, gateway(request), m, access.actor, utcnow())
     return SettlementRead.model_validate(s, update={"milestone_status": m.status})
+
+
+class ContestIn(SQLModel):
+    reason: str = Field(min_length=1, max_length=2000, description="What's wrong; goes in the audit log.")
+
+
+class ResolveIn(SQLModel):
+    decision: Literal["release", "refund"] = Field(
+        description="release pays the payee (payer or reviewer); refund returns the money to the payer "
+        "(payee or reviewer)."
+    )
+    note: str = Field(default="", max_length=2000)
+
+
+def _disbursement_read(d, m) -> DisbursementRead:
+    return DisbursementRead.model_validate(d, update={"milestone_status": m.status})
+
+
+@router.post(
+    "/milestones/{milestone_id}/payout",
+    summary="Pay a captured tranche to the payee now (waives the rest of the dispute window; retries a failed payout)",
+)
+def payout(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep, request: Request) -> DisbursementRead:
+    access, m = auth
+    access.require(Action.release)
+    return _disbursement_read(settlement.pay_out(session, gateway(request), m, access.actor, utcnow()), m)
+
+
+@router.post(
+    "/milestones/{milestone_id}/contest",
+    summary="Object to a captured tranche during its dispute window; its payout waits for a resolution",
+)
+def contest(milestone_id: str, body: ContestIn, auth: MilestoneAccessDep, session: SessionDep) -> AgreementRead:
+    access, m = auth
+    access.require(Action.contest)
+    settlement.contest(session, m, access.actor, body.reason, utcnow())
+    return agreement_read(m.agreement)
+
+
+@router.post("/milestones/{milestone_id}/resolve", summary="End a contest: pay the payee or refund the payer")
+def resolve(
+    milestone_id: str, body: ResolveIn, auth: MilestoneAccessDep, session: SessionDep, request: Request
+) -> DisbursementRead:
+    access, m = auth
+    access.require(Action.resolve_for_payee if body.decision == "release" else Action.resolve_for_payer)
+    d = settlement.resolve(session, gateway(request), m, access.actor, body.decision, body.note, utcnow())
+    return _disbursement_read(d, m)
 
 
 @router.post("/milestones/{milestone_id}/void", summary="Payer cancels a tranche's hold before evidence arrives")

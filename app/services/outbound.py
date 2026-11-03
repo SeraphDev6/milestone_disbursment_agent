@@ -131,17 +131,24 @@ def deliver_due(
     return delivered
 
 
-def start_delivery_loop(factory: sessionmaker, interval: float, allow_http: bool) -> threading.Event:
-    """Background thread that delivers due webhooks every `interval` seconds. Set the returned event to stop."""
+def run_every(name: str, factory: sessionmaker, interval: float, job) -> threading.Event:
+    """Background thread that runs `job(session, now)` every `interval` seconds. Set the returned event to stop."""
     stop = threading.Event()
 
     def loop() -> None:
         while not stop.wait(interval):
             try:
                 with factory() as session:
-                    deliver_due(session, utcnow(), allow_http=allow_http)
+                    job(session, utcnow())
             except Exception:  # noqa: BLE001 - keep the loop alive; failures are retried next tick
                 time.sleep(interval)
 
-    threading.Thread(target=loop, name="webhook-delivery", daemon=True).start()
+    threading.Thread(target=loop, name=name, daemon=True).start()
     return stop
+
+
+def start_delivery_loop(factory: sessionmaker, interval: float, allow_http: bool) -> threading.Event:
+    """Deliver due webhooks every `interval` seconds."""
+    return run_every(
+        "webhook-delivery", factory, interval, lambda session, now: deliver_due(session, now, allow_http=allow_http)
+    )

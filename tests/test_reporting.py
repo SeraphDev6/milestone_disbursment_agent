@@ -53,8 +53,10 @@ def test_verified_tranche_is_invoiced_then_paid(client, invoice_agreement):
     assert status_of(client, aid, keys) == "settled"
     assert funding(client, aid, keys) == {
         "held": "0.00",
+        "in_dispute_window": "0.00",
         "invoiced": "0.00",
         "released": "10000.00",
+        "refunded": "0.00",
         "unfunded": "20000.00",
     }
 
@@ -199,7 +201,8 @@ def test_compliance_packet_json_and_pdf(client, draft):
     assert t1["status"] == "settled" and len(t1["evidence"]) == 2
     assert t1["verdicts"][-1]["met"] and t1["verdicts"][-1]["results"][0]["evidence_ids"]
     assert t1["settlements"][0]["status"] == "succeeded"
-    assert [e["kind"] for e in packet["ledger"]] == ["authorized", "captured"]
+    assert [e["kind"] for e in packet["ledger"]] == ["authorized", "captured", "disbursed"]
+    assert t1["payout_route"] == "platform" and t1["disbursements"][0]["kind"] == "payout"  # payee never connected
 
     pdf = client.get(f"/agreements/{aid}/compliance-packet?format=pdf", headers=h(keys["payer"]))
     assert pdf.headers["content-type"] == "application/pdf"

@@ -71,7 +71,7 @@ flowchart LR
     C -- criteria --> E["Verify<br/>checks, then verdict + citations"]
     D["Evidence in<br/>upload, GitHub, MCP"] --> E
     E --> G{"Confident?"}
-    G -- yes --> S["Settle<br/>capture, Payout or invoice<br/>webhook confirms"]
+    G -- yes --> S["Settle<br/>capture (or invoice)<br/>dispute window, then payout"]
     G -- "no or low confidence" --> R["Human review<br/>payer sees the rationale"]
     R -- approve --> S
     R -- "reject: back to pending" --> D
@@ -82,7 +82,7 @@ Criteria are fixed before any evidence arrives; a verdict below the agreement's 
 
 ## Data model
 
-Every entity is defined once with SQLModel in [`app/models/`](../app/models/) and serves as database table, API input and API output (`XBase` shared fields and validation, `X` table, `XCreate`, `XRead`). Criteria and verdict results are typed value objects stored in JSON columns. That package is the source of truth; this section describes it. Entities: Agreement, Party, Milestone (tranche), Evidence, StoredFile, Verdict (with typed CriterionResult), Settlement, LedgerEntry, AuditEvent, Integration, Subscription, OutboxMessage, WebhookEvent; value objects Criterion and Measure. Settlement mode lives on the Agreement, so push vs pull is configuration, not product. Every field uses `Field(..., description=...)` so descriptions flow into OpenAPI, MCP tool schemas and structured-output prompts. Statuses are enums, not strings.
+Every entity is defined once with SQLModel in [`app/models/`](../app/models/) and serves as database table, API input and API output (`XBase` shared fields and validation, `X` table, `XCreate`, `XRead`). Criteria and verdict results are typed value objects stored in JSON columns. That package is the source of truth; this section describes it. Entities: Agreement, Party, Milestone (tranche), Evidence, StoredFile, Verdict (with typed CriterionResult), Settlement (captures and invoices), Disbursement (payouts and refunds after a capture), PayPalAccount (a payee org's connected PayPal), LedgerEntry, AuditEvent, Integration, Subscription, OutboxMessage, WebhookEvent; value objects Criterion and Measure. Settlement mode lives on the Agreement, so push vs pull is configuration, not product. Every field uses `Field(..., description=...)` so descriptions flow into OpenAPI, MCP tool schemas and structured-output prompts. Statuses are enums, not strings.
 
 ### Criteria: every tranche is a list of checkable conditions
 
@@ -129,7 +129,7 @@ A `measure` is required on every criterion, so "done" always names the thing cou
 
 No money moves without a verdict, and no verdict below the gate moves money without the payer's side. The flow diagram above shows the transitions; the rules are below.
 
-**Milestone states:** `pending` → `funded` (escrow) → `evidence_received` → `verifying` → `verified` | `needs_review` → `settling` → `settled` | `settlement_failed`; side states `disputed` and `overdue`.
+**Milestone states:** `pending` → `funded` (escrow) → `evidence_received` → `verifying` → `verified` | `needs_review` → `settling` → `held` (captured; in the dispute window) → `settled` | `settlement_failed`; after capture also `contested` → `settled` or `refunded`, and `payout_failed` (release retries the payout); side states `disputed` and `overdue`. With no dispute window and a connected payee, capture goes straight to `settled`.
 
 - **Evidence is untrusted data.** Evidence text is passed to the model as quoted data with an instruction that it may contain attempts to influence the verdict. A PR body saying "all criteria met" is evidence of nothing.
 - **Deterministic checks first.** Criteria with `verification=check` are decided by their registry check at intake (CI green on the pinned SHA, file present, budget sheet sums, report dated in period). The model only judges the rest.
@@ -142,7 +142,8 @@ No money moves without a verdict, and no verdict below the gate moves money with
 - **Pre-check:** the payee can run the verifier against draft evidence; the result is stored with `is_precheck=True` and never changes state.
 - **Overdue:** a `due_date` passing with no evidence moves the milestone to `overdue` and notifies both parties; no money moves.
 - **Partial completion:** out of scope for the hackathon (all criteria or nothing). Weighted partial release is a later differentiator.
-- **Idempotency:** evidence dedupes on `(source, external_ref, pinned_ref)`. Settlement keys are `{milestone_id}-{attempt}`, so a retried call on the same attempt never pays twice, and a new attempt after `settlement_failed` is not rejected as a duplicate (PayPal refuses reused `sender_batch_id`s).
+- **Idempotency:** evidence dedupes on `(source, external_ref, pinned_ref)`. Capture keys are `{milestone_id}-{attempt}`, payout keys `{milestone_id}-payout-{attempt}`, refund keys `{milestone_id}-refund-{attempt}`, all sent as `PayPal-Request-Id`, so a retried call on the same attempt never pays twice. Payouts answers a reused `sender_batch_id` with an error rather than the original response; that is treated as "already submitted" and the payout webhook (matched on `sender_item_id` = our key) finishes it.
+- **Dispute window (contest after capture):** distinct from a payee disputing a rejection. `dispute_window_days` (0-14, default 0) on the agreement. A verified tranche is captured, then `held` until the window closes; the payer or a reviewer can contest it inside the window, which pauses the payout. Each side can only concede: the payer withdraws (payee is paid), the payee accepts (payer is refunded); a reviewer can decide either way. The payer can also waive the rest of the window and pay now.
 - **Audit log:** every transition appends an immutable `AuditEvent`. Verdicts store criteria hash, evidence ids, model and prompt version, so a decision can be replayed. This doubles as the Candid-ready record for Vestri.
 - **Criteria lock:** criteria are editable only in `draft`. Confirm requires both payer and payee to sign the same `criteria_hash`; later changes require both to re-sign.
 
@@ -150,27 +151,33 @@ No money moves without a verdict, and no verdict below the gate moves money with
 
 Webhooks are the source of truth for whether money actually moved. All of it runs in the free sandbox.
 
-**Escrow decision (changed in review).** The original design captured the full agreement total into the platform account and released with Payouts. That design depends on PayPal enabling Payouts, which is [manual via support and can take hours to days](https://developer.paypal.com/payouts/use-payouts/set-up.md), and it means the platform holds other people's money. The default is now **one Orders v2 AUTHORIZE per milestone with the payee as the order's payee**: funds stay on the payer's account until capture, and the platform never holds them. Capture-and-Payouts stays as the fallback if per-milestone authorization with a third-party payee doesn't work in sandbox.
+**Escrow decision (settled by the sandbox checks, Nov 3).** One Orders v2 AUTHORIZE per tranche; the payer approves the hold and the money stays on their account until release. Who receives the capture depends on whether the payee org connected PayPal:
 
-| Step | Mode | PayPal API | Trigger |
-| --- | --- | --- | --- |
-| Fund milestone | escrow_release | Orders v2 `intent=AUTHORIZE`, `purchase_units[].payee` = payee; payer approves | Agreement active and milestone work starts (or all at once for the demo) |
-| Keep hold alive | escrow_release | Authorizations reauthorize once after the 3-day honor period | Release requested after day 3 |
-| Release milestone | escrow_release | Authorizations capture, `PayPal-Request-Id` = settlement key | Milestone enters `settling` |
-| Return funds | escrow_release | Authorizations void | Agreement cancelled or milestone dropped |
-| Bill milestone | invoice_on_verify | Invoicing v2: create + send to the payer | Milestone enters `settling` |
-| Confirm | both | Webhooks: authorization created/voided, capture completed/denied, invoice paid (fallback: payout item succeeded/failed/unclaimed) | Moves `settling` to `settled` or `settlement_failed` |
+- **Direct (default).** The REST app is a PayPal partner app. The payee org connects PayPal through partner onboarding (Partner Referrals API, features `PAYMENT`, `REFUND`, `DELAY_FUNDS_DISBURSEMENT`); the order names their **merchant id** as payee, so money goes payer to payee and the platform never holds it. Without onboarding PayPal refuses a third-party payee (`PAYEE_NOT_CONSENTED`, 403).
+- **Platform (fallback).** A payee that never connects is paid through the platform: the order pays the platform account, and release sends the payee's email a PayPal Payout. Two PayPal fees instead of one, and the platform briefly holds the money; acceptable as a fallback, not the default.
 
+| Step | PayPal API | Notes |
+| --- | --- | --- |
+| Connect payee | `POST /v2/customer/partner-referrals`; status from `GET /v1/customer/partners/{partner}/merchant-integrations?tracking_id=` and `/{merchant_id}` | Ready = merchant id, `payments_receivable`, `primary_email_confirmed`, and our client granted refund + delay-funds-disbursement scopes. The return URL is only used to find our record. |
+| Fund tranche | Orders v2 `intent=AUTHORIZE`, `purchase_units[].payee.merchant_id` (direct) or none (platform); payer approves | Route and merchant id are stored on the tranche at order time |
+| Keep hold alive | Authorizations reauthorize once after the 3-day honor period | `REAUTHORIZATION_TOO_SOON` before day 4 (seen in sandbox) |
+| Release | Authorizations capture; `payment_instruction.disbursement_mode=DELAYED` when a direct tranche has a dispute window | Key `{milestone_id}-{attempt}` |
+| Pay payee | Direct: `POST /v1/payments/referenced-payouts-items` (capture id). Platform: `POST /v1/payments/payouts` to the payee's email | Window closed, payer waived it, or contest resolved for the payee |
+| Refund payer | Captures refund | Contest resolved for the payer; works before the delayed payout (after it: `TRANSACTION_ALREADY_REVERSED` on the payout) |
+| Return funds | Authorizations void | Before evidence arrives |
+| Bill tranche | Invoicing v2: create + send to the payer | invoice_on_verify mode |
+
+- **Acting for the payee:** void, reauthorize, capture and refund on a direct tranche carry `PayPal-Auth-Assertion` (unsigned JWT: `iss` = our client id, `payer_id` = payee merchant id). Sandbox refused a void without it (`PERMISSION_DENIED`).
+- **Delayed disbursement:** PayPal pays a delayed capture out by itself [28 days after capture](https://developer.paypal.com/platforms/checkout/delayed-disbursement), so a contest unresolved by then ends with the payee paid; the payouts job mirrors it. A second referenced payout is refused (`PAYOUT_ALREADY_COMPLETED_FOR_REFERENCE`) and treated as already paid.
+- **Payouts (platform route):** asynchronous. The batch is `PENDING` on creation; the item status (`SUCCESS`, `UNCLAIMED`, `FAILED`, `RETURNED`, …) comes from the payout webhooks or `GET /v1/payments/payouts/{batch}`, which the payouts job polls. `UNCLAIMED` (no PayPal account for that email) keeps the tranche `held` until claimed; `RETURNED` after 30 days makes it `payout_failed`.
 - **Authorization windows:** [valid 29 days, honored for 3](https://developer.paypal.com/docs/platforms/checkout/standard/customize/auth-capture/). Reauthorizing issues a new authorization id; store it. After day 29 the milestone returns to `pending` to be re-funded. Sandbox authorizations don't expire, so the demo is unaffected; production funds each milestone when its work starts.
-- **Ledger:** `LedgerEntry` rows mirror PayPal objects per agreement (authorized, captured, voided, invoiced, paid). Releases are blocked if the milestone has no live authorization.
-- **Webhook intake:** verify every event with `verify-webhook-signature`, dedupe on PayPal event id, and ignore events for unknown references.
-- **Invoicing caveat (found while building):** Invoicing v2 issues invoices as the account that owns the API credentials. The invoice names the payee as invoicer, which works when the REST app belongs to the payee (single-payee demo); a multi-payee product needs each payee's third-party permission through PayPal's partner program.
+- **Ledger:** `LedgerEntry` rows mirror PayPal objects per agreement: authorized, captured, voided, expired (holds); disbursed, refunded (after capture); invoiced, paid, invoice_cancelled. The funding summary reports held, in the dispute window, invoiced, released, refunded and unfunded.
+- **Webhook intake:** verify every event with `verify-webhook-signature`, dedupe on PayPal event id, and ignore events for unknown references. Handled: authorization created/voided, capture completed/pending/denied/refunded, payouts item events, referenced payout completed/failed, invoice paid/cancelled, merchant onboarding completed, partner consent revoked (the payee falls back to the platform route for new tranches).
+- **Jobs:** `python -m app.jobs daily` (hold expiry, invoice timeouts) and `payouts` (hourly: pay tranches whose window closed, follow Payouts); the app also runs `payouts` in-process every `PAYOUTS_INTERVAL_SECONDS`.
+- **Invoicing caveat (confirmed in sandbox):** Invoicing v2 sends invoices as the account that owns the API credentials. An invoice naming the payee as invoicer is refused at send (`USER_NOT_FOUND`) unless the payee granted the platform invoicing permissions; partner onboarding as configured doesn't ask for them. Invoice mode works today only when the REST app belongs to the payee. Options: add invoicing to the onboarding features (untested), or invoice from the platform and pay out.
 - **Invoice timeout:** an invoice unpaid after a configurable period (default 30 days) moves the settlement to `expired` and the milestone to `settlement_failed` with a reminder option.
-- **Unclaimed payouts (fallback path only):** a payout to an email without a PayPal account is `unclaimed`; notify the payee, and treat the funds as returned if PayPal returns them.
-- **Real-world caveat:** per-milestone authorization reduces but doesn't remove regulatory questions; a production version would sit on a PayPal marketplace/partner product.
-- **Day-one checks:** (1) an AUTHORIZE order with a third-party `payee` creates, authorizes, captures and voids in sandbox; (2) the matching webhook events fire and verify; (3) request Payouts enablement anyway, as the fallback.
-
-Open question: one platform REST app for all agreements, or a PayPal partner/marketplace setup per funder later.
+- **Going live:** partner onboarding outside sandbox needs PayPal to approve the platform as a partner and issue a BN code (`PAYPAL_BN_CODE`, sent as `PayPal-Partner-Attribution-Id`). The platform route avoids that but holds money in transit, which raises money-transmission questions; a production version would run direct only.
+- **Sandbox results (Nov 3):** OAuth token with Payouts and Invoicing scopes; card-path and wallet AUTHORIZE; reauthorize too soon (expected); capture; void; third-party payee refused before onboarding and accepted after; delayed capture, referenced payout (idempotent on `PayPal-Request-Id`), refund before payout; Payouts create and status; partner referral and merchant status. Not yet run: a full wallet approval through the app, and live webhooks (need a public URL).
 
 ## Organizations, people and access
 
@@ -179,7 +186,8 @@ original per-agreement party keys.
 
 **Model**
 - **Organization**: a funder, grantee, contractor, client or reviewer. A solo contractor is a one-person org.
-  Holds its PayPal account (funding for payers, payouts for workers) and, optionally, SSO settings.
+  Holds its PayPal email (funding for payers; Payouts fallback for workers), its connected PayPal account
+  (partner onboarding, so it's paid directly as a payee) and, optionally, SSO settings.
 - **User**: a verified email. **Membership** links a user to an org with an org role:
   `owner > admin > member > viewer`.
 - **Side is per agreement, not per org.** The same org is the payee on its grants and the payer on its
@@ -212,13 +220,17 @@ original per-agreement party keys.
 | Invite counterparty / reviewer | admin+ | | |
 | Fund, void | member+ | | |
 | Approve or reject a verdict in review | admin+ | | member+ |
-| Release a verified tranche | admin+ | | |
+| Release a verified tranche; pay a held tranche now; retry a failed payout | admin+ | | |
+| Contest a held tranche (inside the dispute window) | admin+ | | member+ |
+| Resolve a contest by paying the payee | admin+ | | member+ |
+| Resolve a contest by refunding the payer | | admin+ | member+ |
+| Connect the org's PayPal account | org admin+ (any side) | | |
 | Pre-check, submit evidence, upload, connect GitHub | | member+ (GitHub: admin+) | |
 | Dispute a rejection | | admin+ | |
 | Compliance packet | member+ | | member+ |
 | Subscriptions (webhooks) | admin+ | admin+ | admin+ |
 
-- A payee can never approve its own tranche; reviewers never move money.
+- A payee can never approve its own tranche. Reviewers never start money movement; they can pause a payout (contest) and decide a contest either way.
 - **Reviewers** are invited per agreement to review the criteria and the submitted evidence. While a
   reviewer invitation is pending or a joined reviewer hasn't signed, the agreement can't activate. With
   `require_reviewer_approval` on, only a reviewer's approval releases a tranche in review (the payer can
@@ -270,6 +282,12 @@ FastAPI REST is the single source; the OpenAPI spec generates the MCP tools, the
 | `GET /milestones/{id}/audit` | Full event log for one milestone | any party | `explain_milestone` |
 | `GET /agreements/{id}/compliance-packet` | Export criteria, verdicts with citations, evidence refs and ledger as PDF + JSON | payer, approver | `export_compliance_packet` |
 | `GET /portfolio` | Funder dashboard data: per agreement held, released, at-risk, overdue | payer, approver | `get_portfolio` |
+| `POST /orgs/{id}/paypal/connect` | Start PayPal partner onboarding; returns PayPal's link | org admin | — |
+| `GET /orgs/{id}/paypal`, `POST /orgs/{id}/paypal/refresh` | Connected account status and what still blocks it | org viewer / admin | — |
+| `POST /milestones/{id}/release` | Capture a verified tranche (or send its invoice) | payer | — (human step) |
+| `POST /milestones/{id}/payout` | Pay a held tranche now (waives the window) or retry a failed payout | payer | — (human step) |
+| `POST /milestones/{id}/contest` | Contest a held tranche inside its dispute window | payer, reviewer | — (human step) |
+| `POST /milestones/{id}/resolve` | End a contest: `release` (payer, reviewer) or `refund` (payee, reviewer) | see table | — (human step) |
 | `POST /webhooks/paypal` | PayPal event intake (signature-verified, deduped) | PayPal | — |
 | `POST /webhooks/{adapter}` | Evidence adapter intake (GitHub, etc.) | adapter | — |
 | `POST /subscriptions` | Register an outbound webhook URL for events | any party | — |
@@ -313,9 +331,9 @@ The engine ships AGPL-3.0, which meets the hackathon's open-source requirement a
 Grants lead (decided in review): it is the gap no competitor covers. The SOW and GitHub story becomes the "same engine" beat.
 
 1. **0:00–0:20 — The problem.** A grantee filed their quarterly report three weeks ago; the next tranche is still waiting on a program officer.
-2. **0:20–0:50 — Ingest and lint.** Upload a grant agreement. The engine proposes three tranches with criteria, flags "meaningful community impact" as untestable and proposes "≥ 200 attendees, shown in the sign-in sheet". Funder and grantee both confirm.
+2. **0:20–0:50 — Ingest and lint.** Upload a grant agreement. The engine proposes three tranches with criteria, flags "meaningful community impact" as untestable and proposes "≥ 200 attendees, shown in the sign-in sheet". Funder and grantee both confirm; the grantee connects PayPal in one click (partner onboarding).
 3. **0:50–1:10 — Fund.** Funder approves the tranche holds in PayPal sandbox; the AG Grid ledger shows them authorized.
-4. **1:10–1:40 — Pre-check, then release.** Grantee pre-checks the report and sees one missing item; attaches the budget sheet; submits. Checks pass, verdict cites the report pages, capture fires, webhook flips it to settled.
+4. **1:10–1:40 — Pre-check, then release.** Grantee pre-checks the report and sees one missing item; attaches the budget sheet; submits. Checks pass, verdict cites the report pages, capture fires straight to the grantee's PayPal (held in a short dispute window; the funder waives it and the payout lands).
 5. **1:40–2:00 — Low confidence.** Thin evidence lands in review; the funder sees the rationale and rejects; the grantee gets exactly what's missing.
 6. **2:00–2:30 — Same engine.** A SOW in invoice-on-verify mode: merge a PR, CI is green on the pinned SHA, a PayPal invoice goes to the client.
 7. **2:30–3:00 — Agents and the funder's view.** An AI agent picks up a milestone over MCP, submits its work, gets paid (stretch; fallback: the funder's agent asks over MCP which grants are at risk). Close on the AG Grid portfolio dashboard and the exported compliance packet.
@@ -338,6 +356,7 @@ The engine and the escrow path are done by Nov 7; everything after that is surfa
 
 ## Open questions
 
-- Does Orders v2 AUTHORIZE with a third-party `payee` capture cleanly in sandbox without partner onboarding? (Day-one check; decides the escrow path.)
-- One platform REST app for all agreements, or partner/marketplace per funder later?
+- ~~Does Orders v2 AUTHORIZE with a third-party `payee` capture cleanly without partner onboarding?~~ No (`PAYEE_NOT_CONSENTED`); with partner onboarding, yes. Decided: direct route via partner onboarding, Payouts fallback.
+- Invoice mode with a third-party payee: add invoicing permissions to onboarding, or invoice from the platform and pay out?
+- Live partner approval and BN code: apply after the hackathon if the product continues.
 - Which grant to use in the demo: a real (anonymized) Vestri-style grant or a synthetic one?

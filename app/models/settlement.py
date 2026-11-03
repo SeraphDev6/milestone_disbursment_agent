@@ -8,7 +8,7 @@ from sqlalchemy import DateTime
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.columns import enum_type, fk, id_field, timestamp, utcnow
-from app.models.enums import MilestoneStatus, SettlementMode, SettlementStatus
+from app.models.enums import DisbursementKind, MilestoneStatus, SettlementMode, SettlementStatus
 
 if TYPE_CHECKING:
     from app.models.agreements import Milestone
@@ -45,6 +45,37 @@ class SettlementRead(SettlementBase):
     milestone_status: MilestoneStatus
 
 
+class DisbursementBase(SQLModel):
+    """After a capture: paying the payee (referenced payout or Payouts) or refunding the payer."""
+
+    kind: DisbursementKind = Field(sa_type=enum_type(DisbursementKind, 24))
+    attempt: int = Field(ge=1)
+    idempotency_key: str = Field(max_length=80, unique=True, description="Sent as PayPal-Request-Id.")
+    paypal_ref: str | None = Field(
+        default=None, max_length=128, index=True, description="Payout item, payout batch or refund id."
+    )
+    status: SettlementStatus = Field(sa_type=enum_type(SettlementStatus, 16))
+
+
+class Disbursement(DisbursementBase, table=True):
+    __tablename__ = "disbursements"
+
+    id: str = id_field()
+    milestone_id: str | None = fk("milestones.id")
+    error: str | None = Field(default=None, max_length=500)
+    created_at: datetime = timestamp()
+    updated_at: datetime = Field(
+        default_factory=utcnow, sa_type=DateTime(timezone=True), sa_column_kwargs={"onupdate": utcnow}
+    )
+
+    milestone: "Milestone" = Relationship(back_populates="disbursements")
+
+
+class DisbursementRead(DisbursementBase):
+    id: str
+    milestone_status: MilestoneStatus
+
+
 class LedgerEntry(SQLModel, table=True):
     """Mirrors PayPal money objects per agreement. Append-only."""
 
@@ -53,7 +84,8 @@ class LedgerEntry(SQLModel, table=True):
     id: str = id_field()
     agreement_id: str | None = fk("agreements.id")
     milestone_id: str | None = Field(default=None, max_length=36, index=True)
-    kind: str = Field(max_length=24)  # authorized, captured, voided, expired, invoiced, paid, invoice_cancelled
+    # authorized, captured, voided, expired (holds); disbursed, refunded (after capture); invoiced, paid, invoice_cancelled
+    kind: str = Field(max_length=24)
     amount: Decimal = Field(max_digits=14, decimal_places=2)
     paypal_ref: str = Field(max_length=64)
     at: datetime = timestamp()

@@ -1,6 +1,7 @@
 """Scheduled jobs. Run as `python -m app.jobs <job>` from Render cron or any scheduler.
 
 daily             drop expired PayPal holds and cancel invoices unpaid past the timeout
+payouts           pay tranches whose dispute window closed and follow payouts in flight (hourly)
 deliver-webhooks  send due outbound webhooks once (when the in-process loop is turned off)
 """
 
@@ -10,9 +11,9 @@ from app.config import Mode, get_settings
 from app.db import make_engine, make_sessionmaker, migrate, utcnow
 from app.integrations.paypal import make_gateway
 from app.services.outbound import deliver_due
-from app.services.settlement import expire_stale_holds, expire_stale_invoices
+from app.services.settlement import disburse_due, expire_stale_holds, expire_stale_invoices
 
-JOBS = ("migrate", "daily", "deliver-webhooks")
+JOBS = ("migrate", "daily", "payouts", "deliver-webhooks")
 
 
 def main(argv: list[str]) -> int:
@@ -31,6 +32,9 @@ def main(argv: list[str]) -> int:
             holds = expire_stale_holds(session, now)
             invoices = expire_stale_invoices(session, make_gateway(settings), now)
             print(f"expired {holds} hold(s), closed {invoices} unpaid invoice(s)")
+        elif argv[0] == "payouts":
+            counts = disburse_due(session, make_gateway(settings), now)
+            print(", ".join(f"{k.replace('_', ' ')}: {v}" for k, v in counts.items()))
         else:
             sent = deliver_due(session, now, allow_http=settings.mode is Mode.mock)
             print(f"delivered {sent} webhook(s)")

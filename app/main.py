@@ -15,7 +15,8 @@ from app.integrations.github import GitHubClient
 from app.integrations.oidc import OIDCClient, lookup_txt
 from app.integrations.paypal import make_gateway
 from app.services import ServiceError
-from app.services.outbound import resolve_host, start_delivery_loop
+from app.services.outbound import resolve_host, run_every, start_delivery_loop
+from app.services.settlement import disburse_due
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -28,14 +29,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             migrate.upgrade(engine)
         app.state.engine = engine
         app.state.sessionmaker = make_sessionmaker(engine)
-        stop = None
+        stops = []
         if settings.outbound_interval_seconds > 0:
-            stop = start_delivery_loop(
-                app.state.sessionmaker, settings.outbound_interval_seconds, allow_http=settings.mode is Mode.mock
+            stops.append(
+                start_delivery_loop(
+                    app.state.sessionmaker, settings.outbound_interval_seconds, allow_http=settings.mode is Mode.mock
+                )
+            )
+        if settings.payouts_interval_seconds > 0:  # pay tranches whose dispute window closed; follow Payouts
+            stops.append(
+                run_every(
+                    "payouts",
+                    app.state.sessionmaker,
+                    settings.payouts_interval_seconds,
+                    lambda session, now: disburse_due(session, app.state.paypal, now),
+                )
             )
         async with app.state.mcp_app.router.lifespan_context(app.state.mcp_app):
             yield
-        if stop:
+        for stop in stops:
             stop.set()
         engine.dispose()
 

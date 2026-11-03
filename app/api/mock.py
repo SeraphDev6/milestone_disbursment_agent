@@ -24,6 +24,17 @@ def approve_order(token: str, request: Request) -> RedirectResponse:
     return RedirectResponse(f"{gw.orders[token]['return_url']}?token={token}", status_code=303)
 
 
+@router.get("/paypal/onboard", include_in_schema=False)
+def onboard(tracking_id: str, request: Request) -> RedirectResponse:
+    """PayPal's seller onboarding: the payee signs in, grants permissions, and is sent back like PayPal does."""
+    gw: MockPayPal = request.app.state.paypal
+    if tracking_id not in gw.referrals:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown onboarding")
+    mid = gw.complete_onboarding(tracking_id)
+    target = gw.referrals[tracking_id]["return_url"]
+    return RedirectResponse(f"{target}?merchantId={tracking_id}&merchantIdInPayPal={mid}", status_code=303)
+
+
 @router.get("/paypal/invoices/{invoice_id}", include_in_schema=False)
 def invoice_page(invoice_id: str, request: Request) -> HTMLResponse:
     inv = request.app.state.paypal.invoices.get(invoice_id)

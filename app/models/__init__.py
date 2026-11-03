@@ -22,11 +22,13 @@ from app.models.criteria import Criterion, CriterionResult, LintIssue, LintRepor
 from app.models.enums import (
     AgreementStatus,
     Comparator,
+    DisbursementKind,
     EvidenceType,
     InvitationKind,
     LintLevel,
     MilestoneStatus,
     OrgRole,
+    PayoutRoute,
     Role,
     SettlementMode,
     SettlementStatus,
@@ -62,7 +64,8 @@ from app.models.identity import (
     UserRead,
 )
 from app.models.oauth import OAuthClient, OAuthCode, OAuthPendingAuthorization
-from app.models.settlement import LedgerEntry, Settlement, SettlementRead
+from app.models.paypal import PayPalAccount, PayPalAccountRead, PayPalConnectStarted
+from app.models.settlement import Disbursement, DisbursementRead, LedgerEntry, Settlement, SettlementRead
 from app.models.sso import SSOConnection, SSOConnectionRead, SSOConnectionWrite, SSODomain, SSOLoginState
 
 __all__ = [
@@ -80,6 +83,9 @@ __all__ = [
     "Comparator",
     "Criterion",
     "CriterionResult",
+    "Disbursement",
+    "DisbursementKind",
+    "DisbursementRead",
     "Evidence",
     "EvidenceCreate",
     "EvidenceRead",
@@ -113,6 +119,10 @@ __all__ = [
     "Party",
     "PartyBase",
     "PartyRead",
+    "PayPalAccount",
+    "PayPalAccountRead",
+    "PayPalConnectStarted",
+    "PayoutRoute",
     "Role",
     "SSOConnection",
     "SSOConnectionRead",

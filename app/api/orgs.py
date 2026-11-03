@@ -218,9 +218,21 @@ def revoke_api_key(org_id: str, key_id: str, principal: PrincipalDep, session: S
 # --- what each side works from ---------------------------------------------------------
 
 ATTENTION = {
-    Role.payer: {MilestoneStatus.needs_review, MilestoneStatus.disputed, MilestoneStatus.settlement_failed},
-    Role.reviewer: {MilestoneStatus.needs_review, MilestoneStatus.disputed},
-    Role.payee: {MilestoneStatus.pending, MilestoneStatus.funded, MilestoneStatus.settlement_failed},
+    Role.payer: {
+        MilestoneStatus.needs_review,
+        MilestoneStatus.disputed,
+        MilestoneStatus.contested,
+        MilestoneStatus.settlement_failed,
+        MilestoneStatus.payout_failed,
+    },
+    Role.reviewer: {MilestoneStatus.needs_review, MilestoneStatus.disputed, MilestoneStatus.contested},
+    Role.payee: {
+        MilestoneStatus.pending,
+        MilestoneStatus.funded,
+        MilestoneStatus.contested,
+        MilestoneStatus.settlement_failed,
+        MilestoneStatus.payout_failed,
+    },
 }
 
 
@@ -278,7 +290,7 @@ def review_queue(org_id: str, principal: PrincipalDep, session: SessionDep) -> l
         select(Party).where(Party.org_id == org_id, col(Party.role).in_((Role.payer, Role.reviewer)))
     ).all():
         for m in party.agreement.milestones:
-            if m.status not in (MilestoneStatus.needs_review, MilestoneStatus.disputed):
+            if m.status not in (MilestoneStatus.needs_review, MilestoneStatus.disputed, MilestoneStatus.contested):
                 continue
             v = next((v for v in reversed(m.verdicts) if not v.is_precheck), None)
             items.append(

@@ -81,6 +81,7 @@ def hermetic_settings(**overrides) -> Settings:
             "llm": "mock",
             "database_url": "sqlite://",
             "outbound_interval_seconds": 0,
+            "payouts_interval_seconds": 0,
             **overrides,
         }
     )

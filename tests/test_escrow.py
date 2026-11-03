@@ -6,13 +6,26 @@ import pytest
 from app.db import utcnow
 from app.integrations.paypal import MOCK_WEBHOOK_SIGNATURE, PayPalError
 from app.models import Milestone
-from tests.helpers import create_active, create_draft, h
+from tests.helpers import connect_paypal, create_active, create_draft, h
 
 
 @pytest.fixture
 def active(client, draft):
-    """An active escrow agreement: payer and payee orgs joined and both confirmed."""
-    return create_active(client, draft)
+    """An active escrow agreement: payer and payee orgs joined and both confirmed; the payee connected PayPal."""
+    aid, mids, ctx = create_active(client, draft)
+    connect_paypal(client, ctx)
+    return aid, mids, ctx
+
+
+def funding(held="0.00", window="0.00", released="0.00", refunded="0.00", unfunded="20000.00", invoiced="0.00"):
+    return {
+        "held": held,
+        "in_dispute_window": window,
+        "invoiced": invoiced,
+        "released": released,
+        "refunded": refunded,
+        "unfunded": unfunded,
+    }
 
 
 def gw(client):
@@ -55,7 +68,7 @@ def test_fund_verify_release_happy_path(client, active):
     fund(client, m1, keys)
     a = agreement(client, aid, keys)
     assert a["milestones"][0]["status"] == "funded"
-    assert a["funding"] == {"held": "10000.00", "invoiced": "0.00", "released": "0.00", "unfunded": "20000.00"}
+    assert a["funding"] == funding(held="10000.00")
 
     verify(client, m1, keys)
     r = release(client, m1, keys)
@@ -64,9 +77,10 @@ def test_fund_verify_release_happy_path(client, active):
     assert s["status"] == "succeeded" and s["milestone_status"] == "settled" and s["idempotency_key"] == f"{m1}-1"
 
     a = agreement(client, aid, keys)
-    assert a["funding"] == {"held": "0.00", "invoiced": "0.00", "released": "10000.00", "unfunded": "20000.00"}
+    assert a["funding"] == funding(released="10000.00")
+    assert a["milestones"][0]["payout_route"] == "direct"
     order = gw(client).orders[next(iter(gw(client).orders))]
-    assert order["payee"] == "grantee@example.org"  # funds go straight to the payee
+    assert order["payee"].startswith("MOCKMERCHANT")  # the payee's own PayPal account: funds go straight to it
 
 
 def test_cannot_fund_before_both_confirm(client, draft):
