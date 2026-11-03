@@ -1,9 +1,11 @@
 # Render Blueprint: the web service (API + web app), Postgres, and the two scheduled jobs.
 #
-# Set the secrets marked `sync: false` in the Render dashboard after the first deploy. MODE starts as mock so the
-# demo works without keys; switch it to sandbox (with the PayPal keys, SECRET_KEY, ANTHROPIC_API_KEY and an email
-# provider) when ready. One web instance runs the outbound-webhook loop in-process; payouts and the daily sweep run
-# as cron jobs here so several instances never race on the same tranche (PAYOUTS_INTERVAL_SECONDS=0 on the web).
+# Render prompts for every `sync: false` value when the Blueprint is first created (they can be left blank and
+# filled in later from the dashboard). MODE starts as mock so the demo works without keys; switch it to sandbox
+# (with the PayPal keys, ANTHROPIC_API_KEY and an email provider) when ready. One web instance runs the
+# outbound-webhook loop in-process; payouts and the daily sweep run as cron jobs here so several instances never
+# race on the same tranche (PAYOUTS_INTERVAL_SECONDS=0 on the web). Blueprint environment groups only take
+# literal values, so the secrets and the database link are repeated per service.
 services:
   - type: web
     name: milestone-engine
@@ -14,55 +16,18 @@ services:
     healthCheckPath: /health
     envVars:
       - fromGroup: milestone-engine-env
-      - key: PAYOUTS_INTERVAL_SECONDS
-        value: "0"
-      - key: PUBLIC_APP_URL
-        # RENDER_EXTERNAL_URL + /app; set explicitly once the service has its final hostname or a custom domain.
-        sync: false
-
-  # Hourly: pay tranches whose dispute window closed, follow Payouts in flight, mirror PayPal's 28-day release.
-  - type: cron
-    name: milestone-engine-payouts
-    runtime: python
-    plan: starter
-    schedule: "7 * * * *"
-    buildCommand: pip install uv && uv sync --frozen --no-dev
-    startCommand: uv run --no-dev python -m app.jobs payouts
-    envVars:
-      - fromGroup: milestone-engine-env
-      - key: AUTO_MIGRATE
-        value: "false"
-
-  # Daily: drop expired PayPal holds (29 days), close invoices unpaid for 30 days, mark tranches overdue.
-  - type: cron
-    name: milestone-engine-daily
-    runtime: python
-    plan: starter
-    schedule: "15 6 * * *"
-    buildCommand: pip install uv && uv sync --frozen --no-dev
-    startCommand: uv run --no-dev python -m app.jobs daily
-    envVars:
-      - fromGroup: milestone-engine-env
-      - key: AUTO_MIGRATE
-        value: "false"
-
-envVarGroups:
-  - name: milestone-engine-env
-    envVars:
-      - key: PYTHON_VERSION
-        value: "3.12.8"
-      - key: MODE
-        value: mock
       - key: DATABASE_URL
         fromDatabase:
           name: milestone-engine-db
           property: connectionString
-      - key: PUBLIC_BASE_URL
-        # The web service's public URL (Render also exposes it as RENDER_EXTERNAL_URL, which the app reads when
-        # this is unset; the cron jobs don't get that variable, so set it here once the hostname is known).
-        sync: false
       - key: SECRET_KEY
         generateValue: true
+      - key: PAYOUTS_INTERVAL_SECONDS
+        value: "0"
+      - key: PUBLIC_BASE_URL
+        sync: false # e.g. https://app.milestone-ledger.com (unset: Render's own URL via RENDER_EXTERNAL_URL)
+      - key: PUBLIC_APP_URL
+        sync: false # PUBLIC_BASE_URL + /app
       - key: PAYPAL_CLIENT_ID
         sync: false
       - key: PAYPAL_CLIENT_SECRET
@@ -73,12 +38,82 @@ envVarGroups:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
+      - key: RESEND_API_KEY
+        sync: false
+
+  # Hourly: pay tranches whose dispute window closed, follow Payouts in flight, mirror PayPal's 28-day release.
+  # The jobs never encrypt or decrypt anything, so their generated SECRET_KEY only has to be non-default.
+  - type: cron
+    name: milestone-engine-payouts
+    runtime: python
+    schedule: "7 * * * *"
+    buildCommand: pip install uv && uv sync --frozen --no-dev
+    startCommand: uv run --no-dev python -m app.jobs payouts
+    envVars:
+      - fromGroup: milestone-engine-env
+      - key: DATABASE_URL
+        fromDatabase:
+          name: milestone-engine-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: AUTO_MIGRATE
+        value: "false"
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: PUBLIC_APP_URL
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_PARTNER_MERCHANT_ID
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+
+  # Daily: drop expired PayPal holds (29 days), close invoices unpaid for 30 days, mark tranches overdue.
+  - type: cron
+    name: milestone-engine-daily
+    runtime: python
+    schedule: "15 6 * * *"
+    buildCommand: pip install uv && uv sync --frozen --no-dev
+    startCommand: uv run --no-dev python -m app.jobs daily
+    envVars:
+      - fromGroup: milestone-engine-env
+      - key: DATABASE_URL
+        fromDatabase:
+          name: milestone-engine-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: AUTO_MIGRATE
+        value: "false"
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: PUBLIC_APP_URL
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_PARTNER_MERCHANT_ID
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+
+# Literal values shared by every service. Change MODE and EMAIL_PROVIDER here once the keys are in place.
+envVarGroups:
+  - name: milestone-engine-env
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: MODE
+        value: mock
       - key: EMAIL_PROVIDER
         value: console
       - key: EMAIL_FROM
         value: "Milestone Ledger <notify@mail.milestone-ledger.com>"
-      - key: RESEND_API_KEY
-        sync: false
 
 databases:
   - name: milestone-engine-db
