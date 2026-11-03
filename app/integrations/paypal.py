@@ -14,8 +14,11 @@ unconnected one through a PayPal invoice from the platform account, then Payouts
 
 Two implementations share one interface:
 - MockPayPal: in-memory, deterministic MOCK ids, approval simulated by our own /mock route.
-- SandboxPayPal: PayPal REST over httpx. Kept behind this interface so it can be swapped for the
-  APIMatic-generated PayPal Server SDK once the day-one check confirms it covers Authorizations.
+- SandboxPayPal (sandbox and live): the APIMatic-generated PayPal Server SDK (`paypal-server-sdk`) for what it
+  covers, which is Orders and Payments (create, authorize and capture orders; reauthorize, capture, void and
+  refund), and plain REST over httpx for what it doesn't: Payouts, referenced payouts, Partner Referrals and
+  merchant status, Invoicing, and webhook signature verification. Both paths share one httpx client, so tests
+  can mock PayPal with one transport.
 """
 
 import base64
@@ -27,8 +30,29 @@ import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Protocol
+from urllib.parse import urlsplit
 
 import httpx
+from apimatic_core.http.response.http_response import HttpResponse as SdkHttpResponse
+from apimatic_core_interfaces.client.http_client import HttpClient as SdkHttpClient
+from paypalserversdk.configuration import Environment as SdkEnvironment
+from paypalserversdk.exceptions.api_exception import ApiException
+from paypalserversdk.exceptions.error_exception import ErrorException
+from paypalserversdk.http.auth.o_auth_2 import ClientCredentialsAuthCredentials
+from paypalserversdk.models.amount_with_breakdown import AmountWithBreakdown
+from paypalserversdk.models.capture_request import CaptureRequest
+from paypalserversdk.models.checkout_payment_intent import CheckoutPaymentIntent
+from paypalserversdk.models.money import Money
+from paypalserversdk.models.order_request import OrderRequest
+from paypalserversdk.models.payee_base import PayeeBase
+from paypalserversdk.models.payment_instruction import PaymentInstruction
+from paypalserversdk.models.payment_source import PaymentSource
+from paypalserversdk.models.paypal_wallet import PaypalWallet
+from paypalserversdk.models.paypal_wallet_experience_context import PaypalWalletExperienceContext
+from paypalserversdk.models.purchase_unit_request import PurchaseUnitRequest
+from paypalserversdk.models.reauthorize_request import ReauthorizeRequest
+from paypalserversdk.models.refund_request import RefundRequest
+from paypalserversdk.paypal_serversdk_client import PaypalServersdkClient
 
 
 class PayPalError(Exception):
@@ -520,6 +544,42 @@ def _b64(data: dict) -> str:
     return base64.urlsafe_b64encode(json.dumps(data, separators=(",", ":")).encode()).rstrip(b"=").decode()
 
 
+def _debug_id(headers: dict) -> str | None:
+    """PayPal-Debug-Id from a plain header dict (the SDK's response headers keep httpx's lower-case keys)."""
+    return next((v for k, v in (headers or {}).items() if k.lower() == "paypal-debug-id"), None)
+
+
+class _HttpxSdkClient(SdkHttpClient):
+    """Runs the PayPal Server SDK's requests through the gateway's httpx client (same base URL, timeout and,
+    in tests, mock transport as the REST calls the SDK doesn't cover)."""
+
+    def __init__(self, gateway: "SandboxPayPal"):
+        self._gateway = gateway
+
+    def execute(self, request, endpoint_configuration):
+        parts = urlsplit(request.query_url)  # the SDK builds a full URL for its environment; keep our base URL
+        path = parts.path + (f"?{parts.query}" if parts.query else "")
+        body = request.parameters  # a JSON string, or form fields as (name, value) pairs for the token call
+        if isinstance(body, str | bytes):
+            kwargs = {"content": body}
+        else:
+            kwargs = {"data": dict(body) if isinstance(body, list | tuple) else body}
+        headers = {k: v for k, v in (request.headers or {}).items() if v is not None}  # unset options are None
+        response = self._gateway._client.request(
+            str(request.http_method),
+            path,
+            headers=headers,
+            params=request.query_parameters,
+            files=request.files,
+            **kwargs,
+        )
+        return self.convert_response(response, endpoint_configuration.contains_binary_response, request)
+
+    def convert_response(self, response, contains_binary_response, request):
+        body = response.content if contains_binary_response else response.text
+        return SdkHttpResponse(response.status_code, response.reason_phrase, dict(response.headers), body, request)
+
+
 class SandboxPayPal:
     def __init__(
         self,
@@ -544,6 +604,14 @@ class SandboxPayPal:
         self._token: str | None = None
         self._token_expires = 0.0
         self._lock = threading.Lock()
+        # The SDK fetches and refreshes its own OAuth token (through the same httpx client).
+        self._sdk = PaypalServersdkClient(
+            environment=SdkEnvironment.SANDBOX if "sandbox" in base_url else SdkEnvironment.PRODUCTION,
+            client_credentials_auth_credentials=ClientCredentialsAuthCredentials(
+                o_auth_client_id=client_id, o_auth_client_secret=client_secret
+            ),
+        )
+        self._sdk.global_configuration.get_http_client_configuration().set_http_client(_HttpxSdkClient(self))
 
     def _access_token(self) -> str:
         with self._lock:
@@ -557,12 +625,42 @@ class SandboxPayPal:
             self._token_expires = time.monotonic() + int(body.get("expires_in", 300))
             return self._token
 
-    def _assertion(self, payee_merchant_id: str | None) -> dict[str, str]:
+    def _assertion(self, payee_merchant_id: str | None) -> str | None:
         """PayPal-Auth-Assertion: act on a connected payee's authorization or capture (unsigned JWT, per PayPal)."""
         if not payee_merchant_id:
-            return {}
+            return None
         claims = {"iss": self._client_id, "payer_id": payee_merchant_id}
-        return {"PayPal-Auth-Assertion": f"{_b64({'alg': 'none'})}.{_b64(claims)}."}
+        return f"{_b64({'alg': 'none'})}.{_b64(claims)}."
+
+    def _sdk_call(self, method, options: dict):
+        """One PayPal Server SDK call, with its errors mapped like the REST ones (`_call`)."""
+        options = {k: v for k, v in options.items() if v is not None}
+        try:
+            return method({"prefer": "return=representation", **options}).body
+        except ErrorException as e:
+            # The SDK only parses the body when it's JSON; a 5xx from a proxy leaves these attributes unset.
+            first = (getattr(e, "details", None) or [None])[0]
+            detail = (
+                (getattr(first, "issue", None) if first else None)
+                or getattr(e, "name", None)
+                or getattr(e, "message", None)
+                or e.reason
+            )
+            raise PayPalError(
+                f"PayPal {e.response_code}: {detail}",
+                status=e.response_code,
+                ambiguous=e.response_code >= 500,
+                debug_id=getattr(e, "debug_id", None) or _debug_id(e.response.headers),
+            ) from e
+        except ApiException as e:
+            raise PayPalError(
+                f"PayPal {e.response_code}: {e.reason}",
+                status=e.response_code,
+                ambiguous=e.response_code >= 500,
+                debug_id=_debug_id(e.response.headers),
+            ) from e
+        except httpx.HTTPError as e:
+            raise PayPalError(f"PayPal unreachable: {e}", ambiguous=True) from e
 
     def _call(
         self,
@@ -609,13 +707,13 @@ class SandboxPayPal:
             )
         return r.json() if r.content else {}
 
-    # --- orders and authorizations ---
+    # --- orders and authorizations (PayPal Server SDK) ---
 
     def create_authorize_order(
         self, *, reference_id, description, amount, currency, payee_merchant_id, return_url, cancel_url, request_id
     ) -> CreatedOrder:
         return self._create_order(
-            "AUTHORIZE",
+            CheckoutPaymentIntent.AUTHORIZE,
             reference_id,
             description,
             amount,
@@ -630,7 +728,7 @@ class SandboxPayPal:
         self, *, reference_id, description, amount, currency, payee_merchant_id, return_url, cancel_url, request_id
     ) -> CreatedOrder:
         return self._create_order(
-            "CAPTURE",
+            CheckoutPaymentIntent.CAPTURE,
             reference_id,
             description,
             amount,
@@ -642,90 +740,103 @@ class SandboxPayPal:
         )
 
     def capture_order(self, order_id, *, request_id) -> Capture:
-        data = self._call("POST", f"/v2/checkout/orders/{order_id}/capture", request_id=request_id)
-        capture = data["purchase_units"][0]["payments"]["captures"][0]
-        return Capture(capture["id"], capture["status"])
+        order = self._sdk_call(self._sdk.orders.capture_order, {"id": order_id, "paypal_request_id": request_id})
+        capture = order.purchase_units[0].payments.captures[0]
+        return Capture(capture.id, capture.status)
 
     def _create_order(
         self, intent, reference_id, description, amount, currency, payee_merchant_id, return_url, cancel_url, request_id
     ) -> CreatedOrder:
-        unit = {
-            "reference_id": reference_id,
-            "custom_id": reference_id,
-            "description": description[:127],
-            "amount": _money(amount, currency),
-        }
+        unit = PurchaseUnitRequest(
+            amount=AmountWithBreakdown(currency_code=currency, value=f"{amount:.2f}"),
+            reference_id=reference_id,
+            custom_id=reference_id,
+            description=description[:127],
+        )
         if payee_merchant_id:
-            unit["payee"] = {"merchant_id": payee_merchant_id}
-        body = {
-            "intent": intent,
-            "purchase_units": [unit],
-            "payment_source": {
-                "paypal": {
-                    "experience_context": {
-                        "return_url": return_url,
-                        "cancel_url": cancel_url,
-                        "user_action": "CONTINUE",
-                        "shipping_preference": "NO_SHIPPING",
-                    }
-                }
-            },
-        }
-        data = self._call("POST", "/v2/checkout/orders", request_id=request_id, json=body)
-        url = next((link["href"] for link in data.get("links", []) if link["rel"] in ("payer-action", "approve")), None)
+            unit.payee = PayeeBase(merchant_id=payee_merchant_id)
+        body = OrderRequest(
+            intent=intent,
+            purchase_units=[unit],
+            payment_source=PaymentSource(
+                paypal=PaypalWallet(
+                    experience_context=PaypalWalletExperienceContext(
+                        return_url=return_url,
+                        cancel_url=cancel_url,
+                        user_action="CONTINUE",
+                        shipping_preference="NO_SHIPPING",
+                    )
+                )
+            ),
+        )
+        order = self._sdk_call(
+            self._sdk.orders.create_order,
+            {"body": body, "paypal_request_id": request_id, "paypal_partner_attribution_id": self._bn_code},
+        )
+        url = next((link.href for link in order.links or [] if link.rel in ("payer-action", "approve")), None)
         if url is None:
             raise PayPalError("PayPal returned no approval link")
-        return CreatedOrder(data["id"], url)
+        return CreatedOrder(order.id, url)
 
     def authorize_order(self, order_id, *, request_id) -> Authorization:
-        data = self._call("POST", f"/v2/checkout/orders/{order_id}/authorize", request_id=request_id)
-        auth = data["purchase_units"][0]["payments"]["authorizations"][0]
-        return Authorization(auth["id"], auth["status"])
+        order = self._sdk_call(self._sdk.orders.authorize_order, {"id": order_id, "paypal_request_id": request_id})
+        auth = order.purchase_units[0].payments.authorizations[0]
+        return Authorization(auth.id, auth.status)
 
     def reauthorize(self, authorization_id, *, amount, currency, payee_merchant_id, request_id) -> Authorization:
-        data = self._call(
-            "POST",
-            f"/v2/payments/authorizations/{authorization_id}/reauthorize",
-            request_id=request_id,
-            json={"amount": _money(amount, currency)},
-            headers=self._assertion(payee_merchant_id),
+        auth = self._sdk_call(
+            self._sdk.payments.reauthorize_payment,
+            {
+                "authorization_id": authorization_id,
+                "paypal_request_id": request_id,
+                "paypal_auth_assertion": self._assertion(payee_merchant_id),
+                "body": ReauthorizeRequest(amount=Money(currency_code=currency, value=f"{amount:.2f}")),
+            },
         )
-        return Authorization(data["id"], data["status"])
+        return Authorization(auth.id, auth.status)
 
     def capture_authorization(
         self, authorization_id, *, amount, currency, payee_merchant_id, delayed, request_id
     ) -> Capture:
-        body: dict = {"amount": _money(amount, currency), "final_capture": True}
+        body = CaptureRequest(amount=Money(currency_code=currency, value=f"{amount:.2f}"), final_capture=True)
         if delayed:
-            body["payment_instruction"] = {"disbursement_mode": "DELAYED"}
-        data = self._call(
-            "POST",
-            f"/v2/payments/authorizations/{authorization_id}/capture",
-            request_id=request_id,
-            json=body,
-            headers=self._assertion(payee_merchant_id),
+            body.payment_instruction = PaymentInstruction(disbursement_mode="DELAYED")
+        capture = self._sdk_call(
+            self._sdk.payments.capture_authorized_payment,
+            {
+                "authorization_id": authorization_id,
+                "paypal_request_id": request_id,
+                "paypal_auth_assertion": self._assertion(payee_merchant_id),
+                "body": body,
+            },
         )
-        return Capture(data["id"], data["status"])
+        return Capture(capture.id, capture.status)
 
     def void_authorization(self, authorization_id, *, payee_merchant_id, request_id) -> None:
-        self._call(
-            "POST",
-            f"/v2/payments/authorizations/{authorization_id}/void",
-            request_id=request_id,
-            headers=self._assertion(payee_merchant_id),
+        self._sdk_call(
+            self._sdk.payments.void_payment,
+            {
+                "authorization_id": authorization_id,
+                "paypal_request_id": request_id,
+                "paypal_auth_assertion": self._assertion(payee_merchant_id),
+            },
         )
 
     # --- after capture ---
 
     def refund_capture(self, capture_id, *, amount, currency, payee_merchant_id, request_id) -> Refund:
-        data = self._call(
-            "POST",
-            f"/v2/payments/captures/{capture_id}/refund",
-            request_id=request_id,
-            json={"amount": _money(amount, currency)},
-            headers=self._assertion(payee_merchant_id),
+        refund = self._sdk_call(
+            self._sdk.payments.refund_captured_payment,
+            {
+                "capture_id": capture_id,
+                "paypal_request_id": request_id,
+                "paypal_auth_assertion": self._assertion(payee_merchant_id),
+                "body": RefundRequest(amount=Money(currency_code=currency, value=f"{amount:.2f}")),
+            },
         )
-        return Refund(data["id"], data["status"])
+        return Refund(refund.id, refund.status)
+
+    # --- payouts, partner onboarding, invoicing, webhooks (REST; not in the SDK) ---
 
     def release_delayed(self, capture_id, *, request_id) -> PayoutResult:
         data = self._call(

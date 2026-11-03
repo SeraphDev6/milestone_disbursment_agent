@@ -16,6 +16,7 @@ dependencies = [
     "joserfc>=1.8.0",
     "mcp>=2.3.0",
     "openpyxl>=3.1.5",
+    "paypal-server-sdk>=2.4.0",
     "psycopg[binary]>=3.3.7",
     "pydantic>=2.14.2",
     "pydantic-ai-slim[anthropic]>=2.65.0",

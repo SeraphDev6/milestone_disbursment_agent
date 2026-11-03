@@ -21,7 +21,7 @@ Logged Nov 3, 2026; updated the same day after the hardening pass (items marked 
 | 13 | P2 | **The platform's merchant ID is found with a throwaway order** when `PAYPAL_PARTNER_MERCHANT_ID` is unset. It costs nothing and expires, but it's hacky. | **Done (Nov 3)** in `render.yaml` (`sync: false`); `scripts/paypal_sandbox_check.py` prints the value to set. |
 | 14 | P2 | **Any PayPal error while reading a payee's status at funding falls back to the platform route.** That avoids blocking funding, but it means a PayPal outage moves money through the platform. | **Done (Nov 3).** A PayPal error while checking a payee that started connecting refuses funding (502, retry); only a payee that never connected falls back to the platform. |
 | 15 | P2 | **The sandbox check scripts live only in the session scratchpad.** | **Done (Nov 3)** as `scripts/paypal_sandbox_check.py` (settings, token, partner merchant id, webhook events, optional $1 order; prints no secrets). |
-| 16 | P2 | **The APIMatic PayPal Server SDK swap hasn't been done** (a prize item). The gateway is our own httpx client. | Check that the SDK covers Orders, Authorizations, Payouts, referenced payouts and Partner Referrals; swap behind the `PayPalGateway` interface. |
+| 16 | P2 | **The APIMatic PayPal Server SDK swap hasn't been done** (a prize item). The gateway is our own httpx client. | **Done as a hybrid (Nov 3).** `paypal-server-sdk` 2.4.0 covers Orders and Payments only, so the gateway calls the SDK for create/authorize/capture orders and reauthorize/capture/void/refund, and keeps httpx for Payouts, referenced payouts, Partner Referrals, Invoicing and webhook verification (none of which are in the SDK). Both share one httpx client (`tests/test_paypal_sdk.py`). |
 
 ## App behaviour gaps
 

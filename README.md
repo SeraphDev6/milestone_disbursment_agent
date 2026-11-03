@@ -2,6 +2,8 @@
 
 Turns a grant or statement of work into tranches with checkable acceptance criteria, verifies evidence against them, and settles each tranche through PayPal. Built for the PayPal AI Hackathon (Nov 2026). Spec: [`docs/SPEC.md`](docs/SPEC.md).
 
+**PayPal:** sandbox and live calls go through the APIMatic-generated [PayPal Server SDK](https://pypi.org/project/paypal-server-sdk/) for everything it covers (Orders v2 and Payments v2: create, authorize and capture orders; reauthorize, capture, void, refund) and through plain REST for what it doesn't (Payouts, referenced payouts, Partner Referrals, Invoicing, webhook verification). One httpx client serves both, so tests mock PayPal with a single transport.
+
 **Status:** agreements, structured criteria and lint, two-party confirmation, PayPal escrow (per-tranche hold, reauthorize, capture, void, expiry, webhooks), agreement extraction, evidence intake, deterministic checks, the AI verifier, the release gate, pre-check and human review all work in mock mode, as do the GitHub and upload evidence adapters. Extraction and verification have been run live against Claude; PayPal sandbox is wired but not yet run against PayPal. Up next: invoice mode and outbound webhooks.
 
 AI parts (extraction, verification) use [Pydantic AI](https://ai.pydantic.dev) with Claude (`claude-opus-5-5`, server-side refusal fallbacks on). Mock mode swaps in a deterministic `FunctionModel`, so both paths run the same agents.
@@ -90,7 +92,8 @@ app/
   ai/              Pydantic AI agents (extraction, verification) and extraction post-processing
   services/        settlement (escrow + invoice), verification and gate, notifications, rate limits,
                    outbound webhooks, compliance packet
-  integrations/    PayPal gateway (mock + REST), email (console, Resend, SMTP), GitHub, OIDC, file uploads
+  integrations/    PayPal gateway (mock; PayPal Server SDK for orders and payments, REST for the rest), email
+                   (console, Resend, SMTP), GitHub, OIDC, file uploads
 scripts/           paypal_sandbox_check.py: verify PayPal credentials and webhook setup from .env
 web/               React app (Vite, React Aria, AG Grid); served at /app from web/dist
 ```

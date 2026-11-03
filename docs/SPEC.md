@@ -55,7 +55,7 @@ Strategy (decided Nov 3): **focus, don't shotgun.**
 | Best Demo Delivery (HM) | $5k | Tight 3:00 script, real sandbox money movement on screen, mock mode for judges | Nov 11 |
 | Most Creative (HM) | $5k | Criteria lint and pre-check reframe escrow as coaching, not gatekeeping | Demo beat 2 |
 | Best Use of AG Grid — **the sponsor bet** | $5k / $2k / $1k x3 | AG Grid for the ledger and milestone grid; AG Studio / AG Charts for a small funder portfolio dashboard (released vs held vs at-risk per grant) | Nov 10 |
-| Best Use of APIMatic — free ride | $1k + 6 mo Business x3 | Call PayPal through the APIMatic-generated PayPal Server SDK (verify on day one; Invoicing may not be in it) and use the APIMatic Context Plugin while building. Generating our own SDKs is optional | Nov 4–5 |
+| Best Use of APIMatic — free ride | $1k + 6 mo Business x3 | PayPal is called through the APIMatic-generated PayPal Server SDK for Orders and Payments (done Nov 3; the SDK has no Payouts, Partner Referrals, Invoicing or webhook verification, which stay on REST). Generating our own SDKs is optional | Nov 3 |
 | Best Use of Render — free ride | $1k / $750 / $500 credits | Web service, Postgres, background worker for verification, cron for authorization expiry and invoice timeouts, all in `render.yaml` | Nov 4 |
 | Best Use of Bryntum | $1k x3 | Dropped (see strategy) | — |
 | Best Use of Channel3 | $1.5k | Skipped: product-catalog tooling does not fit disbursement | — |
