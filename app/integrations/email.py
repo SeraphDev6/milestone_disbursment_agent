@@ -99,6 +99,8 @@ class ResendMailer:
             )
             if r.status_code >= 400:
                 log.error("email to %s (%s) refused by Resend: HTTP %s %s", to, subject, r.status_code, r.text[:200])
+            else:
+                log.info("email to %s: %s (resend id %s)", to, subject, (r.json() or {}).get("id"))
         except httpx.HTTPError as e:
             log.error("email to %s (%s) not sent: %s", to, subject, e)
 
