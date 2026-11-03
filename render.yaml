@@ -76,7 +76,7 @@ envVarGroups:
       - key: EMAIL_PROVIDER
         value: console
       - key: EMAIL_FROM
-        value: "Milestone Engine <no-reply@example.org>"
+        value: "Milestone Ledger <notify@mail.milestone-ledger.com>"
       - key: RESEND_API_KEY
         sync: false
 
