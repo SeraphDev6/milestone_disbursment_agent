@@ -6,21 +6,13 @@ import pytest
 from app.db import utcnow
 from app.integrations.paypal import MOCK_WEBHOOK_SIGNATURE, PayPalError
 from app.models import Milestone
-
-
-def h(key):
-    return {"X-API-Key": key}
+from tests.helpers import create_active, create_draft, h
 
 
 @pytest.fixture
 def active(client, draft):
-    """An active escrow agreement: created and confirmed by both parties."""
-    r = client.post("/agreements", json=draft)
-    body = r.json()
-    a, keys = body["agreement"], {k["role"]: k["api_key"] for k in body["party_keys"]}
-    for role in ("payer", "payee"):
-        client.post(f"/agreements/{a['id']}/confirm", json={"criteria_hash": a["criteria_hash"]}, headers=h(keys[role]))
-    return a["id"], [m["id"] for m in a["milestones"]], keys
+    """An active escrow agreement: payer and payee orgs joined and both confirmed."""
+    return create_active(client, draft)
 
 
 def gw(client):
@@ -78,9 +70,7 @@ def test_fund_verify_release_happy_path(client, active):
 
 
 def test_cannot_fund_before_both_confirm(client, draft):
-    body = client.post("/agreements", json=draft).json()
-    keys = {k["role"]: k["api_key"] for k in body["party_keys"]}
-    mid = body["agreement"]["milestones"][0]["id"]
+    _, (mid, _), keys = create_draft(client, draft)
     r = client.post(f"/milestones/{mid}/fund", headers=h(keys["payer"]))
     assert r.status_code == 409 and "confirm" in r.json()["detail"]
 

@@ -27,7 +27,6 @@ from app.models import (
     EvidenceCreate,
     Milestone,
     MilestoneStatus,
-    Party,
     SettlementMode,
     Verdict,
     VerificationMethod,
@@ -333,14 +332,13 @@ def review(
     session: Session,
     gw: PayPalGateway,
     m: Milestone,
-    party: Party,
+    actor: str,
     approve: bool,
     note: str | None,
     now: datetime,
 ) -> None:
     if m.status not in (MilestoneStatus.needs_review, MilestoneStatus.disputed):
         raise VerificationError(f"tranche is {m.status}; only tranches in needs_review or disputed can be reviewed")
-    actor = f"party:{party.id}"
     verdict = latest_verdict(m)
     detail = {"note": note, "verdict_id": verdict.id if verdict else None}
     if approve:
@@ -362,7 +360,7 @@ def review(
         session.commit()
 
 
-def dispute(session: Session, m: Milestone, party: Party, reason: str) -> None:
+def dispute(session: Session, m: Milestone, actor: str, reason: str) -> None:
     """Payee escalates a rejection. The tranche waits in `disputed` until the payer side reviews it again."""
     if m.status not in (MilestoneStatus.pending, MilestoneStatus.funded):
         raise VerificationError(f"tranche is {m.status}; only a rejected tranche can be disputed")
@@ -374,5 +372,5 @@ def dispute(session: Session, m: Milestone, party: Party, reason: str) -> None:
     ).first()
     if last_review is None or last_review.action != "review_rejected":
         raise VerificationError("only a rejected tranche can be disputed")
-    settlement.transition(session, m, MilestoneStatus.disputed, f"party:{party.id}", "disputed", reason=reason)
+    settlement.transition(session, m, MilestoneStatus.disputed, actor, "disputed", reason=reason)
     session.commit()

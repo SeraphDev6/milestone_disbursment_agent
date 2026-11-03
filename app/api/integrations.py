@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, Response, status
 from sqlmodel import Field, SQLModel, select
 
-from app.api.deps import PartyDep, SessionDep, require_role
+from app.api.deps import AgreementAccessDep, SessionDep
 from app.config import Mode
 from app.db import record_audit
 from app.integrations import github
@@ -24,6 +24,7 @@ from app.models import (
     WebhookEvent,
 )
 from app.services import verification
+from app.services.access import Action
 from app.services.outbound import DestinationError, check_destination
 
 router = APIRouter()
@@ -58,10 +59,10 @@ class GitHubIntegration(SQLModel):
     summary="Payee connects a GitHub repo: merged PRs labelled with a milestone become its evidence",
 )
 def register_github(
-    agreement_id: str, body: GitHubRegistration, party: PartyDep, session: SessionDep, request: Request
+    agreement_id: str, body: GitHubRegistration, access: AgreementAccessDep, session: SessionDep, request: Request
 ) -> GitHubIntegration:
-    require_role(party, Role.payee)
-    a = party.agreement
+    access.require(Action.connect_github)
+    a = access.party.agreement
     if a.status in (AgreementStatus.cancelled, AgreementStatus.completed):
         raise HTTPException(status.HTTP_409_CONFLICT, f"agreement is {a.status}")
     if not github.valid_repo(body.repo):
@@ -77,11 +78,11 @@ def register_github(
             kind="github",
             target=body.repo,
             secret=secrets.token_hex(32),
-            created_by=f"party:{party.id}",
+            created_by=access.actor,
         )
         session.add(row)
         session.flush()
-        record_audit(session, a.id, f"party:{party.id}", "github_connected", detail={"repo": body.repo})
+        record_audit(session, a.id, access.actor, "github_connected", detail={"repo": body.repo})
         session.commit()
     base = request.app.state.settings.public_base_url
     return GitHubIntegration(
@@ -189,8 +190,9 @@ async def github_webhook(
     "/agreements/{agreement_id}/subscriptions", tags=["events"], summary="Subscribe a URL to this agreement's events"
 )
 def subscribe(
-    agreement_id: str, body: SubscriptionCreate, party: PartyDep, session: SessionDep, request: Request
+    agreement_id: str, body: SubscriptionCreate, access: AgreementAccessDep, session: SessionDep, request: Request
 ) -> SubscriptionCreated:
+    access.require(Action.manage_subscriptions)
     state = request.app.state
     try:
         check_destination(body.url, allow_http=state.settings.mode is Mode.mock, resolve=state.resolve)
@@ -198,29 +200,31 @@ def subscribe(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
     sub = Subscription.model_validate(
         body,
-        update={"agreement_id": agreement_id, "secret": secrets.token_hex(32), "created_by": f"party:{party.id}"},
+        update={"agreement_id": agreement_id, "secret": secrets.token_hex(32), "created_by": access.actor},
     )
     session.add(sub)
     session.flush()
-    record_audit(session, agreement_id, f"party:{party.id}", "subscription_created", detail={"url": body.url})
+    record_audit(session, agreement_id, access.actor, "subscription_created", detail={"url": body.url})
     session.commit()
     return SubscriptionCreated.model_validate(sub)
 
 
 @router.get("/agreements/{agreement_id}/subscriptions", tags=["events"], summary="Subscriptions on this agreement")
-def list_subscriptions(agreement_id: str, party: PartyDep, session: SessionDep) -> list[SubscriptionRead]:
+def list_subscriptions(agreement_id: str, access: AgreementAccessDep, session: SessionDep) -> list[SubscriptionRead]:
+    access.require(Action.view)
     subs = session.exec(select(Subscription).where(Subscription.agreement_id == agreement_id)).all()
     return [SubscriptionRead.model_validate(s) for s in subs]
 
 
 @router.delete("/agreements/{agreement_id}/subscriptions/{subscription_id}", tags=["events"], status_code=204)
-def unsubscribe(agreement_id: str, subscription_id: str, party: PartyDep, session: SessionDep) -> Response:
+def unsubscribe(agreement_id: str, subscription_id: str, access: AgreementAccessDep, session: SessionDep) -> Response:
+    access.require(Action.manage_subscriptions)
     sub = session.get(Subscription, subscription_id)
     if sub is None or sub.agreement_id != agreement_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "subscription not found")
-    if sub.created_by != f"party:{party.id}" and party.role != Role.payer:
+    if sub.created_by != access.actor and access.party.role != Role.payer:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "only its creator or the payer can remove a subscription")
     sub.active = False
-    record_audit(session, agreement_id, f"party:{party.id}", "subscription_removed", detail={"url": sub.url})
+    record_audit(session, agreement_id, access.actor, "subscription_removed", detail={"url": sub.url})
     session.commit()
     return Response(status_code=204)

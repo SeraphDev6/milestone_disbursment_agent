@@ -6,12 +6,13 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, Response, UploadFile, status
 from sqlmodel import Field, SQLModel, select
 
-from app.api.deps import EvidencePartyDep, MilestonePartyDep, SessionDep, ai, gateway, require_role
+from app.api.deps import EvidenceAccessDep, MilestoneAccessDep, SessionDep, ai, gateway
 from app.api.views import EvidenceAccepted
 from app.db import utcnow
 from app.integrations.uploads import UploadError, parse_upload
 from app.models import CriterionResult, EvidenceCreate, EvidenceRead, MilestoneStatus, Role, StoredFile, VerdictRead
 from app.services import verification
+from app.services.access import AccessError, Action
 from app.services.packet import milestone_section
 
 router = APIRouter(tags=["evidence"])
@@ -64,14 +65,14 @@ def _verify_later(background: BackgroundTasks, request: Request, milestone_id: s
 def submit_evidence(
     milestone_id: str,
     body: EvidenceCreate,
-    auth: MilestonePartyDep,
+    auth: MilestoneAccessDep,
     session: SessionDep,
     request: Request,
     background: BackgroundTasks,
 ) -> EvidenceAccepted:
-    party, m = auth
-    require_role(party, Role.payee)
-    row, created = verification.submit_evidence(session, m, body, source="api", actor=f"party:{party.id}")
+    access, m = auth
+    access.require(Action.submit_evidence)
+    row, created = verification.submit_evidence(session, m, body, source="api", actor=access.actor)
     if created and m.status == MilestoneStatus.evidence_received:
         _verify_later(background, request, m.id, "system:verifier")
     return EvidenceAccepted(evidence_id=row.id, duplicate=not created, milestone_status=MilestoneStatus(m.status))
@@ -84,7 +85,7 @@ def submit_evidence(
 )
 async def upload_evidence(
     milestone_id: str,
-    auth: MilestonePartyDep,
+    auth: MilestoneAccessDep,
     session: SessionDep,
     request: Request,
     background: BackgroundTasks,
@@ -92,8 +93,8 @@ async def upload_evidence(
     note: Annotated[str | None, Form(max_length=2000, description="Optional context, shown as a payee note.")] = None,
     dated: Annotated[date | None, Form(description="The evidence's own date, if the files don't carry one.")] = None,
 ) -> list[EvidenceAccepted]:
-    party, m = auth
-    require_role(party, Role.payee)
+    access, m = auth
+    access.require(Action.submit_evidence)
     if len(files) > MAX_FILES:
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, f"up to {MAX_FILES} files per upload")
 
@@ -120,7 +121,7 @@ async def upload_evidence(
         session.add(file_row)
         session.flush()
         row, created = verification.submit_evidence(
-            session, m, item.evidence, source="upload", actor=f"party:{party.id}", file_id=file_row.id
+            session, m, item.evidence, source="upload", actor=access.actor, file_id=file_row.id
         )
         results.append(EvidenceAccepted(evidence_id=row.id, duplicate=not created, milestone_status=m.status))
     if any(not r.duplicate for r in results) and m.status == MilestoneStatus.evidence_received:
@@ -133,14 +134,16 @@ async def upload_evidence(
     openapi_extra={"x-mcp-tool": "list_evidence"},
     summary="Evidence on file for a tranche",
 )
-def list_evidence(milestone_id: str, auth: MilestonePartyDep) -> list[EvidenceRead]:
-    _, m = auth
+def list_evidence(milestone_id: str, auth: MilestoneAccessDep) -> list[EvidenceRead]:
+    access, m = auth
+    access.require(Action.view)
     return [EvidenceRead.from_row(e) for e in m.evidence]
 
 
 @router.get("/evidence/{evidence_id}/file", summary="Download the original uploaded file")
-def download_file(evidence_id: str, auth: EvidencePartyDep) -> Response:
-    _, ev = auth
+def download_file(evidence_id: str, auth: EvidenceAccessDep) -> Response:
+    access, ev = auth
+    access.require(Action.view)
     if ev.file is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "this evidence has no uploaded file")
     safe_name = "".join(ch for ch in ev.file.filename if ch.isalnum() or ch in "._- ")[:100] or "evidence"
@@ -160,23 +163,22 @@ def download_file(evidence_id: str, auth: EvidencePartyDep) -> Response:
     summary="Payee checks draft evidence against the criteria without submitting it",
 )
 def precheck(
-    milestone_id: str, body: PrecheckRequest, auth: MilestonePartyDep, session: SessionDep, request: Request
+    milestone_id: str, body: PrecheckRequest, auth: MilestoneAccessDep, session: SessionDep, request: Request
 ) -> VerdictRead:
-    party, m = auth
-    require_role(party, Role.payee)
-    return VerdictRead.model_validate(
-        verification.precheck(session, ai(request), m, body.evidence, f"party:{party.id}")
-    )
+    access, m = auth
+    access.require(Action.submit_evidence)
+    return VerdictRead.model_validate(verification.precheck(session, ai(request), m, body.evidence, access.actor))
 
 
 @router.post("/milestones/{milestone_id}/verify", summary="Re-run verification on the evidence already submitted")
 def reverify(
-    milestone_id: str, auth: MilestonePartyDep, request: Request, background: BackgroundTasks
+    milestone_id: str, auth: MilestoneAccessDep, request: Request, background: BackgroundTasks
 ) -> EvidenceAccepted:
-    party, m = auth
+    access, m = auth
+    access.require(Action.view)
     if m.status != MilestoneStatus.evidence_received:
         raise HTTPException(status.HTTP_409_CONFLICT, f"tranche is {m.status}; nothing to verify")
-    _verify_later(background, request, m.id, f"party:{party.id}")
+    _verify_later(background, request, m.id, access.actor)
     return EvidenceAccepted(evidence_id="", duplicate=False, milestone_status=MilestoneStatus(m.status))
 
 
@@ -185,8 +187,9 @@ def reverify(
     openapi_extra={"x-mcp-tool": "get_verdict"},
     summary="Latest verdict for a tranche, with per-criterion results and citations",
 )
-def get_verdict(milestone_id: str, auth: MilestonePartyDep) -> VerdictRead:
-    _, m = auth
+def get_verdict(milestone_id: str, auth: MilestoneAccessDep) -> VerdictRead:
+    access, m = auth
+    access.require(Action.view)
     v = verification.latest_verdict(m)
     if v is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no verdict yet")
@@ -196,13 +199,17 @@ def get_verdict(milestone_id: str, auth: MilestonePartyDep) -> VerdictRead:
 # --- people ----------------------------------------------------------------------------
 
 
-@router.post("/milestones/{milestone_id}/review", summary="Payer or approver approves or rejects a verdict in review")
+@router.post(
+    "/milestones/{milestone_id}/review", summary="Payer (admin) or reviewer approves or rejects a verdict in review"
+)
 def review(
-    milestone_id: str, body: ReviewRequest, auth: MilestonePartyDep, session: SessionDep, request: Request
+    milestone_id: str, body: ReviewRequest, auth: MilestoneAccessDep, session: SessionDep, request: Request
 ) -> ReviewOutcome:
-    party, m = auth
-    require_role(party, Role.payer, Role.approver)
-    verification.review(session, gateway(request), m, party, body.decision == "approve", body.note, utcnow())
+    access, m = auth
+    access.require(Action.review)
+    if body.decision == "approve" and m.agreement.require_reviewer_approval and access.party.role != Role.reviewer:
+        raise AccessError("this agreement requires a reviewer's approval; the payer can still reject", 403)
+    verification.review(session, gateway(request), m, access.actor, body.decision == "approve", body.note, utcnow())
     session.refresh(m)
     v = verification.latest_verdict(m)
     missing = [] if body.decision == "approve" or v is None else [r for r in v.criteria_results if not r.met]
@@ -213,10 +220,10 @@ def review(
     "/milestones/{milestone_id}/dispute",
     summary="Payee disputes a rejection; the payer side must review the tranche again",
 )
-def dispute(milestone_id: str, body: DisputeIn, auth: MilestonePartyDep, session: SessionDep) -> DisputePack:
-    party, m = auth
-    require_role(party, Role.payee)
-    verification.dispute(session, m, party, body.reason)
+def dispute(milestone_id: str, body: DisputeIn, auth: MilestoneAccessDep, session: SessionDep) -> DisputePack:
+    access, m = auth
+    access.require(Action.dispute)
+    verification.dispute(session, m, access.actor, body.reason)
     return DisputePack(
         milestone_status=MilestoneStatus(m.status), reason=body.reason, pack=milestone_section(session, m)
     )

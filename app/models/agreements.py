@@ -11,11 +11,13 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from pydantic import model_validator
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.columns import PydanticJSON, enum_type, fk, id_field, timestamp
 from app.models.criteria import Criterion, LintReport
 from app.models.enums import AgreementStatus, MilestoneStatus, Role, SettlementMode
+from app.models.identity import EMAIL_PATTERN
 
 if TYPE_CHECKING:
     from app.models.evidence import Evidence, Verdict
@@ -30,33 +32,34 @@ def _money(description: str) -> Any:
 
 
 class PartyBase(SQLModel):
-    role: Role = Field(sa_type=enum_type(Role, 16), description="payer, payee or approver.")
-    paypal_email: str = Field(
+    """An organization's seat on one agreement."""
+
+    role: Role = Field(sa_type=enum_type(Role, 16), description="payer, payee or reviewer on this agreement.")
+    paypal_email: str | None = Field(
+        default=None,
         max_length=320,
-        schema_extra={"pattern": r"^[^@\s]+@[^@\s]+\.[^@\s]+$"},
-        description="PayPal account used for funding or receiving.",
+        description="PayPal account used on this agreement (snapshot of the org's at joining). None for reviewers.",
     )
-    display_name: str = Field(min_length=1, max_length=120, description="Name shown in the UI and audit log.")
+    display_name: str = Field(min_length=1, max_length=200, description="Org name at joining; shown in the record.")
 
 
 class Party(PartyBase, table=True):
     __tablename__ = "parties"
+    __table_args__ = (UniqueConstraint("agreement_id", "org_id"),)
 
     id: str = id_field()
     agreement_id: str | None = fk("agreements.id")
-    api_key_hash: str = Field(max_length=64, unique=True, index=True)
+    org_id: str | None = fk("organizations.id")
     confirmed_criteria_hash: str | None = Field(default=None, max_length=64)
     confirmed_at: datetime | None = timestamp(optional=True)
+    confirmed_by: str | None = Field(default=None, max_length=120)  # actor who signed for the org
 
     agreement: "Agreement" = Relationship(back_populates="parties")
 
 
-class PartyCreate(PartyBase):
-    pass
-
-
 class PartyRead(PartyBase):
     id: str
+    org_id: str
     confirmed_current: bool = Field(description="Whether this party has signed the current criteria hash.")
 
 
@@ -85,6 +88,8 @@ class Milestone(MilestoneBase, table=True):
     agreement_id: str | None = fk("agreements.id")
     position: int
     status: MilestoneStatus = Field(default=MilestoneStatus.pending, sa_type=enum_type(MilestoneStatus))
+    payer_assignee_id: str | None = fk("users.id", optional=True)  # responsible person on the payer side
+    payee_assignee_id: str | None = fk("users.id", optional=True)  # responsible person on the payee side
     paypal_order_id: str | None = Field(default=None, max_length=64, index=True)  # latest funding order
     paypal_authorization_id: str | None = Field(default=None, max_length=64, index=True)  # current live hold
     funded_at: datetime | None = timestamp(optional=True)  # original authorization time
@@ -112,6 +117,8 @@ class MilestoneRead(MilestoneBase):
     position: int
     status: MilestoneStatus
     paypal_authorization_id: str | None = Field(default=None, description="Live PayPal hold for this tranche.")
+    payer_assignee_id: str | None = None
+    payee_assignee_id: str | None = None
     funded_at: datetime | None = Field(default=None, description="When the original hold was placed.")
 
 
@@ -135,6 +142,9 @@ class AgreementBase(SQLModel):
     source_document_uri: str | None = Field(
         default=None, max_length=1000, description="Original agreement file the milestones came from."
     )
+    require_reviewer_approval: bool = Field(
+        default=False, description="When on, only a reviewer's approval releases a tranche in review."
+    )
 
 
 class Agreement(AgreementBase, table=True):
@@ -144,6 +154,7 @@ class Agreement(AgreementBase, table=True):
     status: AgreementStatus = Field(default=AgreementStatus.draft, sa_type=enum_type(AgreementStatus))
     auto_release_enabled: bool = False
     criteria_hash: str | None = Field(default=None, max_length=64)  # locked at activation
+    created_by: str | None = Field(default=None, max_length=120)
     created_at: datetime = timestamp()
 
     parties: list[Party] = Relationship(
@@ -156,18 +167,23 @@ class Agreement(AgreementBase, table=True):
 
 
 class AgreementCreate(AgreementBase):
-    parties: list[PartyCreate] = Field(min_length=2, description="Exactly one payer and one payee; optional approvers.")
+    """Created by the payer org. The payee and any reviewers are invited by email and join with their own org."""
+
+    counterparty_email: str = Field(
+        max_length=320,
+        schema_extra={"pattern": EMAIL_PATTERN},
+        description="Email of the person invited to accept for the payee organization.",
+    )
+    reviewer_emails: list[str] = Field(
+        default_factory=list, description="Optional third-party reviewers to invite (criteria and evidence)."
+    )
     milestones: list[MilestoneCreate] = Field(min_length=1, description="Tranches in payment order.")
 
     @model_validator(mode="after")
-    def _one_payer_one_payee(self) -> "AgreementCreate":
-        roles = [p.role for p in self.parties]
-        if roles.count(Role.payer) != 1 or roles.count(Role.payee) != 1:
-            raise ValueError("an agreement needs exactly one payer and exactly one payee")
-        payer = next(p for p in self.parties if p.role is Role.payer)
-        payee = next(p for p in self.parties if p.role is Role.payee)
-        if payer.paypal_email.lower() == payee.paypal_email.lower():
-            raise ValueError("payer and payee must be different PayPal accounts")
+    def _distinct_invitees(self) -> "AgreementCreate":
+        emails = [self.counterparty_email.lower(), *(e.lower() for e in self.reviewer_emails)]
+        if len(set(emails)) != len(emails):
+            raise ValueError("the counterparty and reviewers must be different people")
         return self
 
 
@@ -183,8 +199,11 @@ class AgreementRead(AgreementBase):
     status: AgreementStatus
     auto_release_enabled: bool
     criteria_hash: str = Field(description="Hash of the current tranches and criteria; sign this to confirm.")
-    locked: bool = Field(description="True once both parties signed and criteria can no longer change.")
+    locked: bool = Field(description="True once every party signed and criteria can no longer change.")
     parties: list[PartyRead]
+    pending_invitations: list[str] = Field(
+        default_factory=list, description="Emails invited (as counterparty or reviewer) who haven't joined yet."
+    )
     milestones: list[MilestoneRead]
     funding: FundingSummary
     lint: LintReport

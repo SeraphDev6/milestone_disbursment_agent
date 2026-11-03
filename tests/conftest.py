@@ -11,10 +11,7 @@ GOOD_DRAFT = {
     "total_amount": "30000.00",
     "currency": "USD",
     "settlement_mode": "escrow_release",
-    "parties": [
-        {"role": "payer", "paypal_email": "funder@example.org", "display_name": "Harbor Foundation"},
-        {"role": "payee", "paypal_email": "grantee@example.org", "display_name": "Riverside Reads"},
-    ],
+    "counterparty_email": "director@riverside.example.org",
     "milestones": [
         {
             "title": "Tranche 1: spring workshops",

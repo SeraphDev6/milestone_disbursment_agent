@@ -6,11 +6,12 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from sqlmodel import Field, SQLModel
 
-from app.api.deps import MilestonePartyDep, SessionDep, gateway, require_role
+from app.api.deps import MilestoneAccessDep, SessionDep, gateway
 from app.api.views import agreement_read, html_page
 from app.db import utcnow
-from app.models import AgreementRead, Role, SettlementRead
+from app.models import AgreementRead, SettlementRead
 from app.services import ServiceError, settlement
+from app.services.access import Action
 
 router = APIRouter(tags=["settlement"])
 
@@ -21,11 +22,11 @@ class FundingStarted(SQLModel):
 
 
 @router.post("/milestones/{milestone_id}/fund", summary="Payer starts a PayPal hold for one tranche")
-def fund(milestone_id: str, auth: MilestonePartyDep, session: SessionDep, request: Request) -> FundingStarted:
-    party, m = auth
-    require_role(party, Role.payer)
+def fund(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep, request: Request) -> FundingStarted:
+    access, m = auth
+    access.require(Action.fund)
     order = settlement.start_funding(
-        session, gateway(request), m, f"party:{party.id}", request.app.state.settings.public_base_url
+        session, gateway(request), m, access.actor, request.app.state.settings.public_base_url
     )
     return FundingStarted(order_id=order.order_id, approve_url=order.approve_url)
 
@@ -50,18 +51,18 @@ def paypal_cancel() -> HTMLResponse:
     "/milestones/{milestone_id}/release",
     summary="Settle a verified tranche: capture its hold or send its invoice (also resumes a failed release)",
 )
-def release(milestone_id: str, auth: MilestonePartyDep, session: SessionDep, request: Request) -> SettlementRead:
-    party, m = auth
-    require_role(party, Role.payer, Role.approver)
-    s = settlement.release(session, gateway(request), m, f"party:{party.id}", utcnow())
+def release(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep, request: Request) -> SettlementRead:
+    access, m = auth
+    access.require(Action.release)
+    s = settlement.release(session, gateway(request), m, access.actor, utcnow())
     return SettlementRead.model_validate(s, update={"milestone_status": m.status})
 
 
 @router.post("/milestones/{milestone_id}/void", summary="Payer cancels a tranche's hold before evidence arrives")
-def void(milestone_id: str, auth: MilestonePartyDep, session: SessionDep, request: Request) -> AgreementRead:
-    party, m = auth
-    require_role(party, Role.payer)
-    settlement.void(session, gateway(request), m, f"party:{party.id}")
+def void(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep, request: Request) -> AgreementRead:
+    access, m = auth
+    access.require(Action.void)
+    settlement.void(session, gateway(request), m, access.actor)
     return agreement_read(m.agreement)
 
 

@@ -34,8 +34,9 @@ def run_migrations_offline() -> None:
 
 
 def run_with(connection) -> None:
-    # SQLite can't ALTER most things; batch mode rebuilds tables instead.
-    _configure(connection=connection, render_as_batch=connection.dialect.name == "sqlite")
+    # Batch mode everywhere: SQLite can't ALTER most things (batch rebuilds the table), and on Postgres batch
+    # operations are plain ALTERs, so one migration file works on both.
+    _configure(connection=connection, render_as_batch=True)
     with context.begin_transaction():
         context.run_migrations()
 

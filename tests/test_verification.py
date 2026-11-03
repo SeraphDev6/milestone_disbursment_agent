@@ -21,24 +21,11 @@ from app.main import create_app
 from app.models import Criterion, Evidence
 from app.services.verification import judge
 from tests.conftest import hermetic_settings
-
-
-def h(key):
-    return {"X-API-Key": key}
-
+from tests.helpers import create_active, h, sign_in
 
 SIGN_IN = "name,session\n" + "\n".join(f"Person {i},S{i % 4}" for i in range(214))
 BUDGET = 'line,actual\nVenue,"$4,200.00"\nBooks,3100\nFacilitators,2500.50\n'
 REPORT = "Riverside Reads final report. Table 2 lists all 87 enrolled students with pre and post scores."
-
-
-def create_active(client, draft, auto_release=False):
-    body = client.post("/agreements", json=draft).json()
-    a, keys = body["agreement"], {k["role"]: k["api_key"] for k in body["party_keys"]}
-    payer_body = {"criteria_hash": a["criteria_hash"], "auto_release_enabled": auto_release}
-    client.post(f"/agreements/{a['id']}/confirm", json=payer_body, headers=h(keys["payer"]))
-    client.post(f"/agreements/{a['id']}/confirm", json={"criteria_hash": a["criteria_hash"]}, headers=h(keys["payee"]))
-    return a["id"], [m["id"] for m in a["milestones"]], keys
 
 
 def submit(client, mid, keys, evidence_type, title, content, **extra):
@@ -64,7 +51,10 @@ def fund(client, mid, keys):
 
 
 def test_extract_text_document(client):
-    r = client.post("/agreements/extract", files={"file": ("grant.txt", b"Grant agreement text...", "text/plain")})
+    token = sign_in(client, "drafter@harbor.example.org")
+    r = client.post(
+        "/agreements/extract", files={"file": ("grant.txt", b"Grant agreement text...", "text/plain")}, headers=h(token)
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["model"] == "mock" and len(body["milestones"]) == 2
@@ -73,8 +63,10 @@ def test_extract_text_document(client):
     assert body["open_questions"]
 
 
-def test_extract_rejects_other_types(client):
-    r = client.post("/agreements/extract", files={"file": ("a.png", b"x", "image/png")})
+def test_extract_requires_sign_in_and_text_or_pdf(client):
+    assert client.post("/agreements/extract", files={"file": ("g.txt", b"x", "text/plain")}).status_code == 401
+    token = sign_in(client, "drafter@harbor.example.org")
+    r = client.post("/agreements/extract", files={"file": ("a.png", b"x", "image/png")}, headers=h(token))
     assert r.status_code == 415
 
 
@@ -82,8 +74,10 @@ def test_org_key_guards_spend():
     app = create_app(hermetic_settings(org_api_key="org-secret"))
     with TestClient(app) as c:
         files = {"file": ("grant.txt", b"text", "text/plain")}
-        assert c.post("/agreements/extract", files=files).status_code == 401
-        assert c.post("/agreements/extract", files=files, headers={"X-Org-Key": "org-secret"}).status_code == 200
+        signed_in = h(sign_in(c, "drafter@harbor.example.org"))
+        assert c.post("/agreements/extract", files=files, headers=signed_in).status_code == 401
+        both = {**signed_in, "X-Org-Key": "org-secret"}
+        assert c.post("/agreements/extract", files=files, headers=both).status_code == 200
 
 
 def test_convert_reports_bad_proposals_and_lints():

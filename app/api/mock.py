@@ -5,12 +5,13 @@ import uuid
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from app.api.deps import MilestonePartyDep, SessionDep, require_role
+from app.api.deps import MilestoneAccessDep, SessionDep
 from app.api.views import agreement_read, html_page
 from app.db import utcnow
 from app.integrations.paypal import MockPayPal
-from app.models import AgreementRead, MilestoneStatus, Role
+from app.models import AgreementRead, MilestoneStatus
 from app.services import settlement
+from app.services.access import Action
 
 router = APIRouter(prefix="/mock", tags=["mock"])
 
@@ -54,9 +55,9 @@ def pay_invoice(invoice_id: str, request: Request, session: SessionDep) -> Redir
 
 
 @router.post("/milestones/{milestone_id}/mark-verified", summary="Mock mode only: mark a tranche verified")
-def mark_verified(milestone_id: str, auth: MilestonePartyDep, session: SessionDep) -> AgreementRead:
-    party, m = auth
-    require_role(party, Role.payer)
+def mark_verified(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep) -> AgreementRead:
+    access, m = auth
+    access.require(Action.release)
     allowed = {
         MilestoneStatus.pending,
         MilestoneStatus.funded,
@@ -65,6 +66,6 @@ def mark_verified(milestone_id: str, auth: MilestonePartyDep, session: SessionDe
     }
     if MilestoneStatus(m.status) not in allowed:
         raise HTTPException(status.HTTP_409_CONFLICT, f"tranche is {m.status}")
-    settlement.transition(session, m, MilestoneStatus.verified, f"party:{party.id}", "mock_mark_verified")
+    settlement.transition(session, m, MilestoneStatus.verified, access.actor, "mock_mark_verified")
     session.commit()
     return agreement_read(m.agreement)

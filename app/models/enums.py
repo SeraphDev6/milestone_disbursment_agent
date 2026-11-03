@@ -7,9 +7,11 @@ class SettlementMode(StrEnum):
 
 
 class Role(StrEnum):
+    """An organization's role on one agreement. The same org can be payer on one agreement and payee on another."""
+
     payer = "payer"
     payee = "payee"
-    approver = "approver"  # payer-side reviewer; never the payee
+    reviewer = "reviewer"  # invited third party: reviews criteria and evidence, never moves money
 
 
 class AgreementStatus(StrEnum):
@@ -70,3 +72,28 @@ class VerificationMethod(StrEnum):
 class LintLevel(StrEnum):
     error = "error"  # blocks confirm
     warning = "warning"  # shown, does not block
+
+
+class OrgRole(StrEnum):
+    owner = "owner"
+    admin = "admin"
+    member = "member"
+    viewer = "viewer"
+
+    @property
+    def rank(self) -> int:
+        return {"viewer": 0, "member": 1, "admin": 2, "owner": 3}[self.value]
+
+    def at_least(self, other: "OrgRole") -> bool:
+        return self.rank >= other.rank
+
+
+class InvitationKind(StrEnum):
+    counterparty = "counterparty"  # join an agreement as its payee
+    reviewer = "reviewer"  # join an agreement as a third-party reviewer
+    member = "member"  # join an organization
+
+
+class TokenKind(StrEnum):
+    session = "session"  # a signed-in user
+    api_key = "api_key"  # an org's integration or agent

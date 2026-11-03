@@ -41,6 +41,13 @@ def funding_summary(row: Agreement) -> FundingSummary:
     )
 
 
+def _pending(row: Agreement) -> list[str]:
+    from app.services.identity import pending_agreement_invitations
+
+    session = object_session(row)
+    return [i.email for i in pending_agreement_invitations(session, row.id)] if session else []
+
+
 def agreement_read(row: Agreement) -> AgreementRead:
     current = criteria_hash(row.milestones)
     return AgreementRead.model_validate(
@@ -55,6 +62,7 @@ def agreement_read(row: Agreement) -> AgreementRead:
             "milestones": [MilestoneRead.model_validate(m) for m in row.milestones],
             "funding": funding_summary(row),
             "lint": lint_agreement(row),
+            "pending_invitations": _pending(row),
         },
     )
 

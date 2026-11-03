@@ -27,20 +27,19 @@ Copy `.env.example` to `.env` to set `MODE=sandbox` and PayPal sandbox credentia
 
 ## Try the flow
 
-1. `POST /agreements/extract` with a PDF or text agreement proposes tranches and criteria (with source quotes, open questions and lint), or `POST /criteria/lint` checks a draft you wrote.
-2. `POST /agreements` creates a draft and returns one API key per party (shown once).
-3. Payer and payee each `POST /agreements/{id}/confirm` with the `criteria_hash` they reviewed (`X-API-Key` header). Confirmation is refused while the lint has errors. When both have signed, the agreement is `active` and its criteria are locked.
-4. Payer `POST /milestones/{id}/fund` returns an `approve_url`; open it to approve the hold (mock mode simulates PayPal's page).
-5. Payee `POST /milestones/{id}/precheck` tries draft evidence without submitting it, then `POST /milestones/{id}/evidence` submits it (spreadsheets as CSV text). Checks run first, then the AI verifier; `GET /milestones/{id}/verdict` shows per-criterion results with citations.
-6. If the payer turned on auto-release and the verdict passes the threshold, a funded tranche settles on its own. Otherwise it waits in `needs_review` for `POST /milestones/{id}/review` (payer or approver): approve releases it, reject returns what's missing.
-   Or upload files: `POST /milestones/{id}/uploads` takes PDF, CSV, XLSX, TXT, MD and images (multipart `files`, optional `note` and `dated`). Spreadsheets become CSV for the checks; PDFs are text-extracted and the original goes to the verifier too.
-   Or connect GitHub: payee `POST /agreements/{id}/integrations/github` with `{"repo": "owner/name"}` returns a webhook URL, secret and one label per milestone. Add the webhook (pull_request events) to the repo; a merged PR carrying a milestone's label becomes evidence pinned to the merge commit, with CI results from GitHub (the only way to satisfy a `ci_green` check).
-7. In invoice mode (`settlement_mode: invoice_on_verify`) nothing is funded up front: a verified tranche sends the payer a PayPal invoice and settles when it's paid (mock mode has a pay page at the invoice link).
-8. After a rejection the payee can `POST /milestones/{id}/dispute`; the payer side then reviews it again.
-9. Integrations: `POST /agreements/{id}/subscriptions` registers a URL for signed events (`X-MDE-Signature: sha256=HMAC(secret, "{X-MDE-Timestamp}.{body}")`); `GET /agreements/{id}/audit` and `GET /milestones/{id}/audit` return the event log; `GET /agreements/{id}/compliance-packet?format=pdf` (payer/approver) exports everything behind each payment.
-10. `POST /milestones/{id}/release` releases a verified tranche manually (e.g. after funding late). `GET /agreements/{id}` shows held, released and unfunded.
+Everything is done as a signed-in person acting for an organization (see "Organizations, people and access" in the spec).
 
-A complete example draft is in [`tests/conftest.py`](tests/conftest.py).
+1. **Sign in:** `POST /auth/magic-link {"email": ...}` then `POST /auth/magic-link/verify {"token": ...}` returns a session token; send `Authorization: Bearer <token>`. In mock mode the link comes back in the response (`dev_link`) instead of being emailed.
+2. **Payer org:** `POST /orgs {"name", "paypal_email"}`. Invite colleagues with `POST /orgs/{id}/invitations {"email", "role"}` (owner, admin, member, viewer); integrations and agents use `POST /orgs/{id}/api-keys`.
+3. **Draft:** `POST /agreements/extract` (PDF or text) proposes tranches and criteria, or `POST /criteria/lint` checks ones you wrote. Then `POST /orgs/{id}/agreements` with `counterparty_email` (and optional `reviewer_emails`) creates it and sends invitations.
+4. **Payee and reviewers** sign in with the invited email and `POST /invitations/accept` for one of their orgs (or a new one). Pending invitations show in `GET /me`.
+5. **Confirm:** each party's admin `POST /agreements/{id}/confirm` with the `criteria_hash` they reviewed. The agreement goes live when the payee has joined, every party (reviewers included) has signed, and no invitation is pending.
+6. **Fund** (escrow): payer `POST /milestones/{id}/fund` returns an `approve_url` for the PayPal hold (mock mode simulates PayPal's page). Invoice mode skips this.
+7. **Evidence:** payee members pre-check (`/precheck`), then submit (`/evidence`, `/uploads`, or merged GitHub PRs). Checks run first, then the AI verifier; `GET /milestones/{id}/verdict` shows results with citations.
+8. **Decide:** with auto-release on and a confident verdict, a funded tranche settles itself. Otherwise it waits in each side's `GET /orgs/{id}/review-queue` for a payer admin or reviewer to `POST /milestones/{id}/review` (with `require_reviewer_approval`, only a reviewer can approve). Rejections return what's missing; the payee can `/dispute`.
+9. **Track:** `GET /orgs/{id}/agreements?side=payer|payee|reviewer`, `GET /orgs/{id}/portfolio`, audit logs, compliance packets (JSON/PDF), and signed outbound webhooks via `POST /agreements/{id}/subscriptions`.
+
+A complete example draft is in [`tests/conftest.py`](tests/conftest.py), and [`tests/helpers.py`](tests/helpers.py) walks the whole sign-in, org and invitation flow.
 
 Run `uv run python -m app.jobs daily` once a day: it clears expired PayPal holds (29 days) and cancels invoices left unpaid for 30 days.
 

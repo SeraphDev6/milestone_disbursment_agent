@@ -10,7 +10,9 @@ from app.models.columns import fk, id_field, timestamp
 
 class AuditEventBase(SQLModel):
     milestone_id: str | None = Field(default=None, max_length=36, index=True)
-    actor: str = Field(max_length=80, description="party:<id>, model, webhook:paypal, github:<user> or system.")
+    actor: str = Field(
+        max_length=120, description="user:<id>@org:<id>, apikey:<id>@org:<id>, webhook:paypal, github:<user> or system."
+    )
     action: str = Field(max_length=64)
     from_status: str | None = Field(default=None, max_length=32)
     to_status: str | None = Field(default=None, max_length=32)
@@ -54,7 +56,7 @@ class Integration(SQLModel, table=True):
     target: str = Field(max_length=200)  # e.g. "owner/repo"
     # HMAC secret the source signs deliveries with. Must be stored readable to verify signatures.
     secret: str = Field(max_length=100)
-    created_by: str = Field(max_length=80)
+    created_by: str = Field(max_length=120)
     created_at: datetime = timestamp()
 
 
@@ -75,7 +77,7 @@ class Subscription(SubscriptionBase, table=True):
     id: str = id_field()
     agreement_id: str | None = fk("agreements.id")
     secret: str = Field(max_length=100)  # HMAC key; readable because we sign with it
-    created_by: str = Field(max_length=80)
+    created_by: str = Field(max_length=120)
     active: bool = True
     created_at: datetime = timestamp()
 

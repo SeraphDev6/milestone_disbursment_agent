@@ -172,6 +172,64 @@ Webhooks are the source of truth for whether money actually moved. All of it run
 
 Open question: one platform REST app for all agreements, or a PayPal partner/marketplace setup per funder later.
 
+## Organizations, people and access
+
+Every person acts as a member of an organization; agreements are between organizations. This replaces the
+original per-agreement party keys.
+
+**Model**
+- **Organization**: a funder, grantee, contractor, client or reviewer. A solo contractor is a one-person org.
+  Holds its PayPal account (funding for payers, payouts for workers) and, optionally, SSO settings.
+- **User**: a verified email. **Membership** links a user to an org with an org role:
+  `owner > admin > member > viewer`.
+- **Side is per agreement, not per org.** The same org is the payee on its grants and the payer on its
+  subcontracts. A party links an agreement to an org with an agreement role: `payer`, `payee` or `reviewer`,
+  and snapshots the PayPal email it uses so the record can't shift later.
+- **Invitations** (one model): to join an agreement as counterparty or reviewer, or to join an org. The
+  invitee signs in with the invited email and picks (or creates) the org they accept for.
+- **Org API keys** carry an org role; integrations and MCP agents act as that org with those rights.
+- **Assignees**: each tranche can name a responsible person on the payer side and on the payee side.
+
+**Sign-in**
+- **Magic link** for everyone: request a link for an email, open it, get a session token (bearer). In mock
+  mode the link is returned in the response so the demo works without an email provider.
+- **Org SSO (OIDC)**: an org admin configures issuer, client id/secret and the email domains it owns.
+  Users with those domains sign in through the org's identity provider and are added to the org on first
+  sign-in (default role member). With "enforce SSO" on, magic links are refused for those domains.
+
+**Who can do what** (agreement role x org role; `member+` means member, admin or owner)
+
+| Action | Payer | Payee | Reviewer |
+| --- | --- | --- | --- |
+| View agreement, criteria, evidence, verdicts, audit | viewer+ | viewer+ | viewer+ |
+| Edit tranches (draft only) | member+ | | |
+| Confirm (sign) criteria | admin+ | admin+ | admin+ |
+| Turn on auto-release | admin+ | | |
+| Invite counterparty / reviewer | admin+ | | |
+| Fund, void | member+ | | |
+| Approve or reject a verdict in review | admin+ | | member+ |
+| Release a verified tranche | admin+ | | |
+| Pre-check, submit evidence, upload, connect GitHub | | member+ (GitHub: admin+) | |
+| Dispute a rejection | | admin+ | |
+| Compliance packet | member+ | | member+ |
+| Subscriptions (webhooks) | admin+ | admin+ | admin+ |
+
+- A payee can never approve its own tranche; reviewers never move money.
+- **Reviewers** are invited per agreement to review the criteria and the submitted evidence. While a
+  reviewer invitation is pending or a joined reviewer hasn't signed, the agreement can't activate. With
+  `require_reviewer_approval` on, only a reviewer's approval releases a tranche in review (the payer can
+  still reject).
+
+**Entry points** (org-scoped; the UI and MCP tools sit on these)
+- `GET /orgs/{id}/agreements?side=payer|payee|reviewer`, `GET /orgs/{id}/review-queue` (tranches waiting on
+  this org's decision), `GET /orgs/{id}/portfolio` (held, released, at risk per agreement).
+- Payer: create from a document, invite, fund, review queue, portfolio, compliance packets.
+- Worker: invitations, criteria, pre-check, evidence, what's missing, disputes, payout status.
+- Reviewer: invitations, criteria sign-off, review queue, compliance packets.
+
+**Cut for the hackathon:** SAML, SCIM, email delivery provider (links are returned in mock mode and logged
+otherwise), two-person approval rules, per-agreement access lists beyond side x role.
+
 ## API surface
 
 FastAPI REST is the single source; the OpenAPI spec generates the MCP tools, the APIMatic SDKs and the Zapier fields. Endpoints tagged `x-mcp-tool` become agent tools; the rest stay REST-only.

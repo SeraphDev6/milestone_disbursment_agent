@@ -6,15 +6,17 @@ from typing import Literal
 from fastapi import APIRouter, Response
 from sqlmodel import select
 
-from app.api.deps import MilestonePartyDep, PartyDep, SessionDep, require_role
-from app.models import AuditEvent, AuditEventRead, Role
+from app.api.deps import AgreementAccessDep, MilestoneAccessDep, SessionDep
+from app.models import AuditEvent, AuditEventRead
+from app.services.access import Action
 from app.services.packet import build_packet, render_pdf
 
 router = APIRouter(tags=["audit"])
 
 
 @router.get("/agreements/{agreement_id}/audit", summary="Full event log for an agreement")
-def agreement_audit(agreement_id: str, party: PartyDep, session: SessionDep) -> list[AuditEventRead]:
+def agreement_audit(agreement_id: str, access: AgreementAccessDep, session: SessionDep) -> list[AuditEventRead]:
+    access.require(Action.view)
     query = select(AuditEvent).where(AuditEvent.agreement_id == agreement_id).order_by(AuditEvent.at)
     return [AuditEventRead.model_validate(e) for e in session.exec(query).all()]
 
@@ -24,8 +26,9 @@ def agreement_audit(agreement_id: str, party: PartyDep, session: SessionDep) -> 
     openapi_extra={"x-mcp-tool": "explain_milestone"},
     summary="Every event for one tranche: who did what, when, and why",
 )
-def milestone_audit(milestone_id: str, auth: MilestonePartyDep, session: SessionDep) -> list[AuditEventRead]:
-    _, m = auth
+def milestone_audit(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep) -> list[AuditEventRead]:
+    access, m = auth
+    access.require(Action.view)
     query = select(AuditEvent).where(AuditEvent.milestone_id == m.id).order_by(AuditEvent.at)
     return [AuditEventRead.model_validate(e) for e in session.exec(query).all()]
 
@@ -36,10 +39,10 @@ def milestone_audit(milestone_id: str, auth: MilestonePartyDep, session: Session
     summary="Criteria, confirmations, evidence, verdicts with citations, reviews, payments and audit trail",
 )
 def compliance_packet(
-    agreement_id: str, party: PartyDep, session: SessionDep, format: Literal["json", "pdf"] = "json"
+    agreement_id: str, access: AgreementAccessDep, session: SessionDep, format: Literal["json", "pdf"] = "json"
 ) -> Response:
-    require_role(party, Role.payer, Role.approver)
-    packet = build_packet(session, party.agreement)
+    access.require(Action.compliance_packet)
+    packet = build_packet(session, access.party.agreement)
     if format == "pdf":
         return Response(
             render_pdf(packet),

@@ -50,7 +50,7 @@ class Evidence(EvidenceBase, table=True):
 
     id: str = id_field()
     milestone_id: str | None = fk("milestones.id")
-    submitted_by: str = Field(max_length=80)
+    submitted_by: str = Field(max_length=120)
     source: str = Field(max_length=16, description="Adapter that produced it: api, upload, github, mcp, precheck.")
     external_ref: str = Field(max_length=500, description="Source-native id, e.g. PR URL or file id.")
     pinned_ref: str = Field(max_length=80, description="Immutable version: commit SHA or content hash.")

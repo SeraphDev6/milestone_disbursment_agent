@@ -7,6 +7,7 @@ from app.ai.agents import claude_runtime, mock_runtime
 from app.api import api_router, mock_router
 from app.config import Mode, Settings, get_settings, use_claude
 from app.db import make_engine, make_sessionmaker, migrate
+from app.integrations.email import ConsoleMailer
 from app.integrations.github import GitHubClient
 from app.integrations.paypal import make_gateway
 from app.services import ServiceError
@@ -47,6 +48,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.ai = claude_runtime(key) if use_claude(settings) else mock_runtime()
     app.state.github = GitHubClient(token=settings.github_token)
     app.state.resolve = resolve_host
+    app.state.mailer = ConsoleMailer()
 
     @app.exception_handler(ServiceError)
     async def _service_error(request: Request, exc: ServiceError) -> JSONResponse:

@@ -135,7 +135,9 @@ def test_upload_rules(client, draft):
 
 def test_evidence_file_is_private_to_the_agreement(client, draft):
     _, (m1, _), keys = create_active(client, draft)
-    _, _, other_keys = create_active(client, copy.deepcopy(draft))
+    _, _, other_keys = create_active(
+        client, copy.deepcopy(draft), payer_email="someone@other.example.org", payee_email="else@other.example.org"
+    )
     upload(client, m1, keys, [("sign-in.csv", SIGN_IN.encode(), "text/csv")])
     [ev] = evidence(client, m1, keys)
     assert client.get(f"/evidence/{ev['id']}/file", headers=h(other_keys["payer"])).status_code == 404
