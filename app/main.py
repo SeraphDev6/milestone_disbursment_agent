@@ -2,12 +2,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import sessionmaker
+from sqlmodel import SQLModel
 
 from app.ai.agents import claude_runtime, mock_runtime
 from app.api import api_router, mock_router
 from app.config import Mode, Settings, get_settings, use_claude
-from app.db.models import Base, make_engine
+from app.db import make_engine, make_sessionmaker
 from app.integrations.github import GitHubClient
 from app.integrations.paypal import make_gateway
 from app.services import ServiceError
@@ -20,9 +20,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         engine = make_engine(settings.database_url)
-        Base.metadata.create_all(engine)
+        SQLModel.metadata.create_all(engine)
         app.state.engine = engine
-        app.state.sessionmaker = sessionmaker(engine, expire_on_commit=False)
+        app.state.sessionmaker = make_sessionmaker(engine)
         stop = None
         if settings.outbound_interval_seconds > 0:
             stop = start_delivery_loop(

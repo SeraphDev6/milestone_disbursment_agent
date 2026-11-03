@@ -6,10 +6,10 @@ deliver-webhooks  send due outbound webhooks once (when the in-process loop is t
 
 import sys
 
-from sqlalchemy.orm import sessionmaker
+from sqlmodel import SQLModel
 
 from app.config import Mode, get_settings
-from app.db.models import Base, make_engine, utcnow
+from app.db import make_engine, make_sessionmaker, utcnow
 from app.integrations.paypal import make_gateway
 from app.services.outbound import deliver_due
 from app.services.settlement import expire_stale_holds, expire_stale_invoices
@@ -23,8 +23,8 @@ def main(argv: list[str]) -> int:
         return 2
     settings = get_settings()
     engine = make_engine(settings.database_url)
-    Base.metadata.create_all(engine)
-    with sessionmaker(engine)() as session:
+    SQLModel.metadata.create_all(engine)
+    with make_sessionmaker(engine)() as session:
         now = utcnow()
         if argv[0] == "daily":
             holds = expire_stale_holds(session, now)

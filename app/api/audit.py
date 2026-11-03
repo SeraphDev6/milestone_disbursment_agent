@@ -6,10 +6,10 @@ from typing import Literal
 
 from fastapi import APIRouter, Response
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlmodel import select
 
 from app.api.deps import MilestonePartyDep, PartyDep, SessionDep, require_role
-from app.db.models import AuditEventRow
+from app.db import AuditEvent
 from app.domain.models import Role
 from app.services.packet import build_packet, render_pdf
 
@@ -43,8 +43,8 @@ def _entries(rows) -> list[AuditEntry]:
 
 @router.get("/agreements/{agreement_id}/audit", summary="Full event log for an agreement")
 def agreement_audit(agreement_id: str, party: PartyDep, session: SessionDep) -> list[AuditEntry]:
-    query = select(AuditEventRow).where(AuditEventRow.agreement_id == agreement_id).order_by(AuditEventRow.at)
-    return _entries(session.scalars(query).all())
+    query = select(AuditEvent).where(AuditEvent.agreement_id == agreement_id).order_by(AuditEvent.at)
+    return _entries(session.exec(query).all())
 
 
 @router.get(
@@ -54,8 +54,8 @@ def agreement_audit(agreement_id: str, party: PartyDep, session: SessionDep) -> 
 )
 def milestone_audit(milestone_id: str, auth: MilestonePartyDep, session: SessionDep) -> list[AuditEntry]:
     _, m = auth
-    query = select(AuditEventRow).where(AuditEventRow.milestone_id == m.id).order_by(AuditEventRow.at)
-    return _entries(session.scalars(query).all())
+    query = select(AuditEvent).where(AuditEvent.milestone_id == m.id).order_by(AuditEvent.at)
+    return _entries(session.exec(query).all())
 
 
 @router.get(

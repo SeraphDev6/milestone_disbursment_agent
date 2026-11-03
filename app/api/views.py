@@ -6,10 +6,10 @@ from html import escape
 
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.orm import object_session
+from sqlmodel import select
 
-from app.db.models import AgreementRow, LedgerRow, VerdictRow
+from app.db import Agreement, LedgerEntry, Verdict
 from app.domain.criteria import criteria_hash, lint_agreement
 from app.domain.models import (
     AgreementDraft,
@@ -88,13 +88,13 @@ class EvidenceAccepted(BaseModel):
     milestone_status: MilestoneStatus
 
 
-def milestone_drafts(row: AgreementRow) -> list[MilestoneDraft]:
+def milestone_drafts(row: Agreement) -> list[MilestoneDraft]:
     return [
         MilestoneDraft(title=m.title, amount=m.amount, due_date=m.due_date, criteria=m.criteria) for m in row.milestones
     ]
 
 
-def agreement_as_draft(row: AgreementRow) -> AgreementDraft:
+def agreement_as_draft(row: Agreement) -> AgreementDraft:
     return AgreementDraft(
         title=row.title,
         total_amount=row.total_amount,
@@ -109,9 +109,9 @@ def agreement_as_draft(row: AgreementRow) -> AgreementDraft:
     )
 
 
-def funding_summary(row: AgreementRow) -> FundingSummary:
+def funding_summary(row: Agreement) -> FundingSummary:
     session = object_session(row)
-    entries = session.scalars(select(LedgerRow).where(LedgerRow.agreement_id == row.id)).all() if session else []
+    entries = session.exec(select(LedgerEntry).where(LedgerEntry.agreement_id == row.id)).all() if session else []
     by_kind: dict[str, Decimal] = {}
     for e in entries:
         by_kind[e.kind] = by_kind.get(e.kind, Decimal(0)) + e.amount
@@ -131,7 +131,7 @@ def funding_summary(row: AgreementRow) -> FundingSummary:
     )
 
 
-def agreement_view(row: AgreementRow) -> AgreementView:
+def agreement_view(row: Agreement) -> AgreementView:
     current = criteria_hash(milestone_drafts(row))
     return AgreementView(
         id=row.id,
@@ -173,7 +173,7 @@ def agreement_view(row: AgreementRow) -> AgreementView:
     )
 
 
-def verdict_view(v: VerdictRow) -> VerdictView:
+def verdict_view(v: Verdict) -> VerdictView:
     return VerdictView(
         id=v.id,
         is_precheck=v.is_precheck,

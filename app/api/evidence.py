@@ -5,11 +5,11 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, Response, UploadFile, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlmodel import select
 
 from app.api.deps import EvidencePartyDep, MilestonePartyDep, SessionDep, ai, gateway, require_role
 from app.api.views import EvidenceAccepted, VerdictView, verdict_view
-from app.db.models import FileRow, utcnow
+from app.db import StoredFile, utcnow
 from app.domain.models import CriterionResult, EvidenceIn, EvidenceType, MilestoneStatus, Role
 from app.integrations.uploads import UploadError, parse_upload
 from app.services import verification
@@ -124,7 +124,7 @@ async def upload_evidence(
 
     results = []
     for item in parsed:
-        file_row = session.scalar(select(FileRow).where(FileRow.sha256 == item.sha256)) or FileRow(
+        file_row = session.exec(select(StoredFile).where(StoredFile.sha256 == item.sha256)).first() or StoredFile(
             filename=item.evidence.title,
             media_type=item.media_type,
             sha256=item.sha256,

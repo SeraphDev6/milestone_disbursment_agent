@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.api.deps import MilestonePartyDep, SessionDep, require_role
 from app.api.views import AgreementView, agreement_view, html_page
-from app.db.models import utcnow
+from app.db import utcnow
 from app.domain.models import MilestoneStatus, Role
 from app.integrations.paypal import MockPayPal
 from app.services import settlement

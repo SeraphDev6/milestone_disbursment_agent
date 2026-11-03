@@ -20,10 +20,10 @@ from datetime import datetime, timedelta
 from urllib.parse import urlsplit
 
 import httpx
-from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
+from sqlmodel import Session, select
 
-from app.db.models import OutboxRow, SubscriptionRow, as_utc, utcnow
+from app.db import OutboxMessage, Subscription, as_utc, utcnow
 
 MAX_ATTEMPTS = 10
 BATCH = 50
@@ -82,14 +82,17 @@ def deliver_due(
     allow_http: bool = False,
 ) -> int:
     """Send every due delivery once. Returns how many succeeded."""
-    pending = session.scalars(
-        select(OutboxRow).where(OutboxRow.status == "pending").order_by(OutboxRow.created_at).limit(BATCH * 4)
+    pending = session.exec(
+        select(OutboxMessage)
+        .where(OutboxMessage.status == "pending")
+        .order_by(OutboxMessage.created_at)
+        .limit(BATCH * 4)
     ).all()
     # Compared in Python: SQLite drops tzinfo, so a SQL comparison against an aware `now` isn't reliable.
     due = [r for r in pending if as_utc(r.next_attempt_at) <= now][:BATCH]
     delivered = 0
     for row in due:
-        sub = session.get(SubscriptionRow, row.subscription_id)
+        sub = session.get(Subscription, row.subscription_id)
         row.attempts += 1
         if sub is None or not sub.active:
             row.status, row.last_error = "dead", "subscription removed"

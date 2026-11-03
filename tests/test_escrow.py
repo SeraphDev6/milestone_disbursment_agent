@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.db.models import MilestoneRow, utcnow
+from app.db import Milestone, utcnow
 from app.integrations.paypal import MOCK_WEBHOOK_SIGNATURE, PayPalError
 
 
@@ -48,7 +48,7 @@ def release(client, mid, keys, role="payer"):
 
 def age_hold(client, mid, days):
     with client.app.state.sessionmaker() as s:
-        m = s.get(MilestoneRow, mid)
+        m = s.get(Milestone, mid)
         m.funded_at = utcnow() - timedelta(days=days)
         s.commit()
 
@@ -134,8 +134,8 @@ def test_expiry_job(client, active):
     age_hold(client, m1, 30)
     with client.app.state.sessionmaker() as s:
         assert expire_stale_holds(s, utcnow()) == 1
-        assert s.get(MilestoneRow, m1).status == "pending"
-        assert s.get(MilestoneRow, m2).status == "funded"
+        assert s.get(Milestone, m1).status == "pending"
+        assert s.get(Milestone, m2).status == "funded"
 
 
 def test_ambiguous_failure_resumes_with_same_key(client, active):
@@ -192,7 +192,7 @@ def test_lost_capture_response_matched_by_authorization(client, active):
     gw(client).drop_next_response = True
     release(client, m1, keys)
     with client.app.state.sessionmaker() as s:
-        auth_id = s.get(MilestoneRow, m1).paypal_authorization_id
+        auth_id = s.get(Milestone, m1).paypal_authorization_id
     event = {
         "id": "WH-2",
         "event_type": "PAYMENT.CAPTURE.COMPLETED",
@@ -223,11 +223,11 @@ def test_return_url_is_idempotent(client, active):
     again = client.get(f"/paypal/return?token={order_id}")
     assert again.status_code == 200
     with client.app.state.sessionmaker() as s:
-        from sqlalchemy import func, select
+        from sqlmodel import func, select
 
-        from app.db.models import LedgerRow
+        from app.db import LedgerEntry
 
-        assert s.scalar(select(func.count()).select_from(LedgerRow).where(LedgerRow.kind == "authorized")) == 1
+        assert s.exec(select(func.count()).select_from(LedgerEntry).where(LedgerEntry.kind == "authorized")).one() == 1
 
 
 def test_amounts_are_decimal_strings(client, active):

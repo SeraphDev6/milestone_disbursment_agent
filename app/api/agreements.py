@@ -12,7 +12,7 @@ from app.ai.agents import AIError
 from app.ai.extraction import ExtractionResult, extract
 from app.api.deps import OrgKeyDep, PartyDep, SessionDep, ai, hash_key
 from app.api.views import AgreementView, agreement_as_draft, agreement_view, milestone_drafts
-from app.db.models import AgreementRow, MilestoneRow, PartyRow, record_audit, utcnow
+from app.db import Agreement, Milestone, Party, record_audit, utcnow
 from app.domain.criteria import assign_criterion_ids, criteria_hash, lint_agreement
 from app.domain.models import AgreementDraft, AgreementStatus, LintReport, MilestoneDraft, MilestoneStatus, Role
 
@@ -47,10 +47,10 @@ class ConfirmRequest(BaseModel):
     )
 
 
-def milestone_rows(drafts: list[MilestoneDraft]) -> list[MilestoneRow]:
+def milestone_rows(drafts: list[MilestoneDraft]) -> list[Milestone]:
     assign_criterion_ids(drafts)
     return [
-        MilestoneRow(
+        Milestone(
             position=i,
             title=m.title,
             amount=m.amount,
@@ -96,7 +96,7 @@ def lint(draft: AgreementDraft) -> LintReport:
     summary="Create a draft agreement; returns one API key per party",
 )
 def create_agreement(draft: AgreementDraft, session: SessionDep, _: OrgKeyDep) -> AgreementCreated:
-    row = AgreementRow(
+    row = Agreement(
         title=draft.title,
         total_amount=draft.total_amount,
         currency=draft.currency,
@@ -106,10 +106,10 @@ def create_agreement(draft: AgreementDraft, session: SessionDep, _: OrgKeyDep) -
         status=AgreementStatus.draft.value,
         milestones=milestone_rows(draft.milestones),
     )
-    keys: list[tuple[PartyRow, str]] = []
+    keys: list[tuple[Party, str]] = []
     for p in draft.parties:
         key = "mde_" + secrets.token_urlsafe(32)
-        party = PartyRow(
+        party = Party(
             role=p.role.value, paypal_email=p.paypal_email, display_name=p.display_name, api_key_hash=hash_key(key)
         )
         row.parties.append(party)

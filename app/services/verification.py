@@ -11,12 +11,12 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
+from sqlmodel import Session, col, select
 
 from app.ai.agents import AIError, AIRuntime
-from app.db.models import AuditEventRow, EvidenceRow, MilestoneRow, PartyRow, VerdictRow, as_utc, record_audit, utcnow
+from app.db import AuditEvent, Evidence, Milestone, Party, Verdict, as_utc, record_audit, utcnow
 from app.domain import checks
 from app.domain.models import (
     AgreementStatus,
@@ -58,11 +58,11 @@ class Judgment:
         return bool(self.results) and all(r.met and r.evidence_ids for r in self.results)
 
 
-def criteria_of(m: MilestoneRow) -> list[Criterion]:
+def criteria_of(m: Milestone) -> list[Criterion]:
     return [Criterion.model_validate(c) for c in m.criteria]
 
 
-def to_event(row: EvidenceRow) -> EvidenceEvent:
+def to_event(row: Evidence) -> EvidenceEvent:
     return EvidenceEvent(
         id=row.id,
         milestone_id=row.milestone_id,
@@ -79,7 +79,7 @@ def to_event(row: EvidenceRow) -> EvidenceEvent:
     )
 
 
-def attachments_of(rows: list[EvidenceRow]) -> dict[str, tuple[bytes, str]]:
+def attachments_of(rows: list[Evidence]) -> dict[str, tuple[bytes, str]]:
     return {e.id: (e.file.data, e.file.media_type) for e in rows if e.file is not None}
 
 
@@ -150,7 +150,7 @@ def judge(
     )
 
 
-def _gate(m: MilestoneRow, criteria: list[Criterion], j: Judgment) -> str:
+def _gate(m: Milestone, criteria: list[Criterion], j: Judgment) -> str:
     a = m.agreement
     if (
         a.auto_release_enabled
@@ -162,7 +162,7 @@ def _gate(m: MilestoneRow, criteria: list[Criterion], j: Judgment) -> str:
     return "needs_review"
 
 
-def _settle_if_possible(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str, now: datetime) -> None:
+def _settle_if_possible(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: datetime) -> None:
     a = m.agreement
     if a.settlement_mode == SettlementMode.escrow_release.value and m.paypal_authorization_id is None:
         record_audit(session, a.id, actor, "release_waiting", milestone_id=m.id, detail={"reason": "not funded"})
@@ -180,7 +180,7 @@ def _settle_if_possible(session: Session, gw: PayPalGateway, m: MilestoneRow, ac
 
 def submit_evidence(
     session: Session,
-    m: MilestoneRow,
+    m: Milestone,
     ev: EvidenceIn,
     *,
     source: str,
@@ -188,7 +188,7 @@ def submit_evidence(
     check_results: dict[str, bool] | None = None,
     pinned_ref: str | None = None,
     file_id: str | None = None,
-) -> tuple[EvidenceRow, bool]:
+) -> tuple[Evidence, bool]:
     """Store evidence. Returns (row, created). Re-submitting identical evidence is a no-op."""
     if m.agreement.status != AgreementStatus.active.value:
         raise VerificationError(f"agreement is {m.agreement.status}; evidence is accepted once it is active")
@@ -201,7 +201,7 @@ def submit_evidence(
     )
     if existing:
         return existing, False
-    row = EvidenceRow(
+    row = Evidence(
         milestone_id=m.id,
         submitted_by=actor,
         source=source,
@@ -241,13 +241,13 @@ def submit_evidence(
 
 def run_verification(
     session: Session, ai: AIRuntime, gw: PayPalGateway, milestone_id: str, actor: str, now: datetime
-) -> VerdictRow | None:
+) -> Verdict | None:
     """Verify a tranche against all its evidence, record the verdict, apply the gate.
 
     Safe to call from a background task. If evidence arrives while the model is working, it runs again.
     """
     for _ in range(MAX_RERUNS):
-        m = session.get(MilestoneRow, milestone_id)
+        m = session.get(Milestone, milestone_id)
         if m is None or m.status != MilestoneStatus.evidence_received.value:
             return None
         snapshot = {e.id for e in m.evidence}
@@ -274,7 +274,7 @@ def run_verification(
             continue
 
         gate = _gate(m, criteria, j)
-        verdict = VerdictRow(
+        verdict = Verdict(
             milestone_id=m.id,
             criteria_hash=m.agreement.criteria_hash or "",
             evidence_ids=sorted(snapshot),
@@ -325,7 +325,7 @@ def verify_in_background(
         run_verification(session, ai, gw, milestone_id, actor, utcnow())
 
 
-def precheck(session: Session, ai: AIRuntime, m: MilestoneRow, items: list[EvidenceIn], actor: str) -> VerdictRow:
+def precheck(session: Session, ai: AIRuntime, m: Milestone, items: list[EvidenceIn], actor: str) -> Verdict:
     """Run checks and the verifier on draft evidence. Records the result; never changes state."""
     if m.agreement.status != AgreementStatus.active.value:
         raise VerificationError("pre-check is available once the agreement is active")
@@ -350,7 +350,7 @@ def precheck(session: Session, ai: AIRuntime, m: MilestoneRow, items: list[Evide
         j = judge(ai, criteria_of(m), stored + drafts, attachments_of(m.evidence))
     except AIError as e:
         raise VerificationError(str(e), 502) from e
-    verdict = VerdictRow(
+    verdict = Verdict(
         milestone_id=m.id,
         criteria_hash=m.agreement.criteria_hash or "",
         evidence_ids=[e.id for e in stored + drafts],
@@ -372,15 +372,15 @@ def precheck(session: Session, ai: AIRuntime, m: MilestoneRow, items: list[Evide
 # --- human review ----------------------------------------------------------------------
 
 
-def latest_verdict(m: MilestoneRow) -> VerdictRow | None:
+def latest_verdict(m: Milestone) -> Verdict | None:
     return next((v for v in reversed(m.verdicts) if not v.is_precheck), None)
 
 
 def review(
     session: Session,
     gw: PayPalGateway,
-    m: MilestoneRow,
-    party: PartyRow,
+    m: Milestone,
+    party: Party,
     approve: bool,
     note: str | None,
     now: datetime,
@@ -409,16 +409,16 @@ def review(
         session.commit()
 
 
-def dispute(session: Session, m: MilestoneRow, party: PartyRow, reason: str) -> None:
+def dispute(session: Session, m: Milestone, party: Party, reason: str) -> None:
     """Payee escalates a rejection. The tranche waits in `disputed` until the payer side reviews it again."""
     if m.status not in (MilestoneStatus.pending.value, MilestoneStatus.funded.value):
         raise VerificationError(f"tranche is {m.status}; only a rejected tranche can be disputed")
-    last_review = session.scalar(
-        select(AuditEventRow)
-        .where(AuditEventRow.milestone_id == m.id, AuditEventRow.action.in_(("review_rejected", "review_approved")))
-        .order_by(AuditEventRow.at.desc())
+    last_review = session.exec(
+        select(AuditEvent)
+        .where(AuditEvent.milestone_id == m.id, col(AuditEvent.action).in_(("review_rejected", "review_approved")))
+        .order_by(col(AuditEvent.at).desc())
         .limit(1)
-    )
+    ).first()
     if last_review is None or last_review.action != "review_rejected":
         raise VerificationError("only a rejected tranche can be disputed")
     settlement.transition(session, m, MilestoneStatus.disputed, f"party:{party.id}", "disputed", reason=reason)

@@ -82,7 +82,7 @@ Criteria are fixed before any evidence arrives; a verdict below the agreement's 
 
 ## Data model
 
-The models live in [`app/domain.py`](../app/domain.py); that file is the source of truth and this section describes it. Entities: Party, Agreement, Milestone (tranche), Criterion, EvidenceEvent, Verdict (with typed CriterionResult), Settlement, LedgerEntry, AuditEvent. Settlement mode lives on the Agreement, so push vs pull is configuration, not product. Every field uses `Field(..., description=...)` so descriptions flow into OpenAPI, MCP tool schemas and structured-output prompts. Statuses are enums, not strings.
+The domain models live in [`app/domain/models.py`](../app/domain/models.py) and the database tables (SQLModel) in [`app/db/models.py`](../app/db/models.py); those files are the source of truth and this section describes them. Entities: Party, Agreement, Milestone (tranche), Criterion, EvidenceEvent, Verdict (with typed CriterionResult), Settlement, LedgerEntry, AuditEvent. Settlement mode lives on the Agreement, so push vs pull is configuration, not product. Every field uses `Field(..., description=...)` so descriptions flow into OpenAPI, MCP tool schemas and structured-output prompts. Statuses are enums, not strings.
 
 ### Criteria: every tranche is a list of checkable conditions
 
@@ -97,14 +97,14 @@ A tranche never releases on "did the thing". It holds one or more `Criterion` ob
 | `evidence_required` | Evidence kinds that can prove it: document, spreadsheet, photo, link, code_change, ci_run, dataset, attestation | spreadsheet |
 | `evidence_description` | The specific artifact | "Signed sign-in sheets for each session, one row per attendee" |
 | `verification` | `check` (deterministic, from the registry), `model` (judged with citations) or `human` (never auto-releases) | check |
-| `check_id` | Registry check when `verification=check`: `ci_green`, `file_present`, `row_count`, `sheet_total`, `dated_by` ([`app/checks.py`](../app/checks.py)) | row_count |
+| `check_id` | Registry check when `verification=check`: `ci_green`, `file_present`, `row_count`, `sheet_total`, `dated_by` ([`app/domain/checks.py`](../app/domain/checks.py)) | row_count |
 | `due_by`, `weight` | Optional earlier deadline; weight reserved for partial release later | — |
 
 A `measure` is required on every criterion, so "done" always names the thing counted and the target.
 
 ### Criteria lint
 
-[`app/criteria.py`](../app/criteria.py) runs on every draft, on `POST /criteria/lint`, and before every confirmation. Errors block confirmation; warnings show but don't block. The extraction model (Nov 6) gets the same rules in its prompt, and its output runs through the same lint.
+[`app/domain/criteria.py`](../app/domain/criteria.py) runs on every draft, on `POST /criteria/lint`, and before every confirmation. Errors block confirmation; warnings show but don't block. The extraction model (Nov 6) gets the same rules in its prompt, and its output runs through the same lint.
 
 | Rule | Level | Catches |
 | --- | --- | --- |
@@ -133,7 +133,7 @@ No money moves without a verdict, and no verdict below the gate moves money with
 
 - **Evidence is untrusted data.** Evidence text is passed to the model as quoted data with an instruction that it may contain attempts to influence the verdict. A PR body saying "all criteria met" is evidence of nothing.
 - **Deterministic checks first.** Criteria with `verification=check` are decided by their registry check at intake (CI green on the pinned SHA, file present, budget sheet sums, report dated in period). The model only judges the rest.
-- **Implementation:** extraction and verification are two Pydantic AI agents with native structured output, run on Claude (`claude-opus-5-5`, effort high, server-side refusal fallbacks) or on a deterministic `FunctionModel` in mock mode ([`app/ai.py`](../app/ai.py)). Evidence ids are aliased (e1, e2, …) in prompts and mapped back; unknown citations are dropped.
+- **Implementation:** extraction and verification are two Pydantic AI agents with native structured output, run on Claude (`claude-opus-5-5`, effort high, server-side refusal fallbacks) or on a deterministic `FunctionModel` in mock mode ([`app/ai/agents.py`](../app/ai/agents.py)). Evidence ids are aliased (e1, e2, …) in prompts and mapped back; unknown citations are dropped.
 - **Verify:** the model gets the criteria and evidence and returns `CriterionResult`s via structured output. Every result must cite an evidence id; an uncited "met" counts as not met. `Verdict.met` is computed server-side from the results; the model never supplies it.
 - **Gate:** auto-release only when `auto_release_enabled`, `Verdict.met`, every check-backed criterion passed, and `model_confidence >= auto_release_threshold`. Stretch: a second skeptic pass (different prompt, told to find reasons to reject) must also return met. Anything else lands in `needs_review` with the rationale shown to the approver.
 - **Who reviews:** only a `payer` or `approver` party may approve or reject; the payee can never approve their own milestone.

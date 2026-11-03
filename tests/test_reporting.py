@@ -7,8 +7,9 @@ from datetime import timedelta
 
 import pytest
 from pypdf import PdfReader
+from sqlmodel import select
 
-from app.db.models import SettlementRow, utcnow
+from app.db import OutboxMessage, Settlement, utcnow
 from app.integrations.paypal import MOCK_WEBHOOK_SIGNATURE, PayPalError
 from app.services.outbound import MAX_ATTEMPTS, DestinationError, check_destination, deliver_due
 from app.services.settlement import expire_stale_invoices
@@ -75,7 +76,7 @@ def test_unpaid_invoices_expire(client, invoice_agreement):
     with client.app.state.sessionmaker() as s:
         assert expire_stale_invoices(s, client.app.state.paypal, utcnow()) == 0
         assert expire_stale_invoices(s, client.app.state.paypal, utcnow() + timedelta(days=31)) == 1
-        assert s.query(SettlementRow).one().status == "expired"
+        assert s.exec(select(Settlement)).one().status == "expired"
     assert status_of(client, aid, keys) == "settlement_failed"
 
 
@@ -155,9 +156,8 @@ def test_failed_deliveries_back_off_then_die(client, draft):
         for _ in range(MAX_ATTEMPTS):
             later += timedelta(hours=7)
             deliver_due(s, later, post=lambda *a: 500, resolve=PUBLIC)
-        from app.db.models import OutboxRow
 
-        assert {r.status for r in s.query(OutboxRow)} == {"dead"}
+        assert {r.status for r in s.exec(select(OutboxMessage))} == {"dead"}
 
 
 def test_subscription_rules(client, draft):

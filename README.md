@@ -44,6 +44,21 @@ A complete example draft is in [`tests/conftest.py`](tests/conftest.py).
 
 Run `uv run python -m app.jobs daily` once a day: it clears expired PayPal holds (29 days) and cancels invoices left unpaid for 30 days.
 
+## Code layout
+
+```
+app/
+  main.py          app factory: wires settings, PayPal, AI, GitHub, routers
+  config.py        settings (env / .env)
+  jobs.py          scheduled jobs: daily expiry, webhook delivery
+  api/             HTTP endpoints by resource, plus shared deps (auth, roles) and views
+  db/              SQLModel tables, sessions, audit log + webhook outbox
+  domain/          pure models, criteria lint, deterministic checks
+  ai/              Pydantic AI agents (extraction, verification) and extraction post-processing
+  services/        settlement (escrow + invoice), verification and gate, outbound webhooks, compliance packet
+  integrations/    PayPal gateway (mock + REST), GitHub, file uploads
+```
+
 ## Develop
 
 ```sh

@@ -5,11 +5,10 @@ import secrets
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request, status
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlmodel import Session, select
 
 from app.ai.agents import AIRuntime
-from app.db.models import EvidenceRow, MilestoneRow, PartyRow, get_session
+from app.db import Evidence, Milestone, Party, get_session
 from app.domain.models import Role
 from app.integrations.paypal import PayPalGateway
 
@@ -21,13 +20,13 @@ def hash_key(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 
 
-def _party_for_key(session: Session, key: str | None) -> PartyRow | None:
+def _party_for_key(session: Session, key: str | None) -> Party | None:
     if not key:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "X-API-Key header required")
-    return session.scalar(select(PartyRow).where(PartyRow.api_key_hash == hash_key(key)))
+    return session.exec(select(Party).where(Party.api_key_hash == hash_key(key))).first()
 
 
-def current_party(agreement_id: str, session: SessionDep, x_api_key: ApiKey = None) -> PartyRow:
+def current_party(agreement_id: str, session: SessionDep, x_api_key: ApiKey = None) -> Party:
     party = _party_for_key(session, x_api_key)
     if party is None or party.agreement_id != agreement_id:
         # Same answer for "no such agreement" and "not your agreement".
@@ -35,26 +34,26 @@ def current_party(agreement_id: str, session: SessionDep, x_api_key: ApiKey = No
     return party
 
 
-def milestone_party(milestone_id: str, session: SessionDep, x_api_key: ApiKey = None) -> tuple[PartyRow, MilestoneRow]:
+def milestone_party(milestone_id: str, session: SessionDep, x_api_key: ApiKey = None) -> tuple[Party, Milestone]:
     party = _party_for_key(session, x_api_key)
-    milestone = session.get(MilestoneRow, milestone_id)
+    milestone = session.get(Milestone, milestone_id)
     if party is None or milestone is None or milestone.agreement_id != party.agreement_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "milestone not found")
     return party, milestone
 
 
-def evidence_party(evidence_id: str, session: SessionDep, x_api_key: ApiKey = None) -> tuple[PartyRow, EvidenceRow]:
+def evidence_party(evidence_id: str, session: SessionDep, x_api_key: ApiKey = None) -> tuple[Party, Evidence]:
     party = _party_for_key(session, x_api_key)
-    ev = session.get(EvidenceRow, evidence_id)
-    m = session.get(MilestoneRow, ev.milestone_id) if ev else None
+    ev = session.get(Evidence, evidence_id)
+    m = session.get(Milestone, ev.milestone_id) if ev else None
     if party is None or ev is None or m is None or m.agreement_id != party.agreement_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "evidence not found")
     return party, ev
 
 
-PartyDep = Annotated[PartyRow, Depends(current_party)]
-MilestonePartyDep = Annotated[tuple[PartyRow, MilestoneRow], Depends(milestone_party)]
-EvidencePartyDep = Annotated[tuple[PartyRow, EvidenceRow], Depends(evidence_party)]
+PartyDep = Annotated[Party, Depends(current_party)]
+MilestonePartyDep = Annotated[tuple[Party, Milestone], Depends(milestone_party)]
+EvidencePartyDep = Annotated[tuple[Party, Evidence], Depends(evidence_party)]
 
 
 def require_org_key(
@@ -69,7 +68,7 @@ def require_org_key(
 OrgKeyDep = Annotated[None, Depends(require_org_key)]
 
 
-def require_role(party: PartyRow, *roles: Role) -> None:
+def require_role(party: Party, *roles: Role) -> None:
     if party.role not in {r.value for r in roles}:
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"only {' or '.join(r.value for r in roles)} can do this")
 

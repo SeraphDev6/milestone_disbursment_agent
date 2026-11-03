@@ -14,11 +14,10 @@ Money rules enforced here:
 import uuid
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlmodel import Session, col, select
 
-from app.db.models import LedgerRow, MilestoneRow, PartyRow, SettlementRow, WebhookEventRow, as_utc, record_audit
+from app.db import LedgerEntry, Milestone, Party, Settlement, WebhookEvent, as_utc, record_audit
 from app.domain.models import AgreementStatus, MilestoneStatus, Role, SettlementMode, SettlementStatus
 from app.integrations.paypal import CreatedOrder, PayPalError, PayPalGateway
 from app.services import ServiceError
@@ -33,7 +32,7 @@ RELEASABLE = {MilestoneStatus.verified.value, MilestoneStatus.settlement_failed.
 # --- helpers ---------------------------------------------------------------------------
 
 
-def transition(session: Session, m: MilestoneRow, to: MilestoneStatus, actor: str, action: str, **detail) -> None:
+def transition(session: Session, m: Milestone, to: MilestoneStatus, actor: str, action: str, **detail) -> None:
     previous = m.status
     m.status = to.value
     record_audit(
@@ -48,17 +47,17 @@ def transition(session: Session, m: MilestoneRow, to: MilestoneStatus, actor: st
     )
 
 
-def _note(session: Session, m: MilestoneRow, actor: str, action: str, **detail) -> None:
+def _note(session: Session, m: Milestone, actor: str, action: str, **detail) -> None:
     record_audit(session, m.agreement_id, actor, action, milestone_id=m.id, detail=detail)
 
 
-def _ledger(session: Session, m: MilestoneRow, kind: str, paypal_ref: str) -> None:
+def _ledger(session: Session, m: Milestone, kind: str, paypal_ref: str) -> None:
     session.add(
-        LedgerRow(agreement_id=m.agreement_id, milestone_id=m.id, kind=kind, amount=m.amount, paypal_ref=paypal_ref)
+        LedgerEntry(agreement_id=m.agreement_id, milestone_id=m.id, kind=kind, amount=m.amount, paypal_ref=paypal_ref)
     )
 
 
-def _payee(m: MilestoneRow) -> PartyRow:
+def _payee(m: Milestone) -> Party:
     return next(p for p in m.agreement.parties if p.role == Role.payee.value)
 
 
@@ -67,7 +66,7 @@ def _paypal_failure(e: PayPalError) -> ServiceError:
     return ServiceError(f"{e}{suffix}", 502)
 
 
-def _mark_funded(session: Session, m: MilestoneRow, authorization_id: str, actor: str, now: datetime) -> bool:
+def _mark_funded(session: Session, m: Milestone, authorization_id: str, actor: str, now: datetime) -> bool:
     if m.paypal_authorization_id is not None:
         return False  # already funded (return URL and webhook race; first one wins)
     m.paypal_authorization_id = authorization_id
@@ -82,7 +81,7 @@ def _mark_funded(session: Session, m: MilestoneRow, authorization_id: str, actor
     return True
 
 
-def _drop_hold(session: Session, m: MilestoneRow, kind: str, actor: str) -> None:
+def _drop_hold(session: Session, m: Milestone, kind: str, actor: str) -> None:
     ref = m.paypal_authorization_id or "unknown"
     _ledger(session, m, kind, ref)
     m.paypal_authorization_id = None
@@ -98,7 +97,7 @@ def _drop_hold(session: Session, m: MilestoneRow, kind: str, actor: str) -> None
 # --- funding ---------------------------------------------------------------------------
 
 
-def start_funding(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str, base_url: str) -> CreatedOrder:
+def start_funding(session: Session, gw: PayPalGateway, m: Milestone, actor: str, base_url: str) -> CreatedOrder:
     a = m.agreement
     if a.status != AgreementStatus.active.value:
         raise ServiceError(f"agreement is {a.status}; both parties must confirm criteria before funding")
@@ -127,9 +126,9 @@ def start_funding(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: s
     return order
 
 
-def complete_funding(session: Session, gw: PayPalGateway, order_id: str, actor: str, now: datetime) -> MilestoneRow:
+def complete_funding(session: Session, gw: PayPalGateway, order_id: str, actor: str, now: datetime) -> Milestone:
     """Called when the payer returns from PayPal approval. Idempotent."""
-    m = session.scalar(select(MilestoneRow).where(MilestoneRow.paypal_order_id == order_id))
+    m = session.exec(select(Milestone).where(Milestone.paypal_order_id == order_id)).first()
     if m is None:
         raise ServiceError("unknown or superseded funding order", 404)
     if m.paypal_authorization_id is not None:
@@ -147,7 +146,7 @@ def complete_funding(session: Session, gw: PayPalGateway, order_id: str, actor: 
     return m
 
 
-def void(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str) -> None:
+def void(session: Session, gw: PayPalGateway, m: Milestone, actor: str) -> None:
     if m.status != MilestoneStatus.funded.value or m.paypal_authorization_id is None:
         raise ServiceError("only a funded tranche with no evidence submitted can be voided")
     try:
@@ -161,7 +160,7 @@ def void(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str) -> No
 def expire_stale_holds(session: Session, now: datetime, actor: str = "system:expiry") -> int:
     """Drop holds past PayPal's 29-day validity. Run daily (cron) and before every release."""
     count = 0
-    for m in session.scalars(select(MilestoneRow).where(MilestoneRow.paypal_authorization_id.is_not(None))):
+    for m in session.exec(select(Milestone).where(col(Milestone.paypal_authorization_id).is_not(None))):
         if m.status not in NO_LIVE_HOLD_STATES and m.funded_at and now - as_utc(m.funded_at) > AUTH_VALIDITY:
             _drop_hold(session, m, "expired", actor)
             count += 1
@@ -172,7 +171,7 @@ def expire_stale_holds(session: Session, now: datetime, actor: str = "system:exp
 # --- release ---------------------------------------------------------------------------
 
 
-def _ensure_live_hold(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str, now: datetime) -> None:
+def _ensure_live_hold(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: datetime) -> None:
     if m.paypal_authorization_id is None or m.funded_at is None:
         raise ServiceError("tranche isn't funded; the payer must fund it first")
     if now - as_utc(m.funded_at) > AUTH_VALIDITY:
@@ -191,7 +190,7 @@ def _ensure_live_hold(session: Session, gw: PayPalGateway, m: MilestoneRow, acto
         session.commit()
 
 
-def _apply_capture_status(session: Session, s: SettlementRow, status: str, actor: str) -> None:
+def _apply_capture_status(session: Session, s: Settlement, status: str, actor: str) -> None:
     m = s.milestone
     if status == "COMPLETED":
         if s.status == SettlementStatus.succeeded.value:
@@ -218,7 +217,7 @@ def _apply_capture_status(session: Session, s: SettlementRow, status: str, actor
         )
 
 
-def release(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str, now: datetime) -> SettlementRow:
+def release(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: datetime) -> Settlement:
     """Settle a verified tranche: capture its hold (escrow) or send a PayPal invoice (invoice mode)."""
     if m.agreement.settlement_mode == SettlementMode.invoice_on_verify.value:
         return _release_by_invoice(session, gw, m, actor)
@@ -231,7 +230,7 @@ def release(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str, no
     elif m.status in RELEASABLE:
         _ensure_live_hold(session, gw, m, actor, now)
         attempt = last.attempt + 1 if last else 1
-        s = SettlementRow(
+        s = Settlement(
             milestone=m,
             attempt=attempt,
             mode=SettlementMode.escrow_release.value,
@@ -274,11 +273,11 @@ def release(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str, no
 INVOICE_TIMEOUT = timedelta(days=30)
 
 
-def _party(m: MilestoneRow, role: Role) -> PartyRow:
+def _party(m: Milestone, role: Role) -> Party:
     return next(p for p in m.agreement.parties if p.role == role.value)
 
 
-def _release_by_invoice(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str) -> SettlementRow:
+def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor: str) -> Settlement:
     """Invoice-on-verify: the payer gets a PayPal invoice for the tranche when it verifies.
 
     Invoicing v2 bills as the account that owns the API credentials, so the invoicer shown is the payee's
@@ -291,7 +290,7 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: MilestoneRow, ac
         s = last  # outcome of the previous send is unknown: resume with the same idempotency key
     elif m.status in RELEASABLE:
         attempt = last.attempt + 1 if last else 1
-        s = SettlementRow(
+        s = Settlement(
             milestone=m,
             attempt=attempt,
             mode=SettlementMode.invoice_on_verify.value,
@@ -339,7 +338,7 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: MilestoneRow, ac
     return s
 
 
-def _close_invoice(session: Session, s: SettlementRow, paid: bool, actor: str, status: str = "") -> str:
+def _close_invoice(session: Session, s: Settlement, paid: bool, actor: str, status: str = "") -> str:
     m = s.milestone
     if s.status != SettlementStatus.submitted.value:
         return "ignored: invoice already closed"
@@ -371,11 +370,11 @@ def expire_stale_invoices(
 ) -> int:
     """Cancel invoices left unpaid past the timeout so the tranche can be re-invoiced or reviewed."""
     count = 0
-    stale = session.scalars(
-        select(SettlementRow).where(
-            SettlementRow.mode == SettlementMode.invoice_on_verify.value,
-            SettlementRow.status == SettlementStatus.submitted.value,
-            SettlementRow.paypal_ref.is_not(None),
+    stale = session.exec(
+        select(Settlement).where(
+            Settlement.mode == SettlementMode.invoice_on_verify.value,
+            Settlement.status == SettlementStatus.submitted.value,
+            col(Settlement.paypal_ref).is_not(None),
         )
     ).all()
     for s in stale:
@@ -412,24 +411,24 @@ def _dispatch(session: Session, event_type: str, res: dict, now: datetime) -> st
 
     if event_type == "PAYMENT.AUTHORIZATION.CREATED":
         order_id = _related(res, "order_id")
-        m = session.scalar(select(MilestoneRow).where(MilestoneRow.paypal_order_id == order_id)) if order_id else None
+        m = session.exec(select(Milestone).where(Milestone.paypal_order_id == order_id)).first() if order_id else None
         if m is None:
             return "ignored: no tranche for this order"
         return "funded" if _mark_funded(session, m, rid, actor, now) else "already funded"
 
     if event_type == "PAYMENT.AUTHORIZATION.VOIDED":
-        m = session.scalar(select(MilestoneRow).where(MilestoneRow.paypal_authorization_id == rid))
+        m = session.exec(select(Milestone).where(Milestone.paypal_authorization_id == rid)).first()
         if m is None:
             return "ignored: hold already released"
         _drop_hold(session, m, "voided", actor)
         return "hold voided"
 
     if event_type in CAPTURE_EVENTS:
-        s = session.scalar(select(SettlementRow).where(SettlementRow.paypal_ref == rid))
+        s = session.exec(select(Settlement).where(Settlement.paypal_ref == rid)).first()
         if s is None:
             # Capture response was lost (ambiguous failure): match through the authorization.
             auth_id = _related(res, "authorization_id")
-            m = session.scalar(select(MilestoneRow).where(MilestoneRow.paypal_authorization_id == auth_id))
+            m = session.exec(select(Milestone).where(Milestone.paypal_authorization_id == auth_id)).first()
             s = m.settlements[-1] if m and m.settlements else None
             if s is None or s.status != SettlementStatus.submitted.value:
                 return "ignored: no open settlement for this capture"
@@ -438,7 +437,7 @@ def _dispatch(session: Session, event_type: str, res: dict, now: datetime) -> st
         return f"capture {CAPTURE_EVENTS[event_type].lower()}"
 
     if event_type in ("INVOICING.INVOICE.PAID", "INVOICING.INVOICE.CANCELLED"):
-        s = session.scalar(select(SettlementRow).where(SettlementRow.paypal_ref == rid))
+        s = session.exec(select(Settlement).where(Settlement.paypal_ref == rid)).first()
         if s is None or s.mode != SettlementMode.invoice_on_verify.value:
             return "ignored: no settlement for this invoice"
         return _close_invoice(session, s, paid=event_type == "INVOICING.INVOICE.PAID", actor=actor)
@@ -450,11 +449,11 @@ def handle_webhook(session: Session, event: dict, now: datetime) -> str:
     event_id, event_type = event.get("id"), event.get("event_type")
     if not event_id or not event_type:
         raise ServiceError("webhook event missing id or event_type", 400)
-    if session.get(WebhookEventRow, event_id) is not None:
+    if session.get(WebhookEvent, event_id) is not None:
         return "duplicate"
     res = event.get("resource") or {}
     outcome = _dispatch(session, event_type, res, now)
-    session.add(WebhookEventRow(id=event_id, event_type=event_type, resource_id=res.get("id"), outcome=outcome))
+    session.add(WebhookEvent(id=event_id, event_type=event_type, resource_id=res.get("id"), outcome=outcome))
     try:
         session.commit()
     except IntegrityError:

@@ -7,11 +7,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlmodel import select
 
 from app.api.deps import PartyDep, SessionDep, require_role
 from app.config import Mode
-from app.db.models import IntegrationRow, MilestoneRow, SubscriptionRow, WebhookEventRow, record_audit
+from app.db import Integration, Milestone, Subscription, WebhookEvent, record_audit
 from app.domain.models import AgreementStatus, MilestoneStatus, Role
 from app.integrations import github
 from app.services import verification
@@ -57,13 +57,13 @@ def register_github(
         raise HTTPException(status.HTTP_409_CONFLICT, f"agreement is {a.status}")
     if not github.valid_repo(body.repo):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "repo must look like 'owner/name'")
-    row = session.scalar(
-        select(IntegrationRow).where(
-            IntegrationRow.agreement_id == a.id, IntegrationRow.kind == "github", IntegrationRow.target == body.repo
+    row = session.exec(
+        select(Integration).where(
+            Integration.agreement_id == a.id, Integration.kind == "github", Integration.target == body.repo
         )
-    )
+    ).first()
     if row is None:
-        row = IntegrationRow(
+        row = Integration(
             agreement_id=a.id,
             kind="github",
             target=body.repo,
@@ -90,9 +90,9 @@ def _ingest_pr(state, integration_id: str, pr: github.MergedPR, milestone_ids: l
     actor = f"github:{pr.merged_by}"
     to_verify = []
     with state.sessionmaker() as session:
-        integration = session.get(IntegrationRow, integration_id)
+        integration = session.get(Integration, integration_id)
         for mid in milestone_ids:
-            m = session.get(MilestoneRow, mid)
+            m = session.get(Milestone, mid)
             if m is None or integration is None or m.agreement_id != integration.agreement_id:
                 continue
             try:
@@ -129,7 +129,7 @@ async def github_webhook(
     x_hub_signature_256: Annotated[str | None, Header()] = None,
 ) -> dict[str, str]:
     raw = await request.body()
-    integration = session.get(IntegrationRow, integration_id)
+    integration = session.get(Integration, integration_id)
     if integration is None or integration.kind != "github":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown integration")
     if not github.signature_ok(integration.secret, raw, x_hub_signature_256):
@@ -139,7 +139,7 @@ async def github_webhook(
     if not x_github_delivery:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "X-GitHub-Delivery header required")
     delivery_id = f"github:{x_github_delivery}"
-    if session.get(WebhookEventRow, delivery_id) is not None:
+    if session.get(WebhookEvent, delivery_id) is not None:
         return {"outcome": "duplicate"}
     try:
         payload = json.loads(raw)
@@ -153,8 +153,7 @@ async def github_webhook(
         outcome = f"ignored: {pr.repo} is not the registered repo"
     else:
         agreement_milestones = {
-            m.id
-            for m in session.scalars(select(MilestoneRow).where(MilestoneRow.agreement_id == integration.agreement_id))
+            m.id for m in session.exec(select(Milestone).where(Milestone.agreement_id == integration.agreement_id))
         }
         matched = [mid for mid in pr.milestone_ids() if mid in agreement_milestones]
         if not matched:
@@ -169,9 +168,7 @@ async def github_webhook(
         else:
             outcome = f"queued for {len(matched)} milestone(s)"
             background.add_task(_ingest_pr, request.app.state, integration.id, pr, matched)
-    session.add(
-        WebhookEventRow(id=delivery_id, event_type=f"github.{x_github_event}", resource_id=None, outcome=outcome)
-    )
+    session.add(WebhookEvent(id=delivery_id, event_type=f"github.{x_github_event}", resource_id=None, outcome=outcome))
     session.commit()
     return {"outcome": outcome}
 
@@ -201,7 +198,7 @@ class SubscriptionCreated(SubscriptionView):
     )
 
 
-def _sub_view(s: SubscriptionRow) -> SubscriptionView:
+def _sub_view(s: Subscription) -> SubscriptionView:
     return SubscriptionView(id=s.id, url=s.url, events=s.events, active=s.active, created_at=s.created_at)
 
 
@@ -216,7 +213,7 @@ def subscribe(
         check_destination(body.url, allow_http=state.settings.mode is Mode.mock, resolve=state.resolve)
     except DestinationError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
-    sub = SubscriptionRow(
+    sub = Subscription(
         agreement_id=agreement_id,
         url=body.url,
         events=body.events or ["*"],
@@ -232,13 +229,13 @@ def subscribe(
 
 @router.get("/agreements/{agreement_id}/subscriptions", tags=["events"], summary="Subscriptions on this agreement")
 def list_subscriptions(agreement_id: str, party: PartyDep, session: SessionDep) -> list[SubscriptionView]:
-    subs = session.scalars(select(SubscriptionRow).where(SubscriptionRow.agreement_id == agreement_id)).all()
+    subs = session.exec(select(Subscription).where(Subscription.agreement_id == agreement_id)).all()
     return [_sub_view(s) for s in subs]
 
 
 @router.delete("/agreements/{agreement_id}/subscriptions/{subscription_id}", tags=["events"], status_code=204)
 def unsubscribe(agreement_id: str, subscription_id: str, party: PartyDep, session: SessionDep) -> Response:
-    sub = session.get(SubscriptionRow, subscription_id)
+    sub = session.get(Subscription, subscription_id)
     if sub is None or sub.agreement_id != agreement_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "subscription not found")
     if sub.created_by != f"party:{party.id}" and party.role != Role.payer.value:

@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import MilestonePartyDep, SessionDep, gateway, require_role
 from app.api.views import AgreementView, agreement_view, html_page
-from app.db.models import utcnow
+from app.db import utcnow
 from app.domain.models import MilestoneStatus, Role, SettlementStatus
 from app.services import ServiceError, settlement
 

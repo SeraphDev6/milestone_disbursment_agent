@@ -14,20 +14,17 @@ from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlmodel import Session, select
 
-from app.db.models import AgreementRow, AuditEventRow, LedgerRow, MilestoneRow
+from app.db import Agreement, AuditEvent, LedgerEntry, Milestone
 
 
 def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat() if dt else None
 
 
-def milestone_section(session: Session, m: MilestoneRow) -> dict:
-    events = session.scalars(
-        select(AuditEventRow).where(AuditEventRow.milestone_id == m.id).order_by(AuditEventRow.at)
-    ).all()
+def milestone_section(session: Session, m: Milestone) -> dict:
+    events = session.exec(select(AuditEvent).where(AuditEvent.milestone_id == m.id).order_by(AuditEvent.at)).all()
     return {
         "id": m.id,
         "title": m.title,
@@ -99,8 +96,8 @@ def milestone_section(session: Session, m: MilestoneRow) -> dict:
     }
 
 
-def build_packet(session: Session, a: AgreementRow) -> dict:
-    ledger = session.scalars(select(LedgerRow).where(LedgerRow.agreement_id == a.id).order_by(LedgerRow.at)).all()
+def build_packet(session: Session, a: Agreement) -> dict:
+    ledger = session.exec(select(LedgerEntry).where(LedgerEntry.agreement_id == a.id).order_by(LedgerEntry.at)).all()
     released = sum((e.amount for e in ledger if e.kind in ("captured", "paid")), start=Decimal(0))
     return {
         "generated_at": datetime.now(UTC).isoformat(),
