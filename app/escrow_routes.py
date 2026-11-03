@@ -130,8 +130,12 @@ def mock_approve(token: str, request: Request) -> RedirectResponse:
 def mock_mark_verified(milestone_id: str, auth: MilestonePartyDep, session: SessionDep) -> AgreementView:
     party, m = auth
     _require(party, Role.payer)
-    allowed = {MilestoneStatus.pending, MilestoneStatus.funded, MilestoneStatus.evidence_received,
-               MilestoneStatus.needs_review}  # fmt: skip
+    allowed = {
+        MilestoneStatus.pending,
+        MilestoneStatus.funded,
+        MilestoneStatus.evidence_received,
+        MilestoneStatus.needs_review,
+    }
     if MilestoneStatus(m.status) not in allowed:
         raise HTTPException(status.HTTP_409_CONFLICT, f"tranche is {m.status}")
     escrow._transition(session, m, MilestoneStatus.verified, f"party:{party.id}", "mock_mark_verified")

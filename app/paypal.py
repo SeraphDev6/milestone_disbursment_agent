@@ -12,6 +12,7 @@ Two implementations share one interface:
 import itertools
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Protocol
@@ -103,11 +104,13 @@ class MockPayPal:
     fail_next: PayPalError | None = None  # tests inject a failure for the next call (PayPal did nothing)
     drop_next_response: bool = False  # PayPal acts, but the response is lost (timeout after success)
     _seq: itertools.count = field(default_factory=lambda: itertools.count(1))
+    # Unique per process so ids never collide with rows a previous run left in a persistent database.
+    _run: str = field(default_factory=lambda: uuid.uuid4().hex[:6].upper())
     _seen: dict[str, object] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def _id(self, prefix: str) -> str:
-        return f"MOCK-{prefix}-{next(self._seq):05d}"
+        return f"MOCK-{prefix}-{self._run}-{next(self._seq):05d}"
 
     def _maybe_fail(self) -> None:
         if self.fail_next is not None:
@@ -133,12 +136,19 @@ class MockPayPal:
             raise PayPalError(f"unknown order {order_id}", status=404)
         order["status"] = "APPROVED"
 
-    def create_authorize_order(self, *, reference_id, description, amount, currency, payee_email, return_url,
-                               cancel_url, request_id) -> CreatedOrder:  # fmt: skip
+    def create_authorize_order(
+        self, *, reference_id, description, amount, currency, payee_email, return_url, cancel_url, request_id
+    ) -> CreatedOrder:
         def create():
             oid = self._id("ORDER")
-            self.orders[oid] = {"status": "CREATED", "amount": amount, "currency": currency, "payee": payee_email,
-                                "return_url": return_url, "reference_id": reference_id}  # fmt: skip
+            self.orders[oid] = {
+                "status": "CREATED",
+                "amount": amount,
+                "currency": currency,
+                "payee": payee_email,
+                "return_url": return_url,
+                "reference_id": reference_id,
+            }
             return CreatedOrder(oid, f"{self.base_url}/mock/paypal/approve?token={oid}")
 
         return self._idempotent(request_id, create)
@@ -199,8 +209,9 @@ class MockPayPal:
 
 
 class SandboxPayPal:
-    def __init__(self, *, client_id: str, client_secret: str, base_url: str, webhook_id: str | None,
-                 timeout: float = 20.0):  # fmt: skip
+    def __init__(
+        self, *, client_id: str, client_secret: str, base_url: str, webhook_id: str | None, timeout: float = 20.0
+    ):
         self._client = httpx.Client(base_url=base_url, timeout=timeout)
         self._auth = (client_id, client_secret)
         self._webhook_id = webhook_id
@@ -240,13 +251,16 @@ class SandboxPayPal:
             except ValueError:
                 detail = r.text[:200]
             raise PayPalError(
-                f"PayPal {r.status_code}: {detail}", status=r.status_code, ambiguous=r.status_code >= 500,
+                f"PayPal {r.status_code}: {detail}",
+                status=r.status_code,
+                ambiguous=r.status_code >= 500,
                 debug_id=debug_id,
-            )  # fmt: skip
+            )
         return r.json() if r.content else {}
 
-    def create_authorize_order(self, *, reference_id, description, amount, currency, payee_email, return_url,
-                               cancel_url, request_id) -> CreatedOrder:  # fmt: skip
+    def create_authorize_order(
+        self, *, reference_id, description, amount, currency, payee_email, return_url, cancel_url, request_id
+    ) -> CreatedOrder:
         body = {
             "intent": "AUTHORIZE",
             "purchase_units": [
@@ -282,16 +296,20 @@ class SandboxPayPal:
 
     def reauthorize(self, authorization_id, *, amount, currency, request_id) -> Authorization:
         data = self._call(
-            "POST", f"/v2/payments/authorizations/{authorization_id}/reauthorize", request_id=request_id,
+            "POST",
+            f"/v2/payments/authorizations/{authorization_id}/reauthorize",
+            request_id=request_id,
             json={"amount": _money(amount, currency)},
-        )  # fmt: skip
+        )
         return Authorization(data["id"], data["status"])
 
     def capture_authorization(self, authorization_id, *, amount, currency, request_id) -> Capture:
         data = self._call(
-            "POST", f"/v2/payments/authorizations/{authorization_id}/capture", request_id=request_id,
+            "POST",
+            f"/v2/payments/authorizations/{authorization_id}/capture",
+            request_id=request_id,
             json={"amount": _money(amount, currency), "final_capture": True},
-        )  # fmt: skip
+        )
         return Capture(data["id"], data["status"])
 
     def void_authorization(self, authorization_id, *, request_id) -> None:

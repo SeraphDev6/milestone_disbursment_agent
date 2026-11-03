@@ -43,9 +43,15 @@ def _transition(session: Session, m: MilestoneRow, to: MilestoneStatus, actor: s
     previous = m.status
     m.status = to.value
     record_audit(
-        session, m.agreement_id, actor, action, milestone_id=m.id, from_status=previous, to_status=m.status,
+        session,
+        m.agreement_id,
+        actor,
+        action,
+        milestone_id=m.id,
+        from_status=previous,
+        to_status=m.status,
         detail=detail,
-    )  # fmt: skip
+    )
 
 
 def _note(session: Session, m: MilestoneRow, actor: str, action: str, **detail) -> None:
@@ -207,9 +213,15 @@ def _apply_capture_status(session: Session, s: SettlementRow, status: str, actor
         s.status = SettlementStatus.failed.value
         s.error = f"capture {status}"
         _transition(
-            session, m, MilestoneStatus.settlement_failed, actor, "settlement_failed", capture_id=s.paypal_ref,
-            status=status, attempt=s.attempt,
-        )  # fmt: skip
+            session,
+            m,
+            MilestoneStatus.settlement_failed,
+            actor,
+            "settlement_failed",
+            capture_id=s.paypal_ref,
+            status=status,
+            attempt=s.attempt,
+        )
 
 
 def release(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str, now: datetime) -> SettlementRow:
@@ -250,8 +262,9 @@ def release(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str, no
                 "PayPal didn't confirm the capture; release again to resume with the same idempotency key", 502
             ) from e
         s.status = SettlementStatus.failed.value
-        _transition(session, m, MilestoneStatus.settlement_failed, actor, "settlement_failed", attempt=s.attempt,
-                    error=s.error)  # fmt: skip
+        _transition(
+            session, m, MilestoneStatus.settlement_failed, actor, "settlement_failed", attempt=s.attempt, error=s.error
+        )
         session.commit()
         raise _paypal_failure(e) from e
 

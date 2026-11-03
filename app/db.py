@@ -6,7 +6,19 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from fastapi import Request
-from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, create_engine
+from sqlalchemy import (
+    JSON,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    create_engine,
+)
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -80,6 +92,49 @@ class MilestoneRow(Base):
     settlements: Mapped[list["SettlementRow"]] = relationship(
         back_populates="milestone", order_by="SettlementRow.attempt", cascade="all, delete-orphan"
     )
+    evidence: Mapped[list["EvidenceRow"]] = relationship(
+        order_by="EvidenceRow.received_at", cascade="all, delete-orphan"
+    )
+    verdicts: Mapped[list["VerdictRow"]] = relationship(order_by="VerdictRow.created_at", cascade="all, delete-orphan")
+
+
+class EvidenceRow(Base):
+    __tablename__ = "evidence"
+    __table_args__ = (UniqueConstraint("milestone_id", "source", "external_ref", "pinned_ref"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    milestone_id: Mapped[str] = mapped_column(ForeignKey("milestones.id"), index=True)
+    submitted_by: Mapped[str] = mapped_column(String(80))
+    source: Mapped[str] = mapped_column(String(16))
+    external_ref: Mapped[str] = mapped_column(String(500))
+    pinned_ref: Mapped[str] = mapped_column(String(80))  # commit SHA or content hash
+    evidence_type: Mapped[str] = mapped_column(String(16))
+    title: Mapped[str] = mapped_column(String(200))
+    content: Mapped[str] = mapped_column(Text)
+    dated: Mapped[date | None] = mapped_column(Date)
+    artifact_uris: Mapped[list[str]] = mapped_column(JSON, default=list)
+    check_results: Mapped[dict] = mapped_column(JSON, default=dict)  # set by adapters only
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class VerdictRow(Base):
+    """Append-only. Everything needed to replay the decision."""
+
+    __tablename__ = "verdicts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    milestone_id: Mapped[str] = mapped_column(ForeignKey("milestones.id"), index=True)
+    criteria_hash: Mapped[str] = mapped_column(String(64))
+    evidence_ids: Mapped[list[str]] = mapped_column(JSON)
+    criteria_results: Mapped[list[dict]] = mapped_column(JSON)
+    met: Mapped[bool]
+    model_confidence: Mapped[float] = mapped_column(Float)
+    rationale: Mapped[str] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(String(64))
+    prompt_version: Mapped[str] = mapped_column(String(32))
+    is_precheck: Mapped[bool] = mapped_column(default=False)
+    gate: Mapped[str] = mapped_column(String(32))  # auto_release, needs_review, precheck
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class SettlementRow(Base):

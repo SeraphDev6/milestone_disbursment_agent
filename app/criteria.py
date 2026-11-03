@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 from collections.abc import Sequence
+from decimal import Decimal
 
 from app.checks import CHECKS
 from app.domain import (
@@ -262,22 +263,27 @@ def lint_criterion(c: Criterion, path: str, milestone: MilestoneDraft) -> list[L
 
 
 def lint_agreement(draft: AgreementDraft) -> LintReport:
+    return lint_tranches(draft.total_amount, draft.milestones)
+
+
+def lint_tranches(total_amount: Decimal, milestones: Sequence[MilestoneDraft]) -> LintReport:
+    """Lint tranches on their own, e.g. extraction output before parties are known."""
     E, W = LintLevel.error, LintLevel.warning
     issues: list[LintIssue] = []
 
-    milestone_sum = sum((m.amount for m in draft.milestones), start=draft.total_amount * 0)
-    if milestone_sum != draft.total_amount:
+    milestone_sum = sum((m.amount for m in milestones), start=Decimal(0))
+    if milestone_sum != total_amount:
         issues.append(
             _issue(
                 E,
                 "amounts_mismatch",
                 "milestones",
-                f"Milestones sum to {milestone_sum} but the agreement total is {draft.total_amount}.",
+                f"Milestones sum to {milestone_sum} but the agreement total is {total_amount}.",
                 "Adjust tranche amounts or the total so they match exactly.",
             )
         )
 
-    for mi, m in enumerate(draft.milestones):
+    for mi, m in enumerate(milestones):
         mpath = f"milestones[{mi}]"
         if len(m.criteria) > MAX_CRITERIA_PER_MILESTONE:
             issues.append(

@@ -1,5 +1,6 @@
 from enum import Enum
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,6 +16,11 @@ class Settings(BaseSettings):
 
     mode: Mode = Mode.mock
     database_url: str = "sqlite:///./local.db"
+    # mock: deterministic stand-in; claude: Claude via Pydantic AI (needs ANTHROPIC_API_KEY).
+    # Unset follows MODE, so sandbox uses Claude and mock uses the stand-in.
+    llm: Literal["mock", "claude"] | None = None
+    # When set, creating agreements and extracting documents (which spends model credits) requires X-Org-Key.
+    org_api_key: str | None = None
     paypal_client_id: str | None = None
     paypal_client_secret: str | None = None
     paypal_base_url: str = "https://api-m.sandbox.paypal.com"
@@ -38,6 +44,10 @@ class Settings(BaseSettings):
         if self.mode is Mode.sandbox and not (self.paypal_client_id and self.paypal_client_secret):
             raise ValueError("MODE=sandbox requires PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET")
         return self
+
+
+def use_claude(settings: Settings) -> bool:
+    return settings.llm == "claude" if settings.llm else settings.mode is Mode.sandbox
 
 
 @lru_cache

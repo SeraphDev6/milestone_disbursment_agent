@@ -226,6 +226,18 @@ def current_party(
 PartyDep = Annotated[PartyRow, Depends(current_party)]
 
 
+def require_org_key(
+    request: Request,
+    x_org_key: Annotated[str | None, Header(description="Organization key, required when the server sets one.")] = None,
+) -> None:
+    expected = request.app.state.settings.org_api_key
+    if expected and not (x_org_key and secrets.compare_digest(x_org_key, expected)):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "X-Org-Key header required")
+
+
+OrgKeyDep = Annotated[None, Depends(require_org_key)]
+
+
 def milestone_party(
     milestone_id: str,
     session: SessionDep,
@@ -268,7 +280,7 @@ def lint(draft: AgreementDraft) -> LintReport:
     openapi_extra={"x-mcp-tool": "create_agreement"},
     summary="Create a draft agreement; returns one API key per party",
 )
-def create_agreement(draft: AgreementDraft, session: SessionDep) -> AgreementCreated:
+def create_agreement(draft: AgreementDraft, session: SessionDep, _: OrgKeyDep) -> AgreementCreated:
     row = AgreementRow(
         title=draft.title,
         total_amount=draft.total_amount,

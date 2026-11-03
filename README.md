@@ -2,7 +2,9 @@
 
 Turns a grant or statement of work into tranches with checkable acceptance criteria, verifies evidence against them, and settles each tranche through PayPal. Built for the PayPal AI Hackathon (Nov 2026). Spec: [`docs/SPEC.md`](docs/SPEC.md).
 
-**Status:** agreements, structured criteria, criteria lint, two-party confirmation and the PayPal escrow path (per-tranche hold, reauthorize, capture, void, expiry, webhooks) work in mock mode. Sandbox is wired but not yet run against PayPal. Up next: extraction and the verifier.
+**Status:** agreements, structured criteria and lint, two-party confirmation, PayPal escrow (per-tranche hold, reauthorize, capture, void, expiry, webhooks), agreement extraction, evidence intake, deterministic checks, the AI verifier, the release gate, pre-check and human review all work in mock mode. PayPal sandbox and Claude are wired but not yet run against the real services. Up next: GitHub and upload evidence adapters.
+
+AI parts (extraction, verification) use [Pydantic AI](https://ai.pydantic.dev) with Claude (`claude-opus-5-5`, server-side refusal fallbacks on). Mock mode swaps in a deterministic `FunctionModel`, so both paths run the same agents.
 
 ## Run it
 
@@ -25,12 +27,13 @@ Copy `.env.example` to `.env` to set `MODE=sandbox` and PayPal sandbox credentia
 
 ## Try the flow
 
-1. `POST /criteria/lint` with a draft to see what a reviewer couldn't verify.
+1. `POST /agreements/extract` with a PDF or text agreement proposes tranches and criteria (with source quotes, open questions and lint), or `POST /criteria/lint` checks a draft you wrote.
 2. `POST /agreements` creates a draft and returns one API key per party (shown once).
 3. Payer and payee each `POST /agreements/{id}/confirm` with the `criteria_hash` they reviewed (`X-API-Key` header). Confirmation is refused while the lint has errors. When both have signed, the agreement is `active` and its criteria are locked.
 4. Payer `POST /milestones/{id}/fund` returns an `approve_url`; open it to approve the hold (mock mode simulates PayPal's page).
-5. Until the verifier lands, mock mode has `POST /mock/milestones/{id}/mark-verified`.
-6. Payer or approver `POST /milestones/{id}/release` captures the hold to the payee. `GET /agreements/{id}` shows held, released and unfunded.
+5. Payee `POST /milestones/{id}/precheck` tries draft evidence without submitting it, then `POST /milestones/{id}/evidence` submits it (spreadsheets as CSV text). Checks run first, then the AI verifier; `GET /milestones/{id}/verdict` shows per-criterion results with citations.
+6. If the payer turned on auto-release and the verdict passes the threshold, a funded tranche settles on its own. Otherwise it waits in `needs_review` for `POST /milestones/{id}/review` (payer or approver): approve releases it, reject returns what's missing.
+7. `POST /milestones/{id}/release` releases a verified tranche manually (e.g. after funding late). `GET /agreements/{id}` shows held, released and unfunded.
 
 A complete example draft is in [`tests/conftest.py`](tests/conftest.py).
 
