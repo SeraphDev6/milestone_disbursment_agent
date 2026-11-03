@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Request
 
-from app.api import agreements, audit, auth, evidence, integrations, mock, orgs, settlement
+from app.api import agreements, audit, auth, evidence, integrations, mock, orgs, settlement, sso
 
 api_router = APIRouter()
 
@@ -12,7 +12,7 @@ def health(request: Request) -> dict[str, str]:
     return {"status": "ok", "mode": request.app.state.settings.mode.value}
 
 
-for module in (auth, orgs, agreements, settlement, evidence, integrations, audit):
+for module in (auth, sso, orgs, agreements, settlement, evidence, integrations, audit):
     api_router.include_router(module.router)
 
 mock_router = mock.router

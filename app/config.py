@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     # Unset follows MODE, so sandbox uses Claude and mock uses the stand-in.
     llm: Literal["mock", "claude"] | None = None
     anthropic_api_key: SecretStr | None = None
+    # Encrypts secrets stored for later use (orgs' SSO client secrets). Must be set and kept stable in sandbox/prod.
+    secret_key: SecretStr = SecretStr("dev-only-insecure-secret-key")
     # When set, creating agreements and extracting documents (which spends model credits) requires X-Org-Key.
     org_api_key: str | None = None
     # Apply pending Alembic migrations at startup. Safe with one app instance; turn off and run
@@ -50,6 +52,8 @@ class Settings(BaseSettings):
     def _sandbox_needs_keys(self) -> "Settings":
         if self.mode is Mode.sandbox and not (self.paypal_client_id and self.paypal_client_secret):
             raise ValueError("MODE=sandbox requires PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET")
+        if self.mode is Mode.sandbox and self.secret_key.get_secret_value().startswith("dev-only"):
+            raise ValueError("MODE=sandbox requires SECRET_KEY")
         return self
 
 

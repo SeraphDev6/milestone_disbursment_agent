@@ -50,7 +50,11 @@ def normalize_email(email: str) -> str:
 
 def request_magic_link(session: Session, mailer: ConsoleMailer, email: str, base_url: str) -> str:
     """Create a one-time sign-in link and email it. Returns the link (shown in mock mode only)."""
+    from app.services import sso  # sso imports this module
+
     email = normalize_email(email)
+    if sso.enforced_for(session, email):
+        raise IdentityError("your organization requires single sign-on; use POST /auth/sso/start", 409)
     raw = _token("mdl")
     session.add(LoginToken(email=email, token_hash=hash_token(raw), expires_at=utcnow() + LOGIN_TTL))
     session.commit()

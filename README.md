@@ -29,7 +29,7 @@ Copy `.env.example` to `.env` to set `MODE=sandbox` and PayPal sandbox credentia
 
 Everything is done as a signed-in person acting for an organization (see "Organizations, people and access" in the spec).
 
-1. **Sign in:** `POST /auth/magic-link {"email": ...}` then `POST /auth/magic-link/verify {"token": ...}` returns a session token; send `Authorization: Bearer <token>`. In mock mode the link comes back in the response (`dev_link`) instead of being emailed.
+1. **Sign in:** `POST /auth/magic-link {"email": ...}` then `POST /auth/magic-link/verify {"token": ...}` returns a session token; send `Authorization: Bearer <token>`. In mock mode the link comes back in the response (`dev_link`) instead of being emailed. Orgs can add OIDC single sign-on for domains they own (`PUT /orgs/{id}/sso`, verify each domain via DNS TXT, then people sign in with `POST /auth/sso/start`).
 2. **Payer org:** `POST /orgs {"name", "paypal_email"}`. Invite colleagues with `POST /orgs/{id}/invitations {"email", "role"}` (owner, admin, member, viewer); integrations and agents use `POST /orgs/{id}/api-keys`.
 3. **Draft:** `POST /agreements/extract` (PDF or text) proposes tranches and criteria, or `POST /criteria/lint` checks ones you wrote. Then `POST /orgs/{id}/agreements` with `counterparty_email` (and optional `reviewer_emails`) creates it and sends invitations.
 4. **Payee and reviewers** sign in with the invited email and `POST /invitations/accept` for one of their orgs (or a new one). Pending invitations show in `GET /me`.

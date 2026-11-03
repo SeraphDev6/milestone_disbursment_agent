@@ -193,9 +193,13 @@ original per-agreement party keys.
 **Sign-in**
 - **Magic link** for everyone: request a link for an email, open it, get a session token (bearer). In mock
   mode the link is returned in the response so the demo works without an email provider.
-- **Org SSO (OIDC)**: an org admin configures issuer, client id/secret and the email domains it owns.
-  Users with those domains sign in through the org's identity provider and are added to the org on first
-  sign-in (default role member). With "enforce SSO" on, magic links are refused for those domains.
+- **Org SSO (OIDC)**: an org admin configures issuer, client id/secret (encrypted at rest with `SECRET_KEY`) and
+  the email domains it owns. A domain only counts once proven with a DNS TXT record
+  (`_mde-verification.<domain> TXT "mde-verification=<token>"`); public mail domains can't be claimed and a
+  domain belongs to one org. Sign-in uses authorization code + PKCE; the ID token's signature (provider JWKS),
+  issuer, audience, expiry and nonce are checked, and its email must be in a verified domain. People are added
+  to the org on first sign-in (default role member, never owner). With "enforce SSO" on, magic links are
+  refused for those domains.
 
 **Who can do what** (agreement role x org role; `member+` means member, admin or owner)
 

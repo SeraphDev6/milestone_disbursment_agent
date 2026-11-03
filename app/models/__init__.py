@@ -62,6 +62,7 @@ from app.models.identity import (
     UserRead,
 )
 from app.models.settlement import LedgerEntry, Settlement, SettlementRead
+from app.models.sso import SSOConnection, SSOConnectionRead, SSOConnectionWrite, SSODomain, SSOLoginState
 
 __all__ = [
     "Agreement",
@@ -109,6 +110,11 @@ __all__ = [
     "PartyBase",
     "PartyRead",
     "Role",
+    "SSOConnection",
+    "SSOConnectionRead",
+    "SSOConnectionWrite",
+    "SSODomain",
+    "SSOLoginState",
     "Settlement",
     "SettlementMode",
     "SettlementRead",
