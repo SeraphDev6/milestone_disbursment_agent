@@ -10,7 +10,7 @@ services:
   - type: web
     name: milestone-engine
     runtime: python
-    plan: free
+    plan: starter # free instances sleep after 15 idle minutes and take up to a minute to wake
     buildCommand: pip install uv && uv sync --frozen --no-dev && cd web && npm ci && npm run build
     startCommand: uv run --no-dev uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips '*'
     healthCheckPath: /api/health
