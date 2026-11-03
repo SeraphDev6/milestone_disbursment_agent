@@ -8,7 +8,6 @@ The overall verdict is computed here (every criterion met and cited), never take
 """
 
 import hashlib
-from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy.exc import IntegrityError
@@ -16,67 +15,37 @@ from sqlalchemy.orm import sessionmaker
 from sqlmodel import Session, col, select
 
 from app.ai.agents import AIError, AIRuntime
-from app.db import AuditEvent, Evidence, Milestone, Party, Verdict, as_utc, record_audit, utcnow
+from app.db import record_audit, utcnow
 from app.domain import checks
-from app.domain.models import (
+from app.integrations.paypal import PayPalGateway
+from app.models import (
     AgreementStatus,
+    AuditEvent,
     Criterion,
     CriterionResult,
-    EvidenceEvent,
-    EvidenceIn,
+    Evidence,
+    EvidenceCreate,
+    Milestone,
     MilestoneStatus,
+    Party,
     SettlementMode,
+    Verdict,
     VerificationMethod,
 )
-from app.integrations.paypal import PayPalGateway
 from app.services import ServiceError, settlement
 
 ACCEPTS_EVIDENCE = {
-    MilestoneStatus.pending.value,
-    MilestoneStatus.funded.value,
-    MilestoneStatus.evidence_received.value,
-    MilestoneStatus.needs_review.value,
-    MilestoneStatus.verifying.value,
+    MilestoneStatus.pending,
+    MilestoneStatus.funded,
+    MilestoneStatus.evidence_received,
+    MilestoneStatus.needs_review,
+    MilestoneStatus.verifying,
 }
 MAX_RERUNS = 3
 
 
 class VerificationError(ServiceError):
     """Same HTTP mapping as escrow errors."""
-
-
-@dataclass
-class Judgment:
-    results: list[CriterionResult]
-    confidence: float
-    rationale: str
-    model: str
-    prompt_version: str
-
-    @property
-    def met(self) -> bool:
-        return bool(self.results) and all(r.met and r.evidence_ids for r in self.results)
-
-
-def criteria_of(m: Milestone) -> list[Criterion]:
-    return [Criterion.model_validate(c) for c in m.criteria]
-
-
-def to_event(row: Evidence) -> EvidenceEvent:
-    return EvidenceEvent(
-        id=row.id,
-        milestone_id=row.milestone_id,
-        source=row.source,
-        external_ref=row.external_ref,
-        pinned_ref=row.pinned_ref,
-        evidence_type=row.evidence_type,
-        title=row.title,
-        content=row.content,
-        dated=row.dated,
-        artifact_uris=row.artifact_uris,
-        check_results=row.check_results,
-        received_at=as_utc(row.received_at),
-    )
 
 
 def attachments_of(rows: list[Evidence]) -> dict[str, tuple[bytes, str]]:
@@ -89,9 +58,10 @@ def attachments_of(rows: list[Evidence]) -> dict[str, tuple[bytes, str]]:
 def judge(
     ai: AIRuntime,
     criteria: list[Criterion],
-    evidence: list[EvidenceEvent],
+    evidence: list[Evidence],
     attachments: dict[str, tuple[bytes, str]] | None = None,
-) -> Judgment:
+) -> Verdict:
+    """Decide every criterion and return an unsaved Verdict; the caller sets gate and provenance and stores it."""
     from app.ai.agents import VERIFY_PROMPT_VERSION
 
     results: dict[str, CriterionResult] = {}
@@ -141,22 +111,27 @@ def judge(
             )
         confidence, rationale, model = out.confidence, out.rationale, ai.model_name
 
-    return Judgment(
-        results=[results[c.id] for c in criteria],  # type: ignore[index]
-        confidence=confidence,
+    ordered = [results[c.id] for c in criteria]  # type: ignore[index]
+    return Verdict(
+        criteria_results=ordered,
+        # Computed here, never taken from the model: every criterion met and cited.
+        met=bool(ordered) and all(r.met and r.evidence_ids for r in ordered),
+        model_confidence=confidence,
         rationale=rationale,
         model=model,
         prompt_version=VERIFY_PROMPT_VERSION,
+        gate="needs_review",
+        criteria_hash="",
     )
 
 
-def _gate(m: Milestone, criteria: list[Criterion], j: Judgment) -> str:
+def _gate(m: Milestone, v: Verdict) -> str:
     a = m.agreement
     if (
         a.auto_release_enabled
-        and j.met
-        and not any(c.verification is VerificationMethod.human for c in criteria)
-        and j.confidence >= a.auto_release_threshold
+        and v.met
+        and not any(c.verification is VerificationMethod.human for c in m.criteria)
+        and v.model_confidence >= a.auto_release_threshold
     ):
         return "auto_release"
     return "needs_review"
@@ -164,7 +139,7 @@ def _gate(m: Milestone, criteria: list[Criterion], j: Judgment) -> str:
 
 def _settle_if_possible(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: datetime) -> None:
     a = m.agreement
-    if a.settlement_mode == SettlementMode.escrow_release.value and m.paypal_authorization_id is None:
+    if a.settlement_mode == SettlementMode.escrow_release and m.paypal_authorization_id is None:
         record_audit(session, a.id, actor, "release_waiting", milestone_id=m.id, detail={"reason": "not funded"})
         session.commit()
         return
@@ -181,7 +156,7 @@ def _settle_if_possible(session: Session, gw: PayPalGateway, m: Milestone, actor
 def submit_evidence(
     session: Session,
     m: Milestone,
-    ev: EvidenceIn,
+    ev: EvidenceCreate,
     *,
     source: str,
     actor: str,
@@ -190,7 +165,7 @@ def submit_evidence(
     file_id: str | None = None,
 ) -> tuple[Evidence, bool]:
     """Store evidence. Returns (row, created). Re-submitting identical evidence is a no-op."""
-    if m.agreement.status != AgreementStatus.active.value:
+    if m.agreement.status != AgreementStatus.active:
         raise VerificationError(f"agreement is {m.agreement.status}; evidence is accepted once it is active")
     if m.status not in ACCEPTS_EVIDENCE:
         raise VerificationError(f"tranche is {m.status}; it no longer accepts evidence")
@@ -201,22 +176,20 @@ def submit_evidence(
     )
     if existing:
         return existing, False
-    row = Evidence(
-        milestone_id=m.id,
-        submitted_by=actor,
-        source=source,
-        external_ref=external,
-        pinned_ref=pinned,
-        evidence_type=ev.evidence_type.value,
-        title=ev.title,
-        content=ev.content,
-        dated=ev.dated,
-        artifact_uris=ev.artifact_uris,
-        check_results=check_results or {},
-        file_id=file_id,
+    row = Evidence.model_validate(
+        ev,
+        update={
+            "milestone_id": m.id,
+            "submitted_by": actor,
+            "source": source,
+            "external_ref": external,
+            "pinned_ref": pinned,
+            "check_results": check_results or {},
+            "file_id": file_id,
+        },
     )
     m.evidence.append(row)
-    if m.status in (MilestoneStatus.pending.value, MilestoneStatus.funded.value, MilestoneStatus.needs_review.value):
+    if m.status in (MilestoneStatus.pending, MilestoneStatus.funded, MilestoneStatus.needs_review):
         settlement.transition(
             session,
             m,
@@ -248,7 +221,7 @@ def run_verification(
     """
     for _ in range(MAX_RERUNS):
         m = session.get(Milestone, milestone_id)
-        if m is None or m.status != MilestoneStatus.evidence_received.value:
+        if m is None or m.status != MilestoneStatus.evidence_received:
             return None
         snapshot = {e.id for e in m.evidence}
         settlement.transition(
@@ -256,10 +229,9 @@ def run_verification(
         )
         session.commit()
 
-        criteria = criteria_of(m)
         try:
             rows = [e for e in m.evidence if e.id in snapshot]
-            j = judge(ai, criteria, [to_event(e) for e in rows], attachments_of(rows))
+            verdict = judge(ai, m.criteria, rows, attachments_of(rows))
         except AIError as e:
             settlement.transition(
                 session, m, MilestoneStatus.evidence_received, actor, "verification_failed", error=str(e)[:500]
@@ -273,20 +245,10 @@ def run_verification(
             session.commit()
             continue
 
-        gate = _gate(m, criteria, j)
-        verdict = Verdict(
-            milestone_id=m.id,
-            criteria_hash=m.agreement.criteria_hash or "",
-            evidence_ids=sorted(snapshot),
-            criteria_results=[r.model_dump(mode="json") for r in j.results],
-            met=j.met,
-            model_confidence=j.confidence,
-            rationale=j.rationale,
-            model=j.model,
-            prompt_version=j.prompt_version,
-            is_precheck=False,
-            gate=gate,
-        )
+        verdict.milestone_id = m.id
+        verdict.criteria_hash = m.agreement.criteria_hash or ""
+        verdict.evidence_ids = sorted(snapshot)
+        verdict.gate = gate = _gate(m, verdict)
         session.add(verdict)
         session.flush()
         if gate == "auto_release":
@@ -297,7 +259,7 @@ def run_verification(
                 "system:gate",
                 "auto_verified",
                 verdict_id=verdict.id,
-                confidence=j.confidence,
+                confidence=verdict.model_confidence,
             )
             session.commit()
             _settle_if_possible(session, gw, m, "system:gate", now)
@@ -309,8 +271,8 @@ def run_verification(
                 "system:gate",
                 "sent_to_review",
                 verdict_id=verdict.id,
-                met=j.met,
-                confidence=j.confidence,
+                met=verdict.met,
+                confidence=verdict.model_confidence,
             )
             session.commit()
         return verdict
@@ -325,46 +287,37 @@ def verify_in_background(
         run_verification(session, ai, gw, milestone_id, actor, utcnow())
 
 
-def precheck(session: Session, ai: AIRuntime, m: Milestone, items: list[EvidenceIn], actor: str) -> Verdict:
+def precheck(session: Session, ai: AIRuntime, m: Milestone, items: list[EvidenceCreate], actor: str) -> Verdict:
     """Run checks and the verifier on draft evidence. Records the result; never changes state."""
-    if m.agreement.status != AgreementStatus.active.value:
+    if m.agreement.status != AgreementStatus.active:
         raise VerificationError("pre-check is available once the agreement is active")
+    # Transient rows: never added to the session, so nothing is stored.
     drafts = [
-        EvidenceEvent(
-            id=f"draft-{i}",
-            milestone_id=m.id,
-            source="precheck",
-            external_ref=f"draft-{i}",
-            pinned_ref="draft",
-            evidence_type=ev.evidence_type,
-            title=ev.title,
-            content=ev.content,
-            dated=ev.dated,
-            artifact_uris=ev.artifact_uris,
-            received_at=utcnow(),
+        Evidence.model_validate(
+            ev,
+            update={
+                "id": f"draft-{i}",
+                "milestone_id": m.id,
+                "submitted_by": actor,
+                "source": "precheck",
+                "external_ref": f"draft-{i}",
+                "pinned_ref": "draft",
+                "received_at": utcnow(),
+            },
         )
         for i, ev in enumerate(items, start=1)
     ]
-    stored = [to_event(e) for e in m.evidence]
+    stored = list(m.evidence)
     try:
-        j = judge(ai, criteria_of(m), stored + drafts, attachments_of(m.evidence))
+        verdict = judge(ai, m.criteria, stored + drafts, attachments_of(m.evidence))
     except AIError as e:
         raise VerificationError(str(e), 502) from e
-    verdict = Verdict(
-        milestone_id=m.id,
-        criteria_hash=m.agreement.criteria_hash or "",
-        evidence_ids=[e.id for e in stored + drafts],
-        criteria_results=[r.model_dump(mode="json") for r in j.results],
-        met=j.met,
-        model_confidence=j.confidence,
-        rationale=j.rationale,
-        model=j.model,
-        prompt_version=j.prompt_version,
-        is_precheck=True,
-        gate="precheck",
-    )
+    verdict.milestone_id = m.id
+    verdict.criteria_hash = m.agreement.criteria_hash or ""
+    verdict.evidence_ids = [e.id for e in stored + drafts]
+    verdict.is_precheck, verdict.gate = True, "precheck"
     session.add(verdict)
-    record_audit(session, m.agreement_id, actor, "precheck", milestone_id=m.id, detail={"met": j.met})
+    record_audit(session, m.agreement_id, actor, "precheck", milestone_id=m.id, detail={"met": verdict.met})
     session.commit()
     return verdict
 
@@ -385,7 +338,7 @@ def review(
     note: str | None,
     now: datetime,
 ) -> None:
-    if m.status not in (MilestoneStatus.needs_review.value, MilestoneStatus.disputed.value):
+    if m.status not in (MilestoneStatus.needs_review, MilestoneStatus.disputed):
         raise VerificationError(f"tranche is {m.status}; only tranches in needs_review or disputed can be reviewed")
     actor = f"party:{party.id}"
     verdict = latest_verdict(m)
@@ -396,7 +349,7 @@ def review(
         _settle_if_possible(session, gw, m, actor, now)
     else:
         back = MilestoneStatus.funded if m.paypal_authorization_id else MilestoneStatus.pending
-        unmet = [r for r in (verdict.criteria_results if verdict else []) if not r["met"]]
+        unmet = [r for r in (verdict.criteria_results if verdict else []) if not r.met]
         settlement.transition(
             session,
             m,
@@ -404,14 +357,14 @@ def review(
             actor,
             "review_rejected",
             **detail,
-            missing=[{"criterion_id": r["criterion_id"], "missing": r["missing"]} for r in unmet],
+            missing=[{"criterion_id": r.criterion_id, "missing": r.missing} for r in unmet],
         )
         session.commit()
 
 
 def dispute(session: Session, m: Milestone, party: Party, reason: str) -> None:
     """Payee escalates a rejection. The tranche waits in `disputed` until the payer side reviews it again."""
-    if m.status not in (MilestoneStatus.pending.value, MilestoneStatus.funded.value):
+    if m.status not in (MilestoneStatus.pending, MilestoneStatus.funded):
         raise VerificationError(f"tranche is {m.status}; only a rejected tranche can be disputed")
     last_review = session.exec(
         select(AuditEvent)

@@ -3,8 +3,9 @@ from decimal import Decimal
 
 import pytest
 
-from app.db import Milestone, utcnow
+from app.db import utcnow
 from app.integrations.paypal import MOCK_WEBHOOK_SIGNATURE, PayPalError
+from app.models import Milestone
 
 
 def h(key):
@@ -225,7 +226,7 @@ def test_return_url_is_idempotent(client, active):
     with client.app.state.sessionmaker() as s:
         from sqlmodel import func, select
 
-        from app.db import LedgerEntry
+        from app.models import LedgerEntry
 
         assert s.exec(select(func.count()).select_from(LedgerEntry).where(LedgerEntry.kind == "authorized")).one() == 1
 

@@ -14,14 +14,14 @@ from collections.abc import Sequence
 from decimal import Decimal
 
 from app.domain.checks import CHECKS
-from app.domain.models import (
-    AgreementDraft,
+from app.models import (
+    AgreementBase,
     Comparator,
     Criterion,
     LintIssue,
     LintLevel,
     LintReport,
-    MilestoneDraft,
+    MilestoneBase,
     VerificationMethod,
 )
 
@@ -108,7 +108,7 @@ def _issue(level: LintLevel, code: str, path: str, message: str, suggestion: str
     return LintIssue(level=level, code=code, path=path, message=message, suggestion=suggestion)
 
 
-def lint_criterion(c: Criterion, path: str, milestone: MilestoneDraft) -> list[LintIssue]:
+def lint_criterion(c: Criterion, path: str, milestone: MilestoneBase) -> list[LintIssue]:
     E, W = LintLevel.error, LintLevel.warning
     issues: list[LintIssue] = []
     statement = c.statement.strip()
@@ -145,7 +145,7 @@ def lint_criterion(c: Criterion, path: str, milestone: MilestoneDraft) -> list[L
                 f"{path}.statement",
                 f"'{term}' can't be counted or checked by a reviewer.",
                 f"Replace '{term}' with the measure itself"
-                f" ({c.measure.metric} {c.measure.comparator.value.replace('_', ' ')}"
+                f" ({c.measure.metric} {c.measure.comparator.replace('_', ' ')}"
                 f"{' ' + str(c.measure.target) if c.measure.target is not None else ''}"
                 f"{' ' + c.measure.unit if c.measure.unit else ''}).",
             )
@@ -202,8 +202,8 @@ def lint_criterion(c: Criterion, path: str, milestone: MilestoneDraft) -> list[L
                         E,
                         "check_evidence_mismatch",
                         f"{path}.evidence_required",
-                        f"Check '{c.check_id}' can't run on {', '.join(e.value for e in c.evidence_required)}.",
-                        f"Require one of: {', '.join(sorted(e.value for e in spec.evidence))}.",
+                        f"Check '{c.check_id}' can't run on {', '.join(e for e in c.evidence_required)}.",
+                        f"Require one of: {', '.join(sorted(e for e in spec.evidence))}.",
                     )
                 )
             if c.measure.comparator not in spec.comparators:
@@ -212,8 +212,8 @@ def lint_criterion(c: Criterion, path: str, milestone: MilestoneDraft) -> list[L
                         E,
                         "check_comparator_mismatch",
                         f"{path}.measure.comparator",
-                        f"Check '{c.check_id}' can't evaluate '{c.measure.comparator.value}'.",
-                        f"Use one of: {', '.join(sorted(x.value for x in spec.comparators))}.",
+                        f"Check '{c.check_id}' can't evaluate '{c.measure.comparator}'.",
+                        f"Use one of: {', '.join(sorted(x for x in spec.comparators))}.",
                     )
                 )
     elif c.check_id:
@@ -222,7 +222,7 @@ def lint_criterion(c: Criterion, path: str, milestone: MilestoneDraft) -> list[L
                 W,
                 "check_ignored",
                 f"{path}.check_id",
-                f"check_id is set but verification is '{c.verification.value}', so the check won't run.",
+                f"check_id is set but verification is '{c.verification}', so the check won't run.",
                 "Set verification to 'check' or remove check_id.",
             )
         )
@@ -262,11 +262,12 @@ def lint_criterion(c: Criterion, path: str, milestone: MilestoneDraft) -> list[L
     return issues
 
 
-def lint_agreement(draft: AgreementDraft) -> LintReport:
-    return lint_tranches(draft.total_amount, draft.milestones)
+def lint_agreement(agreement: AgreementBase) -> LintReport:
+    """Works on a request body (AgreementCreate) or a stored Agreement: both carry total_amount and milestones."""
+    return lint_tranches(agreement.total_amount, agreement.milestones)  # type: ignore[attr-defined]
 
 
-def lint_tranches(total_amount: Decimal, milestones: Sequence[MilestoneDraft]) -> LintReport:
+def lint_tranches(total_amount: Decimal, milestones: Sequence[MilestoneBase]) -> LintReport:
     """Lint tranches on their own, e.g. extraction output before parties are known."""
     E, W = LintLevel.error, LintLevel.warning
     issues: list[LintIssue] = []
@@ -315,7 +316,7 @@ def lint_tranches(total_amount: Decimal, milestones: Sequence[MilestoneDraft]) -
     return LintReport(ok=not any(i.level is LintLevel.error for i in issues), issues=issues)
 
 
-def assign_criterion_ids(milestones: Sequence[MilestoneDraft]) -> None:
+def assign_criterion_ids(milestones: Sequence[MilestoneBase]) -> None:
     """Give every criterion without an id the next free 'cN' within its milestone."""
     for m in milestones:
         used = {c.id for c in m.criteria if c.id}
@@ -329,11 +330,12 @@ def assign_criterion_ids(milestones: Sequence[MilestoneDraft]) -> None:
             used.add(c.id)
 
 
-def criteria_hash(milestones: Sequence[MilestoneDraft]) -> str:
-    """Hash of everything a party signs off on: tranche order, amounts, dates and criteria."""
+def criteria_hash(milestones: Sequence[MilestoneBase]) -> str:
+    """Hash of everything a party signs off on: tranche order and MilestoneBase's fields (title, amount, due date,
+    criteria). Works on request bodies and stored rows alike, since both are MilestoneBase."""
     payload = []
     for m in milestones:
-        data = m.model_dump(mode="json")
+        data = MilestoneBase.model_validate(m).model_dump(mode="json")
         data["amount"] = f"{m.amount:.2f}"  # '10000' and '10000.00' (as read back from the DB) must hash the same
         payload.append(data)
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))

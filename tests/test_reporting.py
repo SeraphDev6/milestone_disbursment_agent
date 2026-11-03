@@ -9,8 +9,9 @@ import pytest
 from pypdf import PdfReader
 from sqlmodel import select
 
-from app.db import OutboxMessage, Settlement, utcnow
+from app.db import utcnow
 from app.integrations.paypal import MOCK_WEBHOOK_SIGNATURE, PayPalError
+from app.models import OutboxMessage, Settlement
 from app.services.outbound import MAX_ATTEMPTS, DestinationError, check_destination, deliver_due
 from app.services.settlement import expire_stale_invoices
 from tests.test_verification import BUDGET, SIGN_IN, create_active, h, status_of, submit

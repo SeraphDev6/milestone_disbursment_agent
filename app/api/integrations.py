@@ -2,18 +2,27 @@
 
 import json
 import secrets
-from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, Response, status
-from pydantic import BaseModel, Field
-from sqlmodel import select
+from sqlmodel import Field, SQLModel, select
 
 from app.api.deps import PartyDep, SessionDep, require_role
 from app.config import Mode
-from app.db import Integration, Milestone, Subscription, WebhookEvent, record_audit
-from app.domain.models import AgreementStatus, MilestoneStatus, Role
+from app.db import record_audit
 from app.integrations import github
+from app.models import (
+    AgreementStatus,
+    Integration,
+    Milestone,
+    MilestoneStatus,
+    Role,
+    Subscription,
+    SubscriptionCreate,
+    SubscriptionCreated,
+    SubscriptionRead,
+    WebhookEvent,
+)
 from app.services import verification
 from app.services.outbound import DestinationError, check_destination
 
@@ -23,17 +32,17 @@ router = APIRouter()
 # --- GitHub ----------------------------------------------------------------------------
 
 
-class GitHubRegistration(BaseModel):
+class GitHubRegistration(SQLModel):
     repo: str = Field(..., description="Repository as 'owner/name'.")
 
 
-class MilestoneLabel(BaseModel):
+class MilestoneLabel(SQLModel):
     milestone_id: str
     title: str
     label: str = Field(..., description="Add this label to a PR so its merge counts as evidence for the milestone.")
 
 
-class GitHubIntegration(BaseModel):
+class GitHubIntegration(SQLModel):
     integration_id: str
     repo: str
     webhook_url: str = Field(..., description="Repo Settings > Webhooks > Payload URL.")
@@ -53,7 +62,7 @@ def register_github(
 ) -> GitHubIntegration:
     require_role(party, Role.payee)
     a = party.agreement
-    if a.status in (AgreementStatus.cancelled.value, AgreementStatus.completed.value):
+    if a.status in (AgreementStatus.cancelled, AgreementStatus.completed):
         raise HTTPException(status.HTTP_409_CONFLICT, f"agreement is {a.status}")
     if not github.valid_repo(body.repo):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "repo must look like 'owner/name'")
@@ -110,7 +119,7 @@ def _ingest_pr(state, integration_id: str, pr: github.MergedPR, milestone_ids: l
                 )
                 session.commit()
                 continue
-            if created and m.status == MilestoneStatus.evidence_received.value:
+            if created and m.status == MilestoneStatus.evidence_received:
                 to_verify.append(m.id)
     for mid in to_verify:
         verification.verify_in_background(state.sessionmaker, state.ai, state.paypal, mid, "system:verifier")
@@ -176,61 +185,32 @@ async def github_webhook(
 # --- outbound webhook subscriptions ----------------------------------------------------
 
 
-class SubscriptionIn(BaseModel):
-    url: str = Field(..., max_length=1000, description="HTTPS endpoint that receives signed JSON events.")
-    events: list[str] = Field(
-        default_factory=lambda: ["*"],
-        description="Event types (milestone.status_changed), prefixes ending in '.' (milestone.), or '*'.",
-    )
-
-
-class SubscriptionView(BaseModel):
-    id: str
-    url: str
-    events: list[str]
-    active: bool
-    created_at: datetime
-
-
-class SubscriptionCreated(SubscriptionView):
-    secret: str = Field(
-        ..., description="Shown once. Verify X-MDE-Signature with HMAC-SHA256(secret, ts + '.' + body)."
-    )
-
-
-def _sub_view(s: Subscription) -> SubscriptionView:
-    return SubscriptionView(id=s.id, url=s.url, events=s.events, active=s.active, created_at=s.created_at)
-
-
 @router.post(
     "/agreements/{agreement_id}/subscriptions", tags=["events"], summary="Subscribe a URL to this agreement's events"
 )
 def subscribe(
-    agreement_id: str, body: SubscriptionIn, party: PartyDep, session: SessionDep, request: Request
+    agreement_id: str, body: SubscriptionCreate, party: PartyDep, session: SessionDep, request: Request
 ) -> SubscriptionCreated:
     state = request.app.state
     try:
         check_destination(body.url, allow_http=state.settings.mode is Mode.mock, resolve=state.resolve)
     except DestinationError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
-    sub = Subscription(
-        agreement_id=agreement_id,
-        url=body.url,
-        events=body.events or ["*"],
-        secret=secrets.token_hex(32),
-        created_by=f"party:{party.id}",
+    sub = Subscription.model_validate(
+        body,
+        update={"agreement_id": agreement_id, "secret": secrets.token_hex(32), "created_by": f"party:{party.id}"},
     )
     session.add(sub)
     session.flush()
     record_audit(session, agreement_id, f"party:{party.id}", "subscription_created", detail={"url": body.url})
     session.commit()
-    return SubscriptionCreated(**_sub_view(sub).model_dump(), secret=sub.secret)
+    return SubscriptionCreated.model_validate(sub)
 
 
 @router.get("/agreements/{agreement_id}/subscriptions", tags=["events"], summary="Subscriptions on this agreement")
-def list_subscriptions(agreement_id: str, party: PartyDep, session: SessionDep) -> list[SubscriptionView]:
+def list_subscriptions(agreement_id: str, party: PartyDep, session: SessionDep) -> list[SubscriptionRead]:
     subs = session.exec(select(Subscription).where(Subscription.agreement_id == agreement_id)).all()
-    return [_sub_view(s) for s in subs]
+    return [SubscriptionRead.model_validate(s) for s in subs]
 
 
 @router.delete("/agreements/{agreement_id}/subscriptions/{subscription_id}", tags=["events"], status_code=204)
@@ -238,7 +218,7 @@ def unsubscribe(agreement_id: str, subscription_id: str, party: PartyDep, sessio
     sub = session.get(Subscription, subscription_id)
     if sub is None or sub.agreement_id != agreement_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "subscription not found")
-    if sub.created_by != f"party:{party.id}" and party.role != Role.payer.value:
+    if sub.created_by != f"party:{party.id}" and party.role != Role.payer:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "only its creator or the payer can remove a subscription")
     sub.active = False
     record_audit(session, agreement_id, f"party:{party.id}", "subscription_removed", detail={"url": sub.url})

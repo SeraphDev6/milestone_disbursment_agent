@@ -18,7 +18,7 @@ from typing import Protocol
 
 import httpx
 
-from app.domain.models import EvidenceIn, EvidenceType
+from app.models import EvidenceCreate, EvidenceType
 
 LABEL_PREFIX = "mde-"
 PASSING = {"success", "neutral", "skipped"}
@@ -139,7 +139,7 @@ def ci_status(api: GitHubAPI, repo: str, sha: str) -> CIStatus:
     return CIStatus(not pending and not failed, verdict + "\n" + "\n".join(lines))
 
 
-def build_evidence(pr: MergedPR, api: GitHubAPI) -> tuple[EvidenceIn, dict[str, bool]]:
+def build_evidence(pr: MergedPR, api: GitHubAPI) -> tuple[EvidenceCreate, dict[str, bool]]:
     ci = ci_status(api, pr.repo, pr.head_sha)
     try:
         files = api.pr_files(pr.repo, pr.number)
@@ -156,7 +156,7 @@ def build_evidence(pr: MergedPR, api: GitHubAPI) -> tuple[EvidenceIn, dict[str, 
         f"CI on head commit (checked by the engine): {ci.summary}\n\n{files_text}\n\n"
         f"PR description (written by the payee, not verified):\n{pr.body[:20_000]}"
     )
-    evidence = EvidenceIn(
+    evidence = EvidenceCreate(
         evidence_type=EvidenceType.code_change,
         title=f"PR #{pr.number}: {pr.title}"[:200],
         content=content,

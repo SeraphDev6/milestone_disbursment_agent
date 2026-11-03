@@ -28,7 +28,7 @@ from pydantic_ai.settings import ModelSettings
 
 from app.domain.checks import CHECKS
 from app.domain.criteria import DEFERRED_PHRASES, VAGUE_TERMS
-from app.domain.models import Criterion, EvidenceEvent
+from app.models import Criterion, Evidence
 
 CLAUDE_MODEL = "claude-opus-5-5"
 EXTRACT_PROMPT_VERSION = "extract-v1"
@@ -100,8 +100,8 @@ class VerifierOutput(BaseModel):
 
 def _checks_table() -> str:
     return "\n".join(
-        f"- {name}: {spec.description} Evidence: {', '.join(sorted(e.value for e in spec.evidence))}. "
-        f"Comparators: {', '.join(sorted(c.value for c in spec.comparators))}."
+        f"- {name}: {spec.description} Evidence: {', '.join(sorted(e for e in spec.evidence))}. "
+        f"Comparators: {', '.join(sorted(c for c in spec.comparators))}."
         for name, spec in CHECKS.items()
     )
 
@@ -178,7 +178,7 @@ def _criteria_payload(criteria: list[Criterion]) -> str:
                 "criterion_id": c.id,
                 "statement": c.statement,
                 "measure": c.measure.model_dump(mode="json"),
-                "evidence_required": [e.value for e in c.evidence_required],
+                "evidence_required": [e for e in c.evidence_required],
                 "evidence_description": c.evidence_description,
             }
             for c in criteria
@@ -187,7 +187,7 @@ def _criteria_payload(criteria: list[Criterion]) -> str:
     )
 
 
-def verification_prompt(criteria: list[Criterion], evidence: list[EvidenceEvent]) -> tuple[str, dict[str, str]]:
+def verification_prompt(criteria: list[Criterion], evidence: list[Evidence]) -> tuple[str, dict[str, str]]:
     """Build the user prompt; evidence gets short aliases (e1, e2, ...) mapped back to real ids."""
     aliases = {f"e{i}": e.id for i, e in enumerate(evidence, start=1)}
     blocks = []
@@ -195,7 +195,7 @@ def verification_prompt(criteria: list[Criterion], evidence: list[EvidenceEvent]
         dated = f' dated="{e.dated}"' if e.dated else ""
         title = _escape(e.title).replace('"', "'")
         blocks.append(
-            f'<evidence id="{alias}" type="{e.evidence_type.value}" title="{title}"{dated}>\n'
+            f'<evidence id="{alias}" type="{e.evidence_type}" title="{title}"{dated}>\n'
             f"{_escape(e.content)}\n</evidence>"
         )
     prompt = f"<criteria>\n{_criteria_payload(criteria)}\n</criteria>\n\n" + "\n\n".join(blocks)
@@ -225,7 +225,7 @@ class AIRuntime:
     def verify(
         self,
         criteria: list[Criterion],
-        evidence: list[EvidenceEvent],
+        evidence: list[Evidence],
         attachments: dict[str, tuple[bytes, str]] | None = None,
     ) -> tuple[VerifierOutput, dict[str, str]]:
         """attachments maps evidence id -> (original bytes, media type), sent alongside the text."""

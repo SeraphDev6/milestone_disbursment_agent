@@ -1,50 +1,22 @@
 """The record: event logs and the compliance packet."""
 
 import json
-from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Response
-from pydantic import BaseModel
 from sqlmodel import select
 
 from app.api.deps import MilestonePartyDep, PartyDep, SessionDep, require_role
-from app.db import AuditEvent
-from app.domain.models import Role
+from app.models import AuditEvent, AuditEventRead, Role
 from app.services.packet import build_packet, render_pdf
 
 router = APIRouter(tags=["audit"])
 
 
-class AuditEntry(BaseModel):
-    at: datetime
-    actor: str
-    action: str
-    milestone_id: str | None
-    from_status: str | None
-    to_status: str | None
-    detail: dict
-
-
-def _entries(rows) -> list[AuditEntry]:
-    return [
-        AuditEntry(
-            at=e.at,
-            actor=e.actor,
-            action=e.action,
-            milestone_id=e.milestone_id,
-            from_status=e.from_status,
-            to_status=e.to_status,
-            detail=e.detail,
-        )
-        for e in rows
-    ]
-
-
 @router.get("/agreements/{agreement_id}/audit", summary="Full event log for an agreement")
-def agreement_audit(agreement_id: str, party: PartyDep, session: SessionDep) -> list[AuditEntry]:
+def agreement_audit(agreement_id: str, party: PartyDep, session: SessionDep) -> list[AuditEventRead]:
     query = select(AuditEvent).where(AuditEvent.agreement_id == agreement_id).order_by(AuditEvent.at)
-    return _entries(session.exec(query).all())
+    return [AuditEventRead.model_validate(e) for e in session.exec(query).all()]
 
 
 @router.get(
@@ -52,10 +24,10 @@ def agreement_audit(agreement_id: str, party: PartyDep, session: SessionDep) -> 
     openapi_extra={"x-mcp-tool": "explain_milestone"},
     summary="Every event for one tranche: who did what, when, and why",
 )
-def milestone_audit(milestone_id: str, auth: MilestonePartyDep, session: SessionDep) -> list[AuditEntry]:
+def milestone_audit(milestone_id: str, auth: MilestonePartyDep, session: SessionDep) -> list[AuditEventRead]:
     _, m = auth
     query = select(AuditEvent).where(AuditEvent.milestone_id == m.id).order_by(AuditEvent.at)
-    return _entries(session.exec(query).all())
+    return [AuditEventRead.model_validate(e) for e in session.exec(query).all()]
 
 
 @router.get(

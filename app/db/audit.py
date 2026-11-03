@@ -2,8 +2,8 @@
 
 from sqlmodel import Session, col, select
 
-from app.db.models import AuditEvent, OutboxMessage, Subscription
 from app.db.session import new_id, utcnow
+from app.models import AuditEvent, OutboxMessage, Subscription
 
 
 def event_type_for(action: str, milestone_id: str | None, to_status: str | None) -> str:

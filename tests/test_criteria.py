@@ -4,11 +4,11 @@ import pytest
 from pydantic import ValidationError
 
 from app.domain.criteria import assign_criterion_ids, criteria_hash, lint_agreement
-from app.domain.models import AgreementDraft, Measure
+from app.models import AgreementCreate, Measure
 
 
 def codes(draft: dict, level: str | None = None) -> set[str]:
-    report = lint_agreement(AgreementDraft.model_validate(draft))
+    report = lint_agreement(AgreementCreate.model_validate(draft))
     return {i.code for i in report.issues if level is None or i.level.value == level}
 
 
@@ -17,7 +17,7 @@ def first_criterion(draft: dict) -> dict:
 
 
 def test_good_draft_is_clean(draft):
-    report = lint_agreement(AgreementDraft.model_validate(draft))
+    report = lint_agreement(AgreementCreate.model_validate(draft))
     assert report.ok, report.issues
 
 
@@ -84,11 +84,11 @@ def test_measure_target_must_fit_comparator():
 def test_criterion_without_measure_is_invalid(draft):
     del first_criterion(draft)["measure"]
     with pytest.raises(ValidationError):
-        AgreementDraft.model_validate(draft)
+        AgreementCreate.model_validate(draft)
 
 
 def test_ids_assigned_and_hash_stable(draft):
-    a = AgreementDraft.model_validate(draft)
+    a = AgreementCreate.model_validate(draft)
     assign_criterion_ids(a.milestones)
     assert [c.id for c in a.milestones[0].criteria] == ["c1", "c2"]
     h1 = criteria_hash(a.milestones)

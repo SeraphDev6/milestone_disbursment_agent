@@ -2,28 +2,29 @@
 
 from decimal import Decimal, InvalidOperation
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import ValidationError
+from sqlmodel import Field, SQLModel
 
 from app.ai.agents import AIRuntime, ExtractionOutput
 from app.domain.criteria import assign_criterion_ids, lint_tranches
-from app.domain.models import Criterion, LintReport, MilestoneDraft
+from app.models import Criterion, LintReport, MilestoneCreate
 
 
-class Provenance(BaseModel):
+class Provenance(SQLModel):
     path: str = Field(..., description="Where the criterion landed, e.g. 'milestones[0].criteria[1]'.")
     source_quote: str = Field(..., description="Agreement text it was drawn from.")
 
 
-class ExtractionProblem(BaseModel):
+class ExtractionProblem(SQLModel):
     path: str
     message: str
 
 
-class ExtractionResult(BaseModel):
+class ExtractionResult(SQLModel):
     title: str
     total_amount: Decimal | None
     currency: str
-    milestones: list[MilestoneDraft] = Field(..., description="Proposed tranches; edit, then POST /agreements.")
+    milestones: list[MilestoneCreate] = Field(..., description="Proposed tranches; edit, then POST /agreements.")
     open_questions: list[str] = Field(..., description="Ambiguities a person must resolve before confirming.")
     problems: list[ExtractionProblem] = Field(..., description="Proposals that failed validation and were left out.")
     provenance: list[Provenance]
@@ -43,7 +44,7 @@ def _decimal(text: str | None) -> Decimal | None:
 def convert(out: ExtractionOutput, model_name: str) -> ExtractionResult:
     problems: list[ExtractionProblem] = []
     provenance: list[Provenance] = []
-    milestones: list[MilestoneDraft] = []
+    milestones: list[MilestoneCreate] = []
 
     for mi, xm in enumerate(out.milestones):
         criteria: list[Criterion] = []
@@ -74,7 +75,7 @@ def convert(out: ExtractionOutput, model_name: str) -> ExtractionResult:
                 problems.append(ExtractionProblem(path=path, message=f"'{xc.statement}': {e.errors()[0]['msg']}"))
         try:
             milestones.append(
-                MilestoneDraft.model_validate(
+                MilestoneCreate.model_validate(
                     {"title": xm.title, "amount": _decimal(xm.amount), "due_date": xm.due_date, "criteria": criteria}
                 )
             )

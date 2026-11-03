@@ -4,29 +4,20 @@ import json
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from sqlmodel import Field, SQLModel
 
 from app.api.deps import MilestonePartyDep, SessionDep, gateway, require_role
-from app.api.views import AgreementView, agreement_view, html_page
+from app.api.views import agreement_read, html_page
 from app.db import utcnow
-from app.domain.models import MilestoneStatus, Role, SettlementStatus
+from app.models import AgreementRead, Role, SettlementRead
 from app.services import ServiceError, settlement
 
 router = APIRouter(tags=["settlement"])
 
 
-class FundingStarted(BaseModel):
+class FundingStarted(SQLModel):
     order_id: str
     approve_url: str = Field(..., description="Send the payer here to approve the hold in PayPal.")
-
-
-class SettlementView(BaseModel):
-    id: str
-    attempt: int
-    idempotency_key: str
-    status: SettlementStatus
-    paypal_ref: str | None
-    milestone_status: MilestoneStatus
 
 
 @router.post("/milestones/{milestone_id}/fund", summary="Payer starts a PayPal hold for one tranche")
@@ -59,26 +50,19 @@ def paypal_cancel() -> HTMLResponse:
     "/milestones/{milestone_id}/release",
     summary="Settle a verified tranche: capture its hold or send its invoice (also resumes a failed release)",
 )
-def release(milestone_id: str, auth: MilestonePartyDep, session: SessionDep, request: Request) -> SettlementView:
+def release(milestone_id: str, auth: MilestonePartyDep, session: SessionDep, request: Request) -> SettlementRead:
     party, m = auth
     require_role(party, Role.payer, Role.approver)
     s = settlement.release(session, gateway(request), m, f"party:{party.id}", utcnow())
-    return SettlementView(
-        id=s.id,
-        attempt=s.attempt,
-        idempotency_key=s.idempotency_key,
-        status=SettlementStatus(s.status),
-        paypal_ref=s.paypal_ref,
-        milestone_status=MilestoneStatus(m.status),
-    )
+    return SettlementRead.model_validate(s, update={"milestone_status": m.status})
 
 
 @router.post("/milestones/{milestone_id}/void", summary="Payer cancels a tranche's hold before evidence arrives")
-def void(milestone_id: str, auth: MilestonePartyDep, session: SessionDep, request: Request) -> AgreementView:
+def void(milestone_id: str, auth: MilestonePartyDep, session: SessionDep, request: Request) -> AgreementRead:
     party, m = auth
     require_role(party, Role.payer)
     settlement.void(session, gateway(request), m, f"party:{party.id}")
-    return agreement_view(m.agreement)
+    return agreement_read(m.agreement)
 
 
 @router.post("/webhooks/paypal", summary="PayPal webhook intake (signature-verified, deduplicated)")

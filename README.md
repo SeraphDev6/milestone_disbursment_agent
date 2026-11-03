@@ -51,9 +51,11 @@ app/
   main.py          app factory: wires settings, PayPal, AI, GitHub, routers
   config.py        settings (env / .env)
   jobs.py          scheduled jobs: daily expiry, webhook delivery
-  api/             HTTP endpoints by resource, plus shared deps (auth, roles) and views
-  db/              SQLModel tables, sessions, audit log + webhook outbox
-  domain/          pure models, criteria lint, deterministic checks
+  models/          single source of truth: one SQLModel definition per entity (XBase -> table X, XCreate, XRead),
+                   plus enums and the value objects stored as typed JSON (Criterion, Measure, CriterionResult)
+  api/             HTTP endpoints by resource, plus shared deps (auth, roles) and response assembly
+  db/              engine, sessions, audit log + webhook outbox
+  domain/          criteria lint and deterministic checks
   ai/              Pydantic AI agents (extraction, verification) and extraction post-processing
   services/        settlement (escrow + invoice), verification and gate, outbound webhooks, compliance packet
   integrations/    PayPal gateway (mock + REST), GitHub, file uploads

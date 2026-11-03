@@ -17,16 +17,27 @@ from datetime import datetime, timedelta
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
-from app.db import LedgerEntry, Milestone, Party, Settlement, WebhookEvent, as_utc, record_audit
-from app.domain.models import AgreementStatus, MilestoneStatus, Role, SettlementMode, SettlementStatus
+from app.db import as_utc, record_audit
 from app.integrations.paypal import CreatedOrder, PayPalError, PayPalGateway
+from app.models import (
+    AgreementStatus,
+    LedgerEntry,
+    Milestone,
+    MilestoneStatus,
+    Party,
+    Role,
+    Settlement,
+    SettlementMode,
+    SettlementStatus,
+    WebhookEvent,
+)
 from app.services import ServiceError
 
 HONOR_PERIOD = timedelta(days=3)
 AUTH_VALIDITY = timedelta(days=29)
 
-NO_LIVE_HOLD_STATES = {MilestoneStatus.settling.value, MilestoneStatus.settled.value}
-RELEASABLE = {MilestoneStatus.verified.value, MilestoneStatus.settlement_failed.value}
+NO_LIVE_HOLD_STATES = {MilestoneStatus.settling, MilestoneStatus.settled}
+RELEASABLE = {MilestoneStatus.verified, MilestoneStatus.settlement_failed}
 
 
 # --- helpers ---------------------------------------------------------------------------
@@ -34,7 +45,7 @@ RELEASABLE = {MilestoneStatus.verified.value, MilestoneStatus.settlement_failed.
 
 def transition(session: Session, m: Milestone, to: MilestoneStatus, actor: str, action: str, **detail) -> None:
     previous = m.status
-    m.status = to.value
+    m.status = to
     record_audit(
         session,
         m.agreement_id,
@@ -58,7 +69,7 @@ def _ledger(session: Session, m: Milestone, kind: str, paypal_ref: str) -> None:
 
 
 def _payee(m: Milestone) -> Party:
-    return next(p for p in m.agreement.parties if p.role == Role.payee.value)
+    return next(p for p in m.agreement.parties if p.role == Role.payee)
 
 
 def _paypal_failure(e: PayPalError) -> ServiceError:
@@ -73,7 +84,7 @@ def _mark_funded(session: Session, m: Milestone, authorization_id: str, actor: s
     m.funded_at = now
     m.reauthorized_at = None
     _ledger(session, m, "authorized", authorization_id)
-    if m.status == MilestoneStatus.pending.value:
+    if m.status == MilestoneStatus.pending:
         transition(session, m, MilestoneStatus.funded, actor, "funded", authorization_id=authorization_id)
     else:
         # Re-funded after an expired hold; verification state is kept.
@@ -88,7 +99,7 @@ def _drop_hold(session: Session, m: Milestone, kind: str, actor: str) -> None:
     m.funded_at = None
     m.reauthorized_at = None
     m.paypal_order_id = None
-    if m.status == MilestoneStatus.funded.value:
+    if m.status == MilestoneStatus.funded:
         transition(session, m, MilestoneStatus.pending, actor, f"hold_{kind}", authorization_id=ref)
     else:
         _note(session, m, actor, f"hold_{kind}", authorization_id=ref)
@@ -99,9 +110,9 @@ def _drop_hold(session: Session, m: Milestone, kind: str, actor: str) -> None:
 
 def start_funding(session: Session, gw: PayPalGateway, m: Milestone, actor: str, base_url: str) -> CreatedOrder:
     a = m.agreement
-    if a.status != AgreementStatus.active.value:
+    if a.status != AgreementStatus.active:
         raise ServiceError(f"agreement is {a.status}; both parties must confirm criteria before funding")
-    if a.settlement_mode != SettlementMode.escrow_release.value:
+    if a.settlement_mode != SettlementMode.escrow_release:
         raise ServiceError("this agreement settles by invoice; there is nothing to fund")
     if m.paypal_authorization_id is not None:
         raise ServiceError("tranche already has a live hold")
@@ -147,7 +158,7 @@ def complete_funding(session: Session, gw: PayPalGateway, order_id: str, actor: 
 
 
 def void(session: Session, gw: PayPalGateway, m: Milestone, actor: str) -> None:
-    if m.status != MilestoneStatus.funded.value or m.paypal_authorization_id is None:
+    if m.status != MilestoneStatus.funded or m.paypal_authorization_id is None:
         raise ServiceError("only a funded tranche with no evidence submitted can be voided")
     try:
         gw.void_authorization(m.paypal_authorization_id, request_id=f"{m.paypal_authorization_id}-void")
@@ -193,17 +204,17 @@ def _ensure_live_hold(session: Session, gw: PayPalGateway, m: Milestone, actor: 
 def _apply_capture_status(session: Session, s: Settlement, status: str, actor: str) -> None:
     m = s.milestone
     if status == "COMPLETED":
-        if s.status == SettlementStatus.succeeded.value:
+        if s.status == SettlementStatus.succeeded:
             return
-        s.status = SettlementStatus.succeeded.value
+        s.status = SettlementStatus.succeeded
         _ledger(session, m, "captured", s.paypal_ref or "unknown")
         transition(session, m, MilestoneStatus.settled, actor, "settled", capture_id=s.paypal_ref, attempt=s.attempt)
     elif status == "PENDING":
         _note(session, m, actor, "capture_pending", capture_id=s.paypal_ref, attempt=s.attempt)
     else:
-        if s.status == SettlementStatus.failed.value:
+        if s.status == SettlementStatus.failed:
             return
-        s.status = SettlementStatus.failed.value
+        s.status = SettlementStatus.failed
         s.error = f"capture {status}"
         transition(
             session,
@@ -219,11 +230,11 @@ def _apply_capture_status(session: Session, s: Settlement, status: str, actor: s
 
 def release(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: datetime) -> Settlement:
     """Settle a verified tranche: capture its hold (escrow) or send a PayPal invoice (invoice mode)."""
-    if m.agreement.settlement_mode == SettlementMode.invoice_on_verify.value:
+    if m.agreement.settlement_mode == SettlementMode.invoice_on_verify:
         return _release_by_invoice(session, gw, m, actor)
 
     last = m.settlements[-1] if m.settlements else None
-    if m.status == MilestoneStatus.settling.value and last and last.status == SettlementStatus.submitted.value:
+    if m.status == MilestoneStatus.settling and last and last.status == SettlementStatus.submitted:
         if last.paypal_ref:
             raise ServiceError("capture is pending at PayPal; the webhook will settle it", 409)
         s = last  # previous attempt's outcome unknown: resume with the same idempotency key
@@ -233,9 +244,9 @@ def release(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: 
         s = Settlement(
             milestone=m,
             attempt=attempt,
-            mode=SettlementMode.escrow_release.value,
+            mode=SettlementMode.escrow_release,
             idempotency_key=f"{m.id}-{attempt}",
-            status=SettlementStatus.submitted.value,
+            status=SettlementStatus.submitted,
         )
         session.add(s)
         transition(session, m, MilestoneStatus.settling, actor, "release_requested", attempt=attempt)
@@ -255,7 +266,7 @@ def release(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: 
             raise ServiceError(
                 "PayPal didn't confirm the capture; release again to resume with the same idempotency key", 502
             ) from e
-        s.status = SettlementStatus.failed.value
+        s.status = SettlementStatus.failed
         transition(
             session, m, MilestoneStatus.settlement_failed, actor, "settlement_failed", attempt=s.attempt, error=s.error
         )
@@ -274,7 +285,7 @@ INVOICE_TIMEOUT = timedelta(days=30)
 
 
 def _party(m: Milestone, role: Role) -> Party:
-    return next(p for p in m.agreement.parties if p.role == role.value)
+    return next(p for p in m.agreement.parties if p.role == role)
 
 
 def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor: str) -> Settlement:
@@ -284,7 +295,7 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor
     PayPal email and, outside a single-payee demo, the payee must grant the platform third-party access.
     """
     last = m.settlements[-1] if m.settlements else None
-    if m.status == MilestoneStatus.settling.value and last and last.status == SettlementStatus.submitted.value:
+    if m.status == MilestoneStatus.settling and last and last.status == SettlementStatus.submitted:
         if last.paypal_ref:
             raise ServiceError("the invoice is out; the tranche settles when the payer pays it", 409)
         s = last  # outcome of the previous send is unknown: resume with the same idempotency key
@@ -293,9 +304,9 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor
         s = Settlement(
             milestone=m,
             attempt=attempt,
-            mode=SettlementMode.invoice_on_verify.value,
+            mode=SettlementMode.invoice_on_verify,
             idempotency_key=f"{m.id}-{attempt}",
-            status=SettlementStatus.submitted.value,
+            status=SettlementStatus.submitted,
         )
         session.add(s)
         transition(session, m, MilestoneStatus.settling, actor, "invoice_requested", attempt=attempt)
@@ -324,7 +335,7 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor
             raise ServiceError(
                 "PayPal didn't confirm the invoice; release again to resume with the same key", 502
             ) from e
-        s.status = SettlementStatus.failed.value
+        s.status = SettlementStatus.failed
         transition(
             session, m, MilestoneStatus.settlement_failed, actor, "settlement_failed", attempt=s.attempt, error=s.error
         )
@@ -340,14 +351,14 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor
 
 def _close_invoice(session: Session, s: Settlement, paid: bool, actor: str, status: str = "") -> str:
     m = s.milestone
-    if s.status != SettlementStatus.submitted.value:
+    if s.status != SettlementStatus.submitted:
         return "ignored: invoice already closed"
     if paid:
-        s.status = SettlementStatus.succeeded.value
+        s.status = SettlementStatus.succeeded
         _ledger(session, m, "paid", s.paypal_ref or "unknown")
         transition(session, m, MilestoneStatus.settled, actor, "settled", invoice_id=s.paypal_ref, attempt=s.attempt)
         return "invoice paid"
-    s.status = status or SettlementStatus.failed.value
+    s.status = status or SettlementStatus.failed
     _ledger(session, m, "invoice_cancelled", s.paypal_ref or "unknown")
     transition(
         session,
@@ -372,8 +383,8 @@ def expire_stale_invoices(
     count = 0
     stale = session.exec(
         select(Settlement).where(
-            Settlement.mode == SettlementMode.invoice_on_verify.value,
-            Settlement.status == SettlementStatus.submitted.value,
+            Settlement.mode == SettlementMode.invoice_on_verify,
+            Settlement.status == SettlementStatus.submitted,
             col(Settlement.paypal_ref).is_not(None),
         )
     ).all()
@@ -385,7 +396,7 @@ def expire_stale_invoices(
         except PayPalError as e:
             if e.ambiguous:
                 continue  # try again next run
-        _close_invoice(session, s, paid=False, actor=actor, status=SettlementStatus.expired.value)
+        _close_invoice(session, s, paid=False, actor=actor, status=SettlementStatus.expired)
         count += 1
     session.commit()
     return count
@@ -430,7 +441,7 @@ def _dispatch(session: Session, event_type: str, res: dict, now: datetime) -> st
             auth_id = _related(res, "authorization_id")
             m = session.exec(select(Milestone).where(Milestone.paypal_authorization_id == auth_id)).first()
             s = m.settlements[-1] if m and m.settlements else None
-            if s is None or s.status != SettlementStatus.submitted.value:
+            if s is None or s.status != SettlementStatus.submitted:
                 return "ignored: no open settlement for this capture"
             s.paypal_ref = rid
         _apply_capture_status(session, s, CAPTURE_EVENTS[event_type], actor)
@@ -438,7 +449,7 @@ def _dispatch(session: Session, event_type: str, res: dict, now: datetime) -> st
 
     if event_type in ("INVOICING.INVOICE.PAID", "INVOICING.INVOICE.CANCELLED"):
         s = session.exec(select(Settlement).where(Settlement.paypal_ref == rid)).first()
-        if s is None or s.mode != SettlementMode.invoice_on_verify.value:
+        if s is None or s.mode != SettlementMode.invoice_on_verify:
             return "ignored: no settlement for this invoice"
         return _close_invoice(session, s, paid=event_type == "INVOICING.INVOICE.PAID", actor=actor)
 

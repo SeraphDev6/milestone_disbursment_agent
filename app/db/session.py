@@ -1,6 +1,5 @@
 """Engine, sessions and time helpers."""
 
-import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
@@ -10,13 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, create_engine
 
-
-def new_id() -> str:
-    return str(uuid.uuid4())
-
-
-def utcnow() -> datetime:
-    return datetime.now(UTC)
+from app.models.columns import new_id, utcnow  # noqa: F401  (re-exported via app.db)
 
 
 def as_utc(dt: datetime) -> datetime:

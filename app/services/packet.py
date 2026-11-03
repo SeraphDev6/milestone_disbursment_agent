@@ -16,7 +16,7 @@ from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from sqlmodel import Session, select
 
-from app.db import Agreement, AuditEvent, LedgerEntry, Milestone
+from app.models import Agreement, AuditEvent, LedgerEntry, Milestone
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -31,7 +31,7 @@ def milestone_section(session: Session, m: Milestone) -> dict:
         "amount": str(m.amount),
         "due_date": m.due_date.isoformat() if m.due_date else None,
         "status": m.status,
-        "criteria": m.criteria,
+        "criteria": [c.model_dump(mode="json") for c in m.criteria],
         "evidence": [
             {
                 "id": e.id,
@@ -59,7 +59,7 @@ def milestone_section(session: Session, m: Milestone) -> dict:
                 "model_confidence": v.model_confidence,
                 "criteria_hash": v.criteria_hash,
                 "evidence_ids": v.evidence_ids,
-                "results": v.criteria_results,
+                "results": [r.model_dump(mode="json") for r in v.criteria_results],
                 "rationale": v.rationale,
             }
             for v in m.verdicts

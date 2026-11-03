@@ -82,7 +82,7 @@ Criteria are fixed before any evidence arrives; a verdict below the agreement's 
 
 ## Data model
 
-The domain models live in [`app/domain/models.py`](../app/domain/models.py) and the database tables (SQLModel) in [`app/db/models.py`](../app/db/models.py); those files are the source of truth and this section describes them. Entities: Party, Agreement, Milestone (tranche), Criterion, EvidenceEvent, Verdict (with typed CriterionResult), Settlement, LedgerEntry, AuditEvent. Settlement mode lives on the Agreement, so push vs pull is configuration, not product. Every field uses `Field(..., description=...)` so descriptions flow into OpenAPI, MCP tool schemas and structured-output prompts. Statuses are enums, not strings.
+Every entity is defined once with SQLModel in [`app/models/`](../app/models/) and serves as database table, API input and API output (`XBase` shared fields and validation, `X` table, `XCreate`, `XRead`). Criteria and verdict results are typed value objects stored in JSON columns. That package is the source of truth; this section describes it. Entities: Party, Agreement, Milestone (tranche), Criterion, EvidenceEvent, Verdict (with typed CriterionResult), Settlement, LedgerEntry, AuditEvent. Settlement mode lives on the Agreement, so push vs pull is configuration, not product. Every field uses `Field(..., description=...)` so descriptions flow into OpenAPI, MCP tool schemas and structured-output prompts. Statuses are enums, not strings.
 
 ### Criteria: every tranche is a list of checkable conditions
 

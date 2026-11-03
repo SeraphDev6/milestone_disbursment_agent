@@ -5,61 +5,63 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
-from pydantic import BaseModel, Field
+from sqlmodel import Field, SQLModel
 from starlette.concurrency import run_in_threadpool
 
 from app.ai.agents import AIError
 from app.ai.extraction import ExtractionResult, extract
 from app.api.deps import OrgKeyDep, PartyDep, SessionDep, ai, hash_key
-from app.api.views import AgreementView, agreement_as_draft, agreement_view, milestone_drafts
-from app.db import Agreement, Milestone, Party, record_audit, utcnow
+from app.api.views import agreement_read
+from app.db import record_audit, utcnow
 from app.domain.criteria import assign_criterion_ids, criteria_hash, lint_agreement
-from app.domain.models import AgreementDraft, AgreementStatus, LintReport, MilestoneDraft, MilestoneStatus, Role
+from app.models import (
+    Agreement,
+    AgreementCreate,
+    AgreementRead,
+    AgreementStatus,
+    LintReport,
+    Milestone,
+    MilestoneCreate,
+    Party,
+    Role,
+)
 
 router = APIRouter(tags=["agreements"])
 
-EDITABLE = {AgreementStatus.draft.value, AgreementStatus.awaiting_confirmation.value}
-SIGNERS = {Role.payer.value, Role.payee.value}
+EDITABLE = {AgreementStatus.draft, AgreementStatus.awaiting_confirmation}
+SIGNERS = {Role.payer, Role.payee}
 MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
 DOCUMENT_TYPES = {"application/pdf", "text/plain", "text/markdown"}
 
 
-class PartyKey(BaseModel):
+class PartyKey(SQLModel):
     party_id: str
     role: Role
-    api_key: str = Field(..., description="Shown once. Send as X-API-Key.")
+    api_key: str = Field(description="Shown once. Send as X-API-Key.")
 
 
-class AgreementCreated(BaseModel):
-    agreement: AgreementView
+class AgreementCreated(SQLModel):
+    agreement: AgreementRead
     party_keys: list[PartyKey]
 
 
-class MilestonesUpdate(BaseModel):
-    total_amount: Decimal | None = Field(None, gt=0, decimal_places=2, description="New total, if it changes too.")
-    milestones: list[MilestoneDraft] = Field(..., min_length=1)
+class MilestonesUpdate(SQLModel):
+    total_amount: Decimal | None = Field(
+        default=None, gt=0, max_digits=14, decimal_places=2, description="New total, if it changes too."
+    )
+    milestones: list[MilestoneCreate] = Field(min_length=1)
 
 
-class ConfirmRequest(BaseModel):
-    criteria_hash: str = Field(..., description="The criteria_hash this party reviewed and agrees to.")
+class ConfirmRequest(SQLModel):
+    criteria_hash: str = Field(description="The criteria_hash this party reviewed and agrees to.")
     auto_release_enabled: bool | None = Field(
-        None, description="Payer only: allow confident verdicts to release without a human."
+        default=None, description="Payer only: allow confident verdicts to release without a human."
     )
 
 
-def milestone_rows(drafts: list[MilestoneDraft]) -> list[Milestone]:
+def milestone_rows(drafts: list[MilestoneCreate]) -> list[Milestone]:
     assign_criterion_ids(drafts)
-    return [
-        Milestone(
-            position=i,
-            title=m.title,
-            amount=m.amount,
-            due_date=m.due_date,
-            criteria=[c.model_dump(mode="json") for c in m.criteria],
-            status=MilestoneStatus.pending.value,
-        )
-        for i, m in enumerate(drafts)
-    ]
+    return [Milestone.model_validate(m, update={"position": i}) for i, m in enumerate(drafts)]
 
 
 @router.post(
@@ -85,7 +87,7 @@ async def extract_agreement(request: Request, _: OrgKeyDep, file: Annotated[Uplo
     openapi_extra={"x-mcp-tool": "lint_agreement_criteria"},
     summary="Check tranches and criteria for anything a reviewer couldn't verify",
 )
-def lint(draft: AgreementDraft) -> LintReport:
+def lint(draft: AgreementCreate) -> LintReport:
     return lint_agreement(draft)
 
 
@@ -95,23 +97,13 @@ def lint(draft: AgreementDraft) -> LintReport:
     openapi_extra={"x-mcp-tool": "create_agreement"},
     summary="Create a draft agreement; returns one API key per party",
 )
-def create_agreement(draft: AgreementDraft, session: SessionDep, _: OrgKeyDep) -> AgreementCreated:
-    row = Agreement(
-        title=draft.title,
-        total_amount=draft.total_amount,
-        currency=draft.currency,
-        settlement_mode=draft.settlement_mode.value,
-        auto_release_threshold=draft.auto_release_threshold,
-        source_document_uri=draft.source_document_uri,
-        status=AgreementStatus.draft.value,
-        milestones=milestone_rows(draft.milestones),
-    )
+def create_agreement(draft: AgreementCreate, session: SessionDep, _: OrgKeyDep) -> AgreementCreated:
+    row = Agreement.model_validate(draft.model_dump(exclude={"parties", "milestones"}))
+    row.milestones = milestone_rows(draft.milestones)
     keys: list[tuple[Party, str]] = []
     for p in draft.parties:
         key = "mde_" + secrets.token_urlsafe(32)
-        party = Party(
-            role=p.role.value, paypal_email=p.paypal_email, display_name=p.display_name, api_key_hash=hash_key(key)
-        )
+        party = Party.model_validate(p, update={"api_key_hash": hash_key(key)})
         row.parties.append(party)
         keys.append((party, key))
     session.add(row)
@@ -119,8 +111,8 @@ def create_agreement(draft: AgreementDraft, session: SessionDep, _: OrgKeyDep) -
     record_audit(session, row.id, "system", "agreement_created", to_status=row.status)
     session.commit()
     return AgreementCreated(
-        agreement=agreement_view(row),
-        party_keys=[PartyKey(party_id=p.id, role=Role(p.role), api_key=k) for p, k in keys],
+        agreement=agreement_read(row),
+        party_keys=[PartyKey(party_id=p.id, role=p.role, api_key=k) for p, k in keys],
     )
 
 
@@ -129,8 +121,8 @@ def create_agreement(draft: AgreementDraft, session: SessionDep, _: OrgKeyDep) -
     openapi_extra={"x-mcp-tool": "get_agreement_status"},
     summary="Agreement, tranches, criteria, lint and confirmation status",
 )
-def get_agreement(agreement_id: str, party: PartyDep) -> AgreementView:
-    return agreement_view(party.agreement)
+def get_agreement(agreement_id: str, party: PartyDep) -> AgreementRead:
+    return agreement_read(party.agreement)
 
 
 @router.put(
@@ -139,9 +131,9 @@ def get_agreement(agreement_id: str, party: PartyDep) -> AgreementView:
 )
 def replace_milestones(
     agreement_id: str, body: MilestonesUpdate, party: PartyDep, session: SessionDep
-) -> AgreementView:
+) -> AgreementRead:
     row = party.agreement
-    if party.role != Role.payer.value:
+    if party.role != Role.payer:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "only the payer edits tranches; the payee confirms or asks for changes"
         )
@@ -154,28 +146,28 @@ def replace_milestones(
     for p in row.parties:
         p.confirmed_criteria_hash = None
         p.confirmed_at = None
-    row.status = AgreementStatus.draft.value
+    row.status = AgreementStatus.draft
     record_audit(
         session, row.id, f"party:{party.id}", "milestones_replaced", from_status=previous, to_status=row.status
     )
     session.commit()
-    return agreement_view(row)
+    return agreement_read(row)
 
 
 @router.post(
     "/agreements/{agreement_id}/confirm",
     summary="Sign the current criteria hash; activates when payer and payee have both signed",
 )
-def confirm(agreement_id: str, body: ConfirmRequest, party: PartyDep, session: SessionDep) -> AgreementView:
+def confirm(agreement_id: str, body: ConfirmRequest, party: PartyDep, session: SessionDep) -> AgreementRead:
     row = party.agreement
     if party.role not in SIGNERS:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "only the payer and payee confirm criteria")
     if row.status not in EDITABLE:
         raise HTTPException(status.HTTP_409_CONFLICT, f"agreement is already {row.status}")
-    if body.auto_release_enabled is not None and party.role != Role.payer.value:
+    if body.auto_release_enabled is not None and party.role != Role.payer:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "only the payer can turn on auto-release")
 
-    report = lint_agreement(agreement_as_draft(row))
+    report = lint_agreement(row)
     if not report.ok:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -184,7 +176,7 @@ def confirm(agreement_id: str, body: ConfirmRequest, party: PartyDep, session: S
                 "lint": report.model_dump(mode="json"),
             },
         )
-    current = criteria_hash(milestone_drafts(row))
+    current = criteria_hash(row.milestones)
     if body.criteria_hash != current:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -206,11 +198,11 @@ def confirm(agreement_id: str, body: ConfirmRequest, party: PartyDep, session: S
 
     signers = [p for p in row.parties if p.role in SIGNERS]
     if all(p.confirmed_criteria_hash == current for p in signers):
-        row.status = AgreementStatus.active.value
+        row.status = AgreementStatus.active
         row.criteria_hash = current
     else:
-        row.status = AgreementStatus.awaiting_confirmation.value
+        row.status = AgreementStatus.awaiting_confirmation
     if row.status != previous:
         record_audit(session, row.id, "system", "status_changed", from_status=previous, to_status=row.status)
     session.commit()
-    return agreement_view(row)
+    return agreement_read(row)

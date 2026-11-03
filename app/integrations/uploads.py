@@ -15,9 +15,9 @@ from openpyxl import load_workbook
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
-from app.domain.models import EvidenceIn, EvidenceType
+from app.models import EvidenceCreate, EvidenceType
 
-MAX_CONTENT_CHARS = 200_000  # EvidenceIn limit; longer text is cut with an explicit marker, original kept
+MAX_CONTENT_CHARS = 200_000  # EvidenceCreate limit; longer text is cut with an explicit marker, original kept
 IMAGE_TYPES = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -34,7 +34,7 @@ class UploadError(ValueError):
 
 @dataclass
 class ParsedUpload:
-    evidence: EvidenceIn
+    evidence: EvidenceCreate
     data: bytes  # original bytes, stored and linked to the evidence
     media_type: str
     sha256: str
@@ -92,7 +92,7 @@ def parse_upload(filename: str, data: bytes, note: str | None, dated: date | Non
     digest = hashlib.sha256(data).hexdigest()
 
     def item(kind: EvidenceType, title: str, text: str, media_type: str, when: date | None) -> ParsedUpload:
-        ev = EvidenceIn(
+        ev = EvidenceCreate(
             evidence_type=kind,
             title=title[:200],
             content=_with_note(_fit(text), note),

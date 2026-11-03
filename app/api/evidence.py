@@ -1,17 +1,16 @@
 """Evidence in (API and file uploads), verification, review and disputes."""
 
-from datetime import date, datetime
+from datetime import date
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, Response, UploadFile, status
-from pydantic import BaseModel, Field
-from sqlmodel import select
+from sqlmodel import Field, SQLModel, select
 
 from app.api.deps import EvidencePartyDep, MilestonePartyDep, SessionDep, ai, gateway, require_role
-from app.api.views import EvidenceAccepted, VerdictView, verdict_view
-from app.db import StoredFile, utcnow
-from app.domain.models import CriterionResult, EvidenceIn, EvidenceType, MilestoneStatus, Role
+from app.api.views import EvidenceAccepted
+from app.db import utcnow
 from app.integrations.uploads import UploadError, parse_upload
+from app.models import CriterionResult, EvidenceCreate, EvidenceRead, MilestoneStatus, Role, StoredFile, VerdictRead
 from app.services import verification
 from app.services.packet import milestone_section
 
@@ -22,41 +21,28 @@ MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_REQUEST_BYTES = 25 * 1024 * 1024
 
 
-class PrecheckRequest(BaseModel):
-    evidence: list[EvidenceIn] = Field(..., min_length=1, description="Draft evidence; nothing is stored.")
+class PrecheckRequest(SQLModel):
+    evidence: list[EvidenceCreate] = Field(..., min_length=1, description="Draft evidence; nothing is stored.")
 
 
-class ReviewRequest(BaseModel):
+class ReviewRequest(SQLModel):
     decision: Literal["approve", "reject"]
     note: str | None = Field(None, max_length=2000, description="Shown to the payee and kept in the audit log.")
 
 
-class ReviewOutcome(BaseModel):
+class ReviewOutcome(SQLModel):
     milestone_status: MilestoneStatus
     missing: list[CriterionResult] = Field(..., description="On rejection: the unmet criteria and what to send.")
 
 
-class DisputeIn(BaseModel):
+class DisputeIn(SQLModel):
     reason: str = Field(..., min_length=10, max_length=4000, description="Why the rejection is wrong.")
 
 
-class DisputePack(BaseModel):
+class DisputePack(SQLModel):
     milestone_status: MilestoneStatus
     reason: str
     pack: dict = Field(..., description="Criteria, evidence, verdicts, reviews, payments and audit for this tranche.")
-
-
-class EvidenceSummary(BaseModel):
-    id: str
-    source: str
-    evidence_type: EvidenceType
-    title: str
-    excerpt: str = Field(..., description="First 500 characters of the text the checks and verifier read.")
-    dated: date | None
-    check_results: dict[str, bool]
-    artifact_uris: list[str]
-    has_file: bool
-    received_at: datetime
 
 
 def _verify_later(background: BackgroundTasks, request: Request, milestone_id: str, actor: str) -> None:
@@ -77,7 +63,7 @@ def _verify_later(background: BackgroundTasks, request: Request, milestone_id: s
 )
 def submit_evidence(
     milestone_id: str,
-    body: EvidenceIn,
+    body: EvidenceCreate,
     auth: MilestonePartyDep,
     session: SessionDep,
     request: Request,
@@ -86,7 +72,7 @@ def submit_evidence(
     party, m = auth
     require_role(party, Role.payee)
     row, created = verification.submit_evidence(session, m, body, source="api", actor=f"party:{party.id}")
-    if created and m.status == MilestoneStatus.evidence_received.value:
+    if created and m.status == MilestoneStatus.evidence_received:
         _verify_later(background, request, m.id, "system:verifier")
     return EvidenceAccepted(evidence_id=row.id, duplicate=not created, milestone_status=MilestoneStatus(m.status))
 
@@ -137,7 +123,7 @@ async def upload_evidence(
             session, m, item.evidence, source="upload", actor=f"party:{party.id}", file_id=file_row.id
         )
         results.append(EvidenceAccepted(evidence_id=row.id, duplicate=not created, milestone_status=m.status))
-    if any(not r.duplicate for r in results) and m.status == MilestoneStatus.evidence_received.value:
+    if any(not r.duplicate for r in results) and m.status == MilestoneStatus.evidence_received:
         _verify_later(background, request, m.id, "system:verifier")
     return results
 
@@ -147,23 +133,9 @@ async def upload_evidence(
     openapi_extra={"x-mcp-tool": "list_evidence"},
     summary="Evidence on file for a tranche",
 )
-def list_evidence(milestone_id: str, auth: MilestonePartyDep) -> list[EvidenceSummary]:
+def list_evidence(milestone_id: str, auth: MilestonePartyDep) -> list[EvidenceRead]:
     _, m = auth
-    return [
-        EvidenceSummary(
-            id=e.id,
-            source=e.source,
-            evidence_type=EvidenceType(e.evidence_type),
-            title=e.title,
-            excerpt=e.content[:500],
-            dated=e.dated,
-            check_results=e.check_results,
-            artifact_uris=e.artifact_uris,
-            has_file=e.file_id is not None,
-            received_at=e.received_at,
-        )
-        for e in m.evidence
-    ]
+    return [EvidenceRead.from_row(e) for e in m.evidence]
 
 
 @router.get("/evidence/{evidence_id}/file", summary="Download the original uploaded file")
@@ -189,10 +161,12 @@ def download_file(evidence_id: str, auth: EvidencePartyDep) -> Response:
 )
 def precheck(
     milestone_id: str, body: PrecheckRequest, auth: MilestonePartyDep, session: SessionDep, request: Request
-) -> VerdictView:
+) -> VerdictRead:
     party, m = auth
     require_role(party, Role.payee)
-    return verdict_view(verification.precheck(session, ai(request), m, body.evidence, f"party:{party.id}"))
+    return VerdictRead.model_validate(
+        verification.precheck(session, ai(request), m, body.evidence, f"party:{party.id}")
+    )
 
 
 @router.post("/milestones/{milestone_id}/verify", summary="Re-run verification on the evidence already submitted")
@@ -200,7 +174,7 @@ def reverify(
     milestone_id: str, auth: MilestonePartyDep, request: Request, background: BackgroundTasks
 ) -> EvidenceAccepted:
     party, m = auth
-    if m.status != MilestoneStatus.evidence_received.value:
+    if m.status != MilestoneStatus.evidence_received:
         raise HTTPException(status.HTTP_409_CONFLICT, f"tranche is {m.status}; nothing to verify")
     _verify_later(background, request, m.id, f"party:{party.id}")
     return EvidenceAccepted(evidence_id="", duplicate=False, milestone_status=MilestoneStatus(m.status))
@@ -211,12 +185,12 @@ def reverify(
     openapi_extra={"x-mcp-tool": "get_verdict"},
     summary="Latest verdict for a tranche, with per-criterion results and citations",
 )
-def get_verdict(milestone_id: str, auth: MilestonePartyDep) -> VerdictView:
+def get_verdict(milestone_id: str, auth: MilestonePartyDep) -> VerdictRead:
     _, m = auth
     v = verification.latest_verdict(m)
     if v is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no verdict yet")
-    return verdict_view(v)
+    return VerdictRead.model_validate(v)
 
 
 # --- people ----------------------------------------------------------------------------
@@ -231,7 +205,7 @@ def review(
     verification.review(session, gateway(request), m, party, body.decision == "approve", body.note, utcnow())
     session.refresh(m)
     v = verification.latest_verdict(m)
-    missing = [] if body.decision == "approve" or v is None else [r for r in v.criteria_results if not r["met"]]
+    missing = [] if body.decision == "approve" or v is None else [r for r in v.criteria_results if not r.met]
     return ReviewOutcome(milestone_status=MilestoneStatus(m.status), missing=missing)
 
 

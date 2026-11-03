@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from app.domain.models import Comparator, Criterion, CriterionResult, EvidenceEvent, EvidenceType
+from app.models import Comparator, Criterion, CriterionResult, Evidence, EvidenceType
 
 
 @dataclass(frozen=True)
@@ -119,7 +119,7 @@ def _pick_column(rows: list[dict[str, str]], metric: str) -> str | None:
     return None
 
 
-def _result(c: Criterion, met: bool, observed: str | None, ev: Sequence[EvidenceEvent], missing: str | None):
+def _result(c: Criterion, met: bool, observed: str | None, ev: Sequence[Evidence], missing: str | None):
     return CriterionResult(
         criterion_id=c.id or "",
         met=met,
@@ -131,11 +131,11 @@ def _result(c: Criterion, met: bool, observed: str | None, ev: Sequence[Evidence
     )
 
 
-def evaluate(c: Criterion, evidence: Sequence[EvidenceEvent]) -> CriterionResult:
+def evaluate(c: Criterion, evidence: Sequence[Evidence]) -> CriterionResult:
     """Decide one check-verified criterion from the evidence. Deterministic."""
     spec = CHECKS[c.check_id or ""]
     usable = [e for e in evidence if e.evidence_type in spec.evidence and e.evidence_type in c.evidence_required]
-    need = f"Attach {c.evidence_description} ({', '.join(t.value for t in c.evidence_required)})."
+    need = f"Attach {c.evidence_description} ({', '.join(t for t in c.evidence_required)})."
     if not usable:
         return _result(c, False, None, [], need)
 
@@ -156,7 +156,7 @@ def evaluate(c: Criterion, evidence: Sequence[EvidenceEvent]) -> CriterionResult
         return _result(c, False, None, [], f"No attached file matches '{c.measure.metric}'. {need}")
 
     if c.check_id == "row_count":
-        best: tuple[int, EvidenceEvent] | None = None
+        best: tuple[int, Evidence] | None = None
         for e in usable:
             n = len(_rows(e.content))
             if best is None or n > best[0]:
@@ -169,7 +169,7 @@ def evaluate(c: Criterion, evidence: Sequence[EvidenceEvent]) -> CriterionResult
             met,
             f"{n} rows in '{e.title}'",
             [e],
-            f"Found {n}{unit}; need {c.measure.comparator.value.replace('_', ' ')} {target}{unit}.",
+            f"Found {n}{unit}; need {c.measure.comparator.replace('_', ' ')} {target}{unit}.",
         )
 
     if c.check_id == "sheet_total":
@@ -196,7 +196,7 @@ def evaluate(c: Criterion, evidence: Sequence[EvidenceEvent]) -> CriterionResult
                 met,
                 f"{total}{unit} (column '{col}' in '{e.title}')",
                 [e],
-                f"Total is {total}{unit}; need {c.measure.comparator.value.replace('_', ' ')} {target}{unit}.",
+                f"Total is {total}{unit}; need {c.measure.comparator.replace('_', ' ')} {target}{unit}.",
             )
         return _result(c, False, None, [], f"No sheet has a column for '{c.measure.metric}'. {need}")
 

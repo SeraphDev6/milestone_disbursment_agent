@@ -23,7 +23,8 @@ import httpx
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import Session, select
 
-from app.db import OutboxMessage, Subscription, as_utc, utcnow
+from app.db import as_utc, utcnow
+from app.models import OutboxMessage, Subscription
 
 MAX_ATTEMPTS = 10
 BATCH = 50

@@ -8,9 +8,9 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from sqlmodel import Session, select
 
 from app.ai.agents import AIRuntime
-from app.db import Evidence, Milestone, Party, get_session
-from app.domain.models import Role
+from app.db import get_session
 from app.integrations.paypal import PayPalGateway
+from app.models import Evidence, Milestone, Party, Role
 
 SessionDep = Annotated[Session, Depends(get_session)]
 ApiKey = Annotated[str | None, Header(alias="X-API-Key", description="Party API key returned at agreement creation.")]
@@ -69,8 +69,8 @@ OrgKeyDep = Annotated[None, Depends(require_org_key)]
 
 
 def require_role(party: Party, *roles: Role) -> None:
-    if party.role not in {r.value for r in roles}:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, f"only {' or '.join(r.value for r in roles)} can do this")
+    if party.role not in {r for r in roles}:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, f"only {' or '.join(r for r in roles)} can do this")
 
 
 def gateway(request: Request) -> PayPalGateway:
