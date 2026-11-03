@@ -47,8 +47,18 @@ def _recipients(session: Session, m: Milestone, party: Party) -> list[str]:
     return sorted({mb.user.email for mb in members if OrgRole(mb.role).at_least(OrgRole.member)})
 
 
-def notify_side(session: Session, m: Milestone, role: Role, subject: str, body: str, link: str | None = None) -> int:
-    """Email one side of the tranche's agreement. Returns how many addresses were written to."""
+def notify_side(
+    session: Session,
+    m: Milestone,
+    role: Role,
+    subject: str,
+    body: str,
+    link: str | None = None,
+    *,
+    tone: str = "neutral",
+) -> int:
+    """Email one side of the tranche's agreement. `tone` picks the stamp ink (settled, held, review, alert,
+    neutral), meaning what it means in the app. Returns how many addresses were written to."""
     notifier = notifier_for(session)
     if notifier is None:
         return 0
@@ -56,7 +66,7 @@ def notify_side(session: Session, m: Milestone, role: Role, subject: str, body: 
     for party in (p for p in m.agreement.parties if p.role == role):
         target = link or notifier.tranche_link(m, party.org_id or "")
         for email in _recipients(session, m, party):
-            notifier.mailer.send(email, subject, body, target)
+            notifier.mailer.send(email, subject, body, target, tone=tone)
             count += 1
     return count
 

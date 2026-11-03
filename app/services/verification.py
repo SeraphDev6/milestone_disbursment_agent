@@ -151,6 +151,7 @@ def _settle_if_possible(session: Session, gw: PayPalGateway, m: Milestone, actor
             tranche_subject(m, "Verified, waiting for funding"),
             f"'{m.title}' met all its acceptance criteria but has no PayPal hold. Fund the tranche to release "
             f"{a.currency} {m.amount} to the payee.",
+            tone="review",
         )
         return
     try:
@@ -308,7 +309,7 @@ def _notify_review_needed(session: Session, m: Milestone, verdict: Verdict) -> N
     body = f"Evidence for '{m.title}' was verified. {summary}\n\nRationale: {verdict.rationale}"
     sides = [Role.reviewer] if m.agreement.require_reviewer_approval else [Role.payer, Role.reviewer]
     for role in sides:
-        notify_side(session, m, role, subject, body)
+        notify_side(session, m, role, subject, body, tone="review")
 
 
 def mark_overdue(session: Session, now: datetime, actor: str = "system:overdue") -> int:
@@ -335,6 +336,7 @@ def mark_overdue(session: Session, now: datetime, actor: str = "system:overdue")
             subject,
             f"'{m.title}' was due on {m.due_date:%B %d, %Y} and no evidence has been submitted. Submit it when "
             "ready; the tranche still accepts evidence.",
+            tone="alert",
         )
         notify_side(
             session,
@@ -343,6 +345,7 @@ def mark_overdue(session: Session, now: datetime, actor: str = "system:overdue")
             subject,
             f"'{m.title}' was due on {m.due_date:%B %d, %Y} and the payee hasn't submitted evidence. No money "
             "has moved.",
+            tone="alert",
         )
         count += 1
     return count
@@ -439,6 +442,7 @@ def review(
             f"The evidence for '{m.title}' was not accepted."
             + (f" Note from the reviewer: {note}" if note else "")
             + f"\n\nWhat's missing:\n{missing}\n\nSubmit the missing evidence and the tranche is verified again.",
+            tone="alert",
         )
 
 

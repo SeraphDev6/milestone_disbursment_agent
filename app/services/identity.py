@@ -75,7 +75,7 @@ def request_magic_link(
         link = f"{base_url}/auth/magic-link/verify?token={raw}"
     if next_path:
         link += f"&next={quote(next_path, safe='')}"
-    mailer.send(email, "Your sign-in link", "Open this link to sign in. It expires in 15 minutes.", link)
+    mailer.send(email, "Sign in: 'Milestone Ledger'", "Open this link to sign in. It expires in 15 minutes.", link)
     return link
 
 
@@ -176,11 +176,11 @@ def invite(
     link = f"{(app_url or base_url).rstrip('/')}/invitations/accept?token={raw}"
     if agreement is not None:
         what = "receive payments under" if kind == InvitationKind.counterparty else "review"
-        subject = f"You're invited to {what} '{agreement.title}'"
+        subject = f"Invitation to {what}: '{agreement.title}'"
         record_audit(session, agreement.id, actor, "invited", detail={"email": email, "kind": kind})
     else:
-        subject = f"You're invited to join {org.name if org else 'an organization'}"
-    mailer.send(email, subject, "Sign in with this email, then accept the invitation.", link)
+        subject = f"Invitation to join: '{org.name if org else 'an organization'}'"
+    mailer.send(email, subject, "Sign in with this email, then accept the invitation.", link, tone="held")
     if commit:
         session.commit()
     return inv, link

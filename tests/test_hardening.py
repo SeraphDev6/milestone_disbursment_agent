@@ -403,8 +403,19 @@ def test_live_mode_settings():
 def test_email_senders_render_text_and_html():
     from app.integrations.email import ResendMailer, SmtpMailer, make_mailer, render
 
-    text, html = render("Hi", "Line one.\n\nLine two.", "https://x.example/y")
-    assert text.endswith("https://x.example/y\n") and "<p>Line one.</p><p>Line two.</p>" in html
+    text, html = render(
+        "Evidence rejected: 'Tranche 1' (Grant)",
+        "Line one.\n\nWhat's missing:\n- c1: sheets\n- c2: budget",
+        "https://x.example/y",
+        tone="alert",
+    )
+    assert text.endswith("https://x.example/y\n") and "- c1: sheets" in text
+    assert ">Evidence rejected</span>" in html and "Tranche 1&#x27; (Grant)</h1>" in html  # stamp and headline
+    assert "#9b2018" in html  # alert ink
+    assert "Line one." in html and "<td" in html and "c1: sheets" in html and "c2: budget" in html
+    assert "href='https://x.example/y'" in html and "<script" not in html
+    _, neutral = render("Sign in: 'Milestone Ledger'", "Open this link.", "https://x/y")
+    assert "#514c46" in neutral and ">Sign in<" in neutral
     assert isinstance(make_mailer(hermetic_settings(email_provider="resend", resend_api_key="k")), ResendMailer)
     assert isinstance(make_mailer(hermetic_settings(email_provider="smtp", smtp_host="mail.example")), SmtpMailer)
 

@@ -42,26 +42,122 @@ class SentMail:
     subject: str
     body: str
     link: str
+    tone: str = "neutral"
 
 
 class Mailer(Protocol):
-    def send(self, to: str, subject: str, body: str, link: str) -> None: ...
+    def send(self, to: str, subject: str, body: str, link: str, *, tone: str = "neutral") -> None: ...
 
 
-def render(subject: str, body: str, link: str) -> tuple[str, str]:
-    """Plain-text and HTML versions of one message. The body is plain text; the link is shown once at the end."""
+# The web app's "Ledger & Stamp" look (web/DESIGN.md), in email terms: a paper page, an ink stamp naming what
+# happened, ruled lines, one accent, 2px corners, no gradients or shadows. Colours are the Paper theme's hex
+# values from web/src/design/themes.css. Everything is inline and table-based for mail clients.
+PAPER = {
+    "page": "#f6f1e7",
+    "sheet": "#fdfbf6",
+    "sunken": "#ede6da",
+    "ink": "#2a1f17",
+    "ink2": "#5d5044",
+    "link": "#1e4b8d",
+    "hairline": "#d3c9bb",
+    "rule": "#463b32",
+    "accent": "#18417c",
+    "on_accent": "#fcfaf6",
+}
+# Stamp inks mean the same thing as in the app: settled, held (in progress), review (needs a person),
+# alert (failed or disputed), neutral.
+STAMPS = {
+    "settled": ("#0a562b", "#ddf4e1"),
+    "held": ("#194781", "#e1effd"),
+    "review": ("#794900", "#fbe9c6"),
+    "alert": ("#9b2018", "#ffe6e1"),
+    "neutral": ("#514c46", "#ede9e2"),
+}
+SERIF = "Newsreader, 'Iowan Old Style', Georgia, 'Times New Roman', serif"
+SANS = "'Atkinson Hyperlegible Next', 'Atkinson Hyperlegible', -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
+MONO = "'Atkinson Hyperlegible Mono', ui-monospace, Menlo, Consolas, monospace"
+BUTTON = "Open in Milestone Ledger"
+
+
+def split_subject(subject: str) -> tuple[str, str]:
+    """Notification subjects are "What happened: 'tranche' (agreement)"; the first part is the stamp."""
+    if ": '" in subject:
+        stamp, rest = subject.split(": '", 1)
+        return stamp, "'" + rest
+    return subject, ""
+
+
+def _paragraph_html(paragraph: str) -> str:
+    lines = [ln for ln in paragraph.split("\n") if ln.strip()]
+    items = [ln[2:].strip() for ln in lines if ln.startswith("- ")]
+    if items:
+        head = [ln for ln in lines if not ln.startswith("- ")]
+        label = (
+            f"<p style='margin:0 0 6px;font:600 15px/1.5 {SANS};color:{PAPER['ink']}'>{escape(' '.join(head))}</p>"
+            if head
+            else ""
+        )
+        rows = "".join(
+            f"<tr><td valign=top style='padding:4px 10px 4px 0;font:14px/1.5 {MONO};color:{PAPER['ink2']}'>•</td>"
+            f"<td style='padding:4px 0;font:15px/1.5 {SANS};color:{PAPER['ink']};border-bottom:1px solid "
+            f"{PAPER['hairline']}'>{escape(item)}</td></tr>"
+            for item in items
+        )
+        return f"{label}<table role=presentation cellpadding=0 cellspacing=0 style='margin:0 0 16px'>{rows}</table>"
+    return f"<p style='margin:0 0 16px;font:16px/1.55 {SANS};color:{PAPER['ink']}'>{escape(' '.join(lines))}</p>"
+
+
+def render(subject: str, body: str, link: str, tone: str = "neutral") -> tuple[str, str]:
+    """Plain-text and HTML versions of one message. The body is plain text: blank lines separate paragraphs and
+    lines starting with "- " make a list. The link, if any, becomes the button and is repeated as text."""
     text = f"{body}\n\n{link}\n" if link else f"{body}\n"
-    paragraphs = "".join(f"<p>{escape(p)}</p>" for p in body.split("\n\n") if p.strip())
+    stamp, headline = split_subject(subject)
+    ink, surface = STAMPS.get(tone, STAMPS["neutral"])
+    paragraphs = "".join(_paragraph_html(p) for p in body.split("\n\n") if p.strip())
+    headline_html = (
+        f"<h1 style='margin:14px 0 18px;font:400 26px/1.25 {SERIF};color:{PAPER['ink']}'>{escape(headline)}</h1>"
+        if headline
+        else "<div style='height:14px'></div>"
+    )
     button = (
-        f"<p><a href='{escape(link)}' style='display:inline-block;padding:.6rem 1rem;background:#1f3a5f;"
-        f"color:#fff;text-decoration:none;border-radius:4px'>Open</a></p><p style='color:#666;font-size:.85rem'>"
-        f"Or copy this link: {escape(link)}</p>"
+        f"<table role=presentation cellpadding=0 cellspacing=0 style='margin:8px 0 10px'><tr><td style='background:"
+        f"{PAPER['accent']};border-radius:2px'><a href='{escape(link)}' style='display:inline-block;padding:11px 18px;"
+        f"font:600 15px/1 {SANS};color:{PAPER['on_accent']};text-decoration:none'>{BUTTON}</a></td></tr></table>"
+        f"<p style='margin:0 0 4px;font:12px/1.5 {SANS};color:{PAPER['ink2']}'>Or copy this link:</p>"
+        f"<p style='margin:0;font:12px/1.5 {MONO};color:{PAPER['link']};word-break:break-all'>"
+        f"<a href='{escape(link)}' style='color:{PAPER['link']}'>{escape(link)}</a></p>"
         if link
         else ""
     )
     html = (
-        "<!doctype html><meta charset=utf-8><body style='font-family:system-ui;max-width:36rem;margin:2rem auto;"
-        f"line-height:1.5'><h1 style='font-size:1.2rem'>{escape(subject)}</h1>{paragraphs}{button}</body>"
+        "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width'>"
+        "<meta name=color-scheme content=light><meta name=supported-color-schemes content=light>"
+        f"<title>{escape(subject)}</title></head>"
+        f"<body style='margin:0;padding:0;background:{PAPER['page']}'>"
+        f"<div style='display:none;max-height:0;overflow:hidden;color:{PAPER['page']}'>{escape(body[:120])}</div>"
+        f"<table role=presentation width=100% cellpadding=0 cellspacing=0 style='background:{PAPER['page']}'>"
+        "<tr><td align=center style='padding:28px 12px'>"
+        f"<table role=presentation width=100% cellpadding=0 cellspacing=0 style='max-width:600px'>"
+        # masthead: wordmark over a double rule (the ledger's closing rule)
+        f"<tr><td style='padding:0 4px 10px;font:400 20px/1.2 {SERIF};color:{PAPER['ink']}'>Milestone Ledger"
+        f"<span style='font:400 12px/1.2 {SANS};color:{PAPER['ink2']};letter-spacing:.08em;text-transform:uppercase;"
+        "float:right;padding-top:5px'>Notice</span></td></tr>"
+        f"<tr><td style='border-top:1px solid {PAPER['rule']};border-bottom:3px double {PAPER['rule']};height:2px'></td></tr>"
+        # the sheet
+        f"<tr><td style='padding:16px 0 0'><table role=presentation width=100% cellpadding=0 cellspacing=0 "
+        f"style='background:{PAPER['sheet']};border:1px solid {PAPER['rule']};border-radius:2px'>"
+        f"<tr><td style='padding:24px 28px 8px'>"
+        # the stamp
+        f"<span style='display:inline-block;padding:5px 10px 4px;border:2px solid {ink};border-radius:2px;"
+        f"background:{surface};color:{ink};font:600 12px/1 {MONO};letter-spacing:.12em;text-transform:uppercase'>"
+        f"{escape(stamp)}</span>"
+        f"{headline_html}{paragraphs}{button}"
+        "</td></tr>"
+        f"<tr><td style='padding:14px 28px 18px;border-top:1px solid {PAPER['hairline']};font:12px/1.5 {SANS};"
+        f"color:{PAPER['ink2']}'>Sent by Milestone Ledger about an agreement your organization is party to. "
+        "Replies to this address aren't read; the people on the agreement are reachable from the link above."
+        "</td></tr></table></td></tr>"
+        "</table></td></tr></table></body></html>"
     )
     return text, html
 
@@ -73,8 +169,8 @@ class ConsoleMailer:
     def __post_init__(self) -> None:
         _ensure_visible()
 
-    def send(self, to: str, subject: str, body: str, link: str) -> None:
-        mail = SentMail(to=to, subject=subject, body=body, link=link)
+    def send(self, to: str, subject: str, body: str, link: str, *, tone: str = "neutral") -> None:
+        mail = SentMail(to=to, subject=subject, body=body, link=link, tone=tone)
         self.sent.append(mail)
         log.info("email to %s: %s (%s)", to, subject, link)
 
@@ -88,8 +184,8 @@ class ResendMailer:
     def __post_init__(self) -> None:
         _ensure_visible()
 
-    def send(self, to: str, subject: str, body: str, link: str) -> None:
-        text, html = render(subject, body, link)
+    def send(self, to: str, subject: str, body: str, link: str, *, tone: str = "neutral") -> None:
+        text, html = render(subject, body, link, tone)
         try:
             r = httpx.post(
                 "https://api.resend.com/emails",
@@ -117,8 +213,8 @@ class SmtpMailer:
     def __post_init__(self) -> None:
         _ensure_visible()
 
-    def send(self, to: str, subject: str, body: str, link: str) -> None:
-        text, html = render(subject, body, link)
+    def send(self, to: str, subject: str, body: str, link: str, *, tone: str = "neutral") -> None:
+        text, html = render(subject, body, link, tone)
         msg = EmailMessage()
         msg["From"], msg["To"], msg["Subject"] = self.sender, to, subject
         msg.set_content(text)

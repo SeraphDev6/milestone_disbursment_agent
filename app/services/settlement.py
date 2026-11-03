@@ -422,6 +422,7 @@ def _apply_payout_status(session: Session, d: Disbursement, status: str, actor: 
                 f"{m.agreement.currency} {m.amount} for '{m.title}' was sent to {email}, but that address has no "
                 "PayPal account yet. Open the PayPal email to claim it or create a PayPal account with that "
                 "address. PayPal returns the money after 30 days if it isn't claimed.",
+                tone="review",
             )
     elif status == "PENDING":
         _note(session, m, actor, "payout_pending", payout_ref=d.paypal_ref, attempt=d.attempt)
@@ -438,6 +439,7 @@ def _apply_payout_status(session: Session, d: Disbursement, status: str, actor: 
             tranche_subject(m, "Payout failed"),
             f"Paying the payee for '{m.title}' failed at PayPal ({d.error}). The money was captured and is not lost; "
             "retry the payout from the tranche once the cause is fixed (for example the payee's PayPal email).",
+            tone="alert",
         )
 
 
@@ -750,6 +752,7 @@ def _notify_payment_due(session: Session, m: Milestone, path: str | None) -> Non
         f"'{m.title}' met all {len(m.criteria)} acceptance criteria. Pay {m.agreement.currency} {m.amount} to the "
         "payee through PayPal with the link below; the verdict and evidence are in the agreement's audit log.",
         link=f"{n.base_url}{path}",
+        tone="held",
     )
 
 
