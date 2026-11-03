@@ -1,0 +1,9 @@
+.steps { list-style: none; margin: 0 0 var(--space-5); padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.step { margin: 0; }
+.stepButton { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--target-compact); padding: var(--space-1) var(--space-3) var(--space-1) var(--space-1); border: var(--rule) solid var(--rule-hairline); border-radius: var(--radius); background: transparent; font: inherit; color: var(--text-secondary); }
+button.stepButton { cursor: pointer; color: var(--text-primary); }
+button.stepButton:hover { background: var(--surface-sunken); }
+.num { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border: var(--rule) solid var(--border-control); font-family: var(--font-figures); font-size: var(--text-sm); }
+.current .stepButton { border-color: var(--rule-strong); color: var(--text-primary); font-weight: 700; background: var(--surface-sheet); }
+.current .num { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.done .num { background: var(--stamp-settled-surface); color: var(--stamp-settled-ink); border-color: var(--stamp-settled-edge); }

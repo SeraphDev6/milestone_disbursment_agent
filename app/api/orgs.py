@@ -64,8 +64,10 @@ class AgreementSummary(SQLModel):
     currency: str
     total_amount: Decimal
     held: Decimal
+    in_dispute_window: Decimal = Field(description="Captured from the payer, waiting out the dispute window.")
     invoiced: Decimal
     released: Decimal
+    refunded: Decimal = Field(description="Captured, then returned to the payer after a contest.")
     counterparties: list[str] = Field(description="The other parties' names.")
     tranches: int
     needs_attention: int = Field(
@@ -87,7 +89,9 @@ class ReviewItem(SQLModel):
 
 
 class Portfolio(SQLModel):
-    currency_totals: dict[str, dict[str, Decimal]] = Field(description="Per currency: total, held, invoiced, released.")
+    currency_totals: dict[str, dict[str, Decimal]] = Field(
+        description="Per currency: total, held, in_dispute_window, invoiced, released, refunded."
+    )
     agreements: list[AgreementSummary]
 
 
@@ -145,6 +149,7 @@ def invite_member(
         email=body.email,
         actor=principal.actor,
         base_url=request.app.state.settings.public_base_url,
+        app_url=request.app.state.settings.public_app_url,
         org=org,
         org_role=body.role,
     )
@@ -254,8 +259,10 @@ def _summary(party: Party) -> AgreementSummary:
         currency=a.currency,
         total_amount=a.total_amount,
         held=f.held,
+        in_dispute_window=f.in_dispute_window,
         invoiced=f.invoiced,
         released=f.released,
+        refunded=f.refunded,
         counterparties=[p.display_name for p in a.parties if p.id != party.id],
         tranches=len(a.milestones),
         needs_attention=sum(1 for m in a.milestones if m.status in ATTENTION[party.role]),
@@ -319,9 +326,12 @@ def portfolio(org_id: str, principal: PrincipalDep, session: SessionDep) -> Port
     summaries = [_summary(p) for p in _seats(session, org_id, Role.payer)]
     totals: dict[str, dict[str, Decimal]] = {}
     for s in summaries:
-        t = totals.setdefault(s.currency, {k: Decimal("0.00") for k in ("total", "held", "invoiced", "released")})
+        buckets = ("total", "held", "in_dispute_window", "invoiced", "released", "refunded")
+        t = totals.setdefault(s.currency, {k: Decimal("0.00") for k in buckets})
         t["total"] += s.total_amount
         t["held"] += s.held
+        t["in_dispute_window"] += s.in_dispute_window
         t["invoiced"] += s.invoiced
         t["released"] += s.released
+        t["refunded"] += s.refunded
     return Portfolio(currency_totals=totals, agreements=summaries)

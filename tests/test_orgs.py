@@ -129,8 +129,10 @@ def test_review_queue_and_portfolio(client, draft):
     assert p["currency_totals"]["USD"] == {
         "total": "30000.00",
         "held": "10000.00",
+        "in_dispute_window": "0.00",
         "invoiced": "0.00",
         "released": "0.00",
+        "refunded": "0.00",
     }
 
 

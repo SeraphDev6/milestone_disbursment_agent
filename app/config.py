@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     paypal_partner_merchant_id: str | None = None
     paypal_bn_code: str | None = None  # partner attribution id, once PayPal issues one for a live partner app
     # Where PayPal sends the payer back after approving. Render sets RENDER_EXTERNAL_URL.
+    # Where the web app lives (e.g. https://host/app). When set, emailed sign-in and invitation links open the web
+    # app (/auth/verify, /invitations/accept) instead of the API's pages, and SSO started from the app returns there.
+    public_app_url: str | None = None
     public_base_url: str = Field(
         "http://localhost:8000", validation_alias=AliasChoices("PUBLIC_BASE_URL", "RENDER_EXTERNAL_URL")
     )

@@ -158,7 +158,15 @@ def create_agreement(
     ]
     for email, kind in invitees:
         inv, link = identity.invite(
-            session, mailer(request), kind=kind, email=email, actor=actor, base_url=base, agreement=row, commit=False
+            session,
+            mailer(request),
+            kind=kind,
+            email=email,
+            actor=actor,
+            base_url=base,
+            app_url=request.app.state.settings.public_app_url,
+            agreement=row,
+            commit=False,
         )
         invitations.append(inv)
         links[inv.email] = link
@@ -204,6 +212,7 @@ def invite_to_agreement(
         email=body.email,
         actor=access.actor,
         base_url=request.app.state.settings.public_base_url,
+        app_url=request.app.state.settings.public_app_url,
         agreement=a,
     )
     return InvitationSent(invitation=invitation_read(session, inv), dev_link=link if show_links(request) else None)

@@ -1,0 +1,34 @@
+.ledger { list-style: none; margin: 0; padding: 0; border-top: var(--rule-thick) solid var(--rule-strong); }
+.ledgerRow {
+  display: grid; grid-template-columns: 3rem minmax(0, 1fr) auto; gap: var(--space-1) var(--space-4); align-items: center;
+  padding: var(--space-3) 0; border-bottom: var(--rule) solid var(--rule-hairline); margin: 0;
+}
+@media (min-width: 48rem) { .ledgerRow { grid-template-columns: 3rem minmax(0, 1fr) 9rem 10rem 9rem; } }
+.no { font-family: var(--font-display); font-size: var(--text-2xl); color: var(--text-secondary); line-height: 1; }
+.rowTitle { display: grid; gap: 2px; min-width: 0; }
+.rowTitle a { font-weight: 700; font-size: var(--text-lg); }
+.rowMeta { color: var(--text-secondary); font-size: var(--text-sm); }
+.rowAmount { text-align: right; }
+.rowDue { color: var(--text-secondary); font-size: var(--text-sm); }
+@media (max-width: 47.99rem) { .rowDue { display: none; } .rowStamp { grid-column: 2 / -1; } }
+.ledgerFoot { display: grid; grid-template-columns: 3rem 1fr auto; gap: var(--space-4); padding: var(--space-3) 0; font-weight: 700; }
+.ledgerFoot .rowAmount { border-bottom: 4px double var(--rule-strong); }
+
+.signatures { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
+.sig { display: grid; grid-template-columns: auto 1fr; gap: var(--space-1) var(--space-3); margin: 0; align-items: start; }
+.sigLine { border-bottom: var(--rule) solid var(--rule-strong); padding-bottom: var(--space-1); display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-2); align-items: baseline; }
+.sigName { font-family: var(--font-display); font-size: var(--text-lg); font-style: italic; }
+.sigName.unsigned { font-style: normal; color: var(--text-secondary); font-family: var(--font-ui); font-size: var(--text-md); }
+.sigRole { font-family: var(--font-figures); font-size: var(--text-xs); letter-spacing: var(--tracking-stamp); text-transform: uppercase; color: var(--text-secondary); }
+.sigIcon { margin-top: 0.3rem; }
+.sigOk { color: var(--text-success); }
+.sigNo { color: var(--text-secondary); }
+
+.critList { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--space-3); }
+.crit { display: grid; grid-template-columns: 2.5rem minmax(0, 1fr); gap: var(--space-1) var(--space-3); margin: 0; padding: var(--space-3) 0; border-top: var(--rule) solid var(--rule-hairline); }
+.critNo { font-family: var(--font-figures); color: var(--text-secondary); font-size: var(--text-sm); padding-top: 0.15rem; }
+.critStatement { font-weight: 700; margin: 0; }
+.critMeta { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); color: var(--text-secondary); font-size: var(--text-sm); margin: 0; }
+.critMeta strong { color: var(--text-primary); font-weight: 600; }
+.checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.checklist li { display: flex; gap: var(--space-2); align-items: flex-start; margin: 0; }

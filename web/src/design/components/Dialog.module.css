@@ -1,0 +1,22 @@
+.overlay {
+  position: fixed; inset: 0; z-index: 50;
+  display: grid; place-items: center; padding: var(--space-4);
+  background: color-mix(in srgb, var(--surface-inverse) 55%, transparent);
+}
+.overlay[data-entering] { animation: fade var(--dur-slide) ease-out; }
+.modal {
+  width: min(100%, 36rem); max-height: calc(100vh - 2rem); overflow: auto;
+  background: var(--surface-raised); color: var(--text-primary);
+  border: var(--rule) solid var(--rule-strong); border-radius: var(--radius);
+  box-shadow: var(--overlay-shadow);
+}
+.wide { width: min(100%, 56rem); }
+.modal[data-entering] { animation: slide var(--dur-slide) ease-out; }
+.dialog { outline: none; padding: var(--space-5); display: grid; gap: var(--space-4); }
+.head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-3); border-bottom: var(--rule) solid var(--rule-hairline); padding-bottom: var(--space-3); }
+.head h2 { margin: 0; font-size: var(--text-2xl); }
+.footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); border-top: var(--rule) solid var(--rule-hairline); padding-top: var(--space-4); }
+.summary { padding: var(--space-3) var(--space-4); background: var(--surface-sunken); border-left: 4px solid var(--rule-strong); }
+@keyframes fade { from { opacity: 0; } }
+@keyframes slide { from { transform: translateY(8px); opacity: 0; } }
+@media (forced-colors: active) { .modal { border-color: CanvasText; } }

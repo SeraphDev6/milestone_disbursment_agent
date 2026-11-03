@@ -1,4 +1,13 @@
-# Local Postgres. Without it the app falls back to SQLite at ./local.db.
+# The whole app locally: Postgres plus the API serving the web app.
+#
+#   docker compose up --build          -> http://localhost:8000/app/   (API docs at /docs)
+#
+# Mock mode by default: no keys needed, PayPal and email are stand-ins, and /app/demo loads a ready-made grant.
+# For PayPal sandbox and Claude, put MODE=sandbox and the keys in .env (see .env.example); compose reads it.
+# Change the host port with APP_PORT=8080 docker compose up.
+#
+# Just the database (for `uv run uvicorn` on the host): docker compose up -d db
+
 services:
   db:
     image: postgres:16
@@ -10,6 +19,28 @@ services:
       - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U milestone -d milestone"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      MODE: ${MODE:-mock}
+      DATABASE_URL: postgresql://milestone:milestone@db:5432/milestone
+      # Browser-facing URLs: PayPal returns the payer here, and emailed links open the app.
+      PUBLIC_BASE_URL: http://localhost:${APP_PORT:-8000}
+      PUBLIC_APP_URL: http://localhost:${APP_PORT:-8000}/app
+    ports:
+      - "${APP_PORT:-8000}:8000"
 
 volumes:
   pgdata:

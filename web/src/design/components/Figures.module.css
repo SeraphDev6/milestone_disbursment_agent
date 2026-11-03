@@ -1,0 +1,16 @@
+.amount {
+  font-family: var(--font-figures);
+  font-variant-numeric: tabular-nums slashed-zero;
+  white-space: nowrap;
+}
+.currency { color: var(--text-secondary); font-size: 0.82em; letter-spacing: var(--tracking-caps); margin-right: 0.35em; }
+.end { text-align: right; display: inline-block; }
+
+/* Accounting rules: a single rule above a total, a double rule beneath it. */
+.totals { display: grid; gap: 0; margin: 0; }
+.row { display: grid; grid-template-columns: 1fr auto; gap: var(--space-4); align-items: baseline; padding: var(--space-1) 0; }
+.row dt { color: var(--text-secondary); }
+.row dd { margin: 0; text-align: right; }
+.total { border-top: var(--rule) solid var(--rule-strong); margin-top: var(--space-1); padding-top: var(--space-2); font-weight: 700; }
+.total dd { border-bottom: 4px double var(--rule-strong); padding-bottom: 2px; }
+.total dt { color: var(--text-primary); }

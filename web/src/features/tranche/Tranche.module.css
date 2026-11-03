@@ -1,0 +1,44 @@
+.track { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(6.5rem, 1fr); overflow-x: auto; gap: 0; counter-reset: st; }
+.trackStep { position: relative; display: grid; justify-items: start; gap: var(--space-1); padding: var(--space-2) var(--space-3) var(--space-2) 0; margin: 0; font-size: var(--text-sm); color: var(--text-secondary); }
+.trackStep::before { content: ""; height: 4px; width: 100%; background: var(--rule-hairline); }
+.done::before { background: var(--rule-strong); }
+.current::before { background: repeating-linear-gradient(90deg, var(--rule-strong) 0 6px, transparent 6px 10px); }
+.done, .current { color: var(--text-primary); }
+.current { font-weight: 700; }
+.stepMark { display: inline-flex; align-items: center; gap: var(--space-1); }
+
+.results { list-style: none; margin: 0; padding: 0; display: grid; }
+.result { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-1) var(--space-3); padding: var(--space-3) 0; border-top: var(--rule) solid var(--rule-hairline); margin: 0; }
+.verdictMark { width: 1.75rem; height: 1.75rem; display: grid; place-items: center; border: var(--rule-thick) solid; margin-top: 2px; }
+.met { color: var(--stamp-settled-ink); border-color: var(--stamp-settled-edge); background: var(--stamp-settled-surface); }
+.unmet { color: var(--stamp-alert-ink); border-color: var(--stamp-alert-edge); background: var(--stamp-alert-surface); }
+.unjudged { color: var(--text-secondary); border-color: var(--border-control); border-style: dashed; }
+.resultBody { display: grid; gap: var(--space-1); min-width: 0; }
+.resultStatement { margin: 0; font-weight: 700; }
+.resultMeta { margin: 0; color: var(--text-secondary); font-size: var(--text-sm); display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); }
+.resultMeta strong { color: var(--text-primary); }
+.quote { margin: 0; font-family: var(--font-display); font-style: italic; border-left: 3px double var(--rule-strong); padding-left: var(--space-3); }
+.missing { margin: 0; padding: var(--space-2) var(--space-3); background: var(--callout-review-surface); border-left: 4px solid var(--callout-review-edge); }
+.cite { font-family: var(--font-figures); font-size: 0.78em; vertical-align: super; line-height: 0; margin-left: 2px; }
+.cite a { text-decoration: none; padding: 0 2px; }
+.cite a:hover { text-decoration: underline; }
+.rationale { font-family: var(--font-display); font-size: var(--text-lg); line-height: 1.5; margin: 0; max-width: var(--measure); }
+
+.evidence { list-style: none; margin: 0; padding: 0; counter-reset: ev; }
+.evItem { display: grid; grid-template-columns: 2.25rem minmax(0, 1fr); gap: var(--space-1) var(--space-3); padding: var(--space-3) 0; border-top: var(--rule) solid var(--rule-hairline); margin: 0; scroll-margin-top: 7rem; }
+.evItem:target { background: var(--highlight); color: var(--on-highlight); }
+.evNo { font-family: var(--font-figures); color: var(--text-secondary); }
+.evTitle { font-weight: 700; margin: 0; overflow-wrap: anywhere; }
+.evMeta { color: var(--text-secondary); font-size: var(--text-sm); display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin: 0; }
+.excerpt { margin: 0; font-family: var(--font-figures); font-size: var(--text-sm); white-space: pre-wrap; max-height: 8.5rem; overflow: auto; padding: var(--space-2); background: var(--surface-sunken); border-radius: var(--radius); }
+.checks { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+.timeline { list-style: none; margin: 0; padding: 0 0 0 var(--space-4); border-left: var(--rule-thick) solid var(--rule-strong); display: grid; gap: var(--space-3); }
+.tlItem { position: relative; margin: 0; display: grid; gap: 2px; }
+.tlItem::before { content: ""; position: absolute; left: calc(-1 * var(--space-4) - 6px); top: 0.45em; width: 10px; height: 10px; background: var(--surface-sheet); border: var(--rule-thick) solid var(--rule-strong); }
+.tlWhen { font-family: var(--font-figures); font-size: var(--text-xs); color: var(--text-secondary); }
+.tlWhat { font-weight: 600; display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.tlWho { font-size: var(--text-sm); color: var(--text-secondary); }
+
+.actions { display: grid; gap: var(--space-3); }
+.action { display: grid; gap: var(--space-1); }

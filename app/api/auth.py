@@ -66,7 +66,10 @@ def invitation_read(session, inv: Invitation) -> InvitationRead:
 
 @router.post("/auth/magic-link", summary="Email a one-time sign-in link")
 def request_link(body: MagicLinkRequest, session: SessionDep, request: Request) -> MagicLinkSent:
-    link = identity.request_magic_link(session, mailer(request), body.email, request.app.state.settings.public_base_url)
+    settings = request.app.state.settings
+    link = identity.request_magic_link(
+        session, mailer(request), body.email, settings.public_base_url, app_url=settings.public_app_url
+    )
     return MagicLinkSent(dev_link=link if show_links(request) else None)
 
 
@@ -109,6 +112,26 @@ def me(principal: PrincipalDep, session: SessionDep) -> Me:
 @router.post("/invitations/accept", summary="Accept an invitation for one of your orgs, or for a new org")
 def accept(body: AcceptInvitation, principal: PrincipalDep, session: SessionDep) -> InvitationAccepted:
     result = identity.accept_invitation(session, principal, body.token, body.org_id, body.new_org)
+    return _accepted(session, principal, result)
+
+
+class AcceptInvitationById(SQLModel):
+    org_id: str | None = Field(default=None, description="Accept for this org (you must be its admin or owner).")
+    new_org: OrganizationCreate | None = Field(default=None, description="Or create an org and accept for it.")
+
+
+@router.post(
+    "/invitations/{invitation_id}/accept",
+    summary="Accept one of your pending invitations (from GET /me) without the emailed link",
+)
+def accept_by_id(
+    invitation_id: str, body: AcceptInvitationById, principal: PrincipalDep, session: SessionDep
+) -> InvitationAccepted:
+    result = identity.accept_invitation_by_id(session, principal, invitation_id, body.org_id, body.new_org)
+    return _accepted(session, principal, result)
+
+
+def _accepted(session, principal, result) -> InvitationAccepted:
     return InvitationAccepted(
         invitation=invitation_read(session, result.invitation),
         organization=OrganizationRead.model_validate(

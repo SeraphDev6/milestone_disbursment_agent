@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" type="image/svg+xml" href="/app/favicon.svg" />
+    <title>Milestone Ledger</title>
+    <script>
+      // Apply the saved theme before first paint so there is no flash of the wrong theme.
+      try {
+        var t = localStorage.getItem("mde.theme");
+        if (t === "paper" || t === "carbon" || t === "contrast") document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

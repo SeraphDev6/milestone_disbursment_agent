@@ -1,0 +1,8 @@
+.seal { display: inline-flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.mark {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: 0.15em 0.5em; border: var(--rule) dashed var(--border-control); border-radius: var(--radius);
+  font-family: var(--font-figures); font-size: var(--text-sm); letter-spacing: 0.04em; color: var(--text-primary);
+}
+.label { color: var(--text-secondary); font-size: var(--text-sm); }
+.locked { border-style: solid; border-color: var(--stamp-settled-edge); }

@@ -1,0 +1,64 @@
+.button {
+  --_bg: transparent;
+  --_fg: var(--text-primary);
+  --_border: var(--border-control);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--target-min);
+  min-width: var(--target-min);
+  padding: 0 var(--space-4);
+  border: var(--rule) solid var(--_border);
+  border-radius: var(--radius);
+  background: var(--_bg);
+  color: var(--_fg);
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: var(--text-md);
+  line-height: 1.1;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 80ms linear, transform var(--dur-press) var(--ease-press);
+}
+.button[data-pressed], a.button:active { transform: translateY(1px); }
+a.primary:hover { --_bg: var(--accent-hover); --_border: var(--accent-hover); }
+a.secondary:hover { --_bg: var(--surface-sunken); }
+.button[data-disabled] { cursor: not-allowed; opacity: 1; --_fg: var(--text-secondary); --_border: var(--rule-hairline); --_bg: transparent; }
+.button[data-pending] { cursor: progress; }
+
+.primary { --_bg: var(--accent); --_fg: var(--on-accent); --_border: var(--accent); }
+.primary[data-hovered] { --_bg: var(--accent-hover); --_border: var(--accent-hover); }
+.primary[data-disabled] { --_bg: var(--surface-sunken); --_fg: var(--text-secondary); --_border: var(--border-control); }
+
+.secondary { --_bg: var(--surface-sheet); }
+.secondary[data-hovered] { --_bg: var(--surface-sunken); }
+
+.quiet { --_border: transparent; padding: 0 var(--space-3); }
+.quiet[data-hovered] { --_bg: var(--surface-sunken); }
+.quiet[data-disabled] { --_border: transparent; }
+
+.danger { --_bg: var(--danger); --_fg: var(--on-danger); --_border: var(--danger); }
+.danger[data-hovered] { --_bg: var(--danger-hover); --_border: var(--danger-hover); }
+
+.sm { min-height: var(--target-compact); min-width: var(--target-compact); padding: 0 var(--space-3); font-size: var(--text-sm); }
+.icon { padding: 0; }
+
+.spinner {
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
+
+@media (forced-colors: active) {
+  .button { border-color: ButtonText; }
+  .primary, .danger { background: ButtonText; color: ButtonFace; forced-color-adjust: none; }
+  .button[data-disabled] { border-color: GrayText; color: GrayText; background: ButtonFace; }
+}

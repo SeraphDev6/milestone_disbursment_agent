@@ -8,7 +8,16 @@ AI parts (extraction, verification) use [Pydantic AI](https://ai.pydantic.dev) w
 
 ## Run it
 
-Needs [uv](https://docs.astral.sh/uv/). Mock mode needs no keys.
+The whole app (Postgres, the API and the web app) with Docker. Mock mode needs no keys:
+
+```sh
+docker compose up --build
+# open http://localhost:8000/app/  (try /app/demo; API docs at /docs)
+```
+
+Compose reads `.env` if there is one: set `MODE=sandbox` plus the PayPal keys and `SECRET_KEY` there for the PayPal sandbox and Claude. Use `APP_PORT=8080 docker compose up` if port 8000 is taken. Data lives in the `pgdata` volume (`docker compose down -v` resets it).
+
+To develop on the host instead, you need [uv](https://docs.astral.sh/uv/):
 
 ```sh
 uv sync
@@ -24,6 +33,16 @@ DATABASE_URL=postgresql://milestone:milestone@localhost:5433/milestone uv run uv
 ```
 
 Copy `.env.example` to `.env` to set `MODE=sandbox` and PayPal sandbox credentials.
+
+## Web app
+
+A React app for every side of an agreement (funder, grantee, reviewer) lives in [`web/`](web/README.md). Its design system, *Ledger & Stamp*, is WCAG 2.2 AA with its checks automated: [`web/DESIGN.md`](web/DESIGN.md).
+
+```sh
+cd web && npm install && MDE_API=http://localhost:8000 npm run dev   # http://localhost:5173/app/
+```
+
+Run the API with `PUBLIC_BASE_URL=http://localhost:5173` so mock PayPal redirects return through the dev server. After `npm run build`, the API serves the app itself at `/app`.
 
 ## Try the flow
 
@@ -59,6 +78,7 @@ app/
   ai/              Pydantic AI agents (extraction, verification) and extraction post-processing
   services/        settlement (escrow + invoice), verification and gate, outbound webhooks, compliance packet
   integrations/    PayPal gateway (mock + REST), GitHub, file uploads
+web/               React app (Vite, React Aria, AG Grid); served at /app from web/dist
 ```
 
 ## Develop

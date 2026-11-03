@@ -24,8 +24,10 @@ def account_for(session: Session, org_id: str) -> PayPalAccount | None:
 
 def read(row: PayPalAccount | None, org_id: str) -> PayPalAccountRead:
     if row is None:
-        return PayPalAccountRead(org_id=org_id, ready=False, issues=["PayPal isn't connected"], checked_at=None)
-    return PayPalAccountRead.model_validate(row, update={"ready": row.ready, "issues": row.issues()})
+        return PayPalAccountRead(
+            org_id=org_id, started=False, ready=False, issues=["PayPal isn't connected"], checked_at=None
+        )
+    return PayPalAccountRead.model_validate(row, update={"started": True, "ready": row.ready, "issues": row.issues()})
 
 
 def _audit_all_agreements(session: Session, org_id: str, actor: str, action: str, **detail) -> None:

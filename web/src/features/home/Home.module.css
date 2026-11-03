@@ -1,0 +1,10 @@
+.count { display: inline-grid; place-items: center; min-width: 1.6em; padding: 0 0.4em; margin-left: var(--space-2); border: var(--rule-thick) solid var(--stamp-review-edge); background: var(--stamp-review-surface); color: var(--stamp-review-ink); font-family: var(--font-figures); font-size: var(--text-sm); vertical-align: middle; }
+.muted { color: var(--text-secondary); font-size: var(--text-sm); }
+.queue { list-style: none; margin: 0; padding: 0; display: grid; }
+.queueItem { display: grid; grid-template-columns: 8rem 1fr auto; gap: var(--space-2) var(--space-4); align-items: center; padding: var(--space-3) 0; border-bottom: var(--rule) solid var(--rule-hairline); margin: 0; }
+.queueItem:last-child { border-bottom: 0; }
+.queueItem > :first-child { justify-self: start; }
+.queueBody { display: grid; gap: 2px; min-width: 0; }
+.queueBody a { font-weight: 700; }
+.queueAction { color: var(--text-secondary); font-size: var(--text-sm); font-style: italic; font-family: var(--font-display); }
+@media (max-width: 40rem) { .queueItem { grid-template-columns: 1fr; } .queueAction { display: none; } }

@@ -209,6 +209,11 @@ original per-agreement party keys.
   issuer, audience, expiry and nonce are checked, and its email must be in a verified domain. People are added
   to the org on first sign-in (default role member, never owner). With "enforce SSO" on, magic links are
   refused for those domains.
+- **Web app hand-offs:** with `PUBLIC_APP_URL` set, emailed sign-in and invitation links open the web app
+  (`/auth/verify?token=`, `/invitations/accept?token=`), which exchanges them through the API; MCP consent
+  sign-in keeps the API's own pages. SSO started with `to_app` returns to `/auth/sso#token=…` (the fragment never
+  reaches a server). A signed-in invitee can accept from their inbox with `POST /invitations/{id}/accept`; the
+  signed-in email must match the invitation, which is what the emailed token proves.
 
 **Who can do what** (agreement role x org role; `member+` means member, admin or owner)
 

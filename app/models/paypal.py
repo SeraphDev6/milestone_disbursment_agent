@@ -56,6 +56,7 @@ class PayPalAccount(PayPalAccountBase, table=True):
 
 class PayPalAccountRead(PayPalAccountBase):
     org_id: str
+    started: bool = Field(description="Someone in the org started connecting PayPal (onboarding may be unfinished).")
     ready: bool = Field(description="True when tranches can be held and paid straight to this account.")
     issues: list[str] = Field(description="What still blocks payments, in plain words.")
     checked_at: datetime | None

@@ -22,6 +22,7 @@ dependencies = [
     "pydantic-settings>=2.16.2",
     "pypdf>=6.21.4",
     "python-multipart>=0.0.33",
+    "reportlab>=5.1.0",
     "sqlalchemy>=2",
     "sqlmodel>=0.0.48",
     "uvicorn[standard]>=0.54.0",
@@ -31,7 +32,6 @@ dependencies = [
 dev = [
     "httpx2>=2.16.0",
     "pytest>=9.2.0",
-    "reportlab>=5.1.0",
     "ruff>=0.17.3",
 ]
 

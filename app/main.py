@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from app.ai.agents import claude_runtime, mock_runtime
 from app.api import api_router, browser, mock_router
 from app.api.mcp import build_mcp
+from app.api.spa import mount_spa
 from app.config import Mode, Settings, get_settings, use_claude
 from app.db import make_engine, make_sessionmaker, migrate
 from app.integrations.crypto import SecretBox
@@ -89,6 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(browser.router)
     if settings.mode is Mode.mock:
         app.include_router(mock_router)
+    mount_spa(app)  # the web app at /app, when web/dist has been built
 
     # MCP (tools generated from the routes above) and its OAuth endpoints. Mounted last at "/" so every
     # FastAPI route matches first; it serves /mcp, /.well-known/*, /authorize, /token, /register, /revoke.

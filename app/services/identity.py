@@ -50,9 +50,17 @@ def normalize_email(email: str) -> str:
 
 
 def request_magic_link(
-    session: Session, mailer: ConsoleMailer, email: str, base_url: str, next_path: str | None = None
+    session: Session,
+    mailer: ConsoleMailer,
+    email: str,
+    base_url: str,
+    next_path: str | None = None,
+    app_url: str | None = None,
 ) -> str:
-    """Create a one-time sign-in link and email it. Returns the link (shown in mock mode only)."""
+    """Create a one-time sign-in link and email it. Returns the link (shown in mock mode only).
+
+    With app_url (and no next_path, which belongs to the API's own browser flows such as MCP consent) the link
+    opens the web app, which exchanges the token through POST /auth/magic-link/verify."""
     from app.services import sso  # sso imports this module
 
     email = normalize_email(email)
@@ -61,7 +69,10 @@ def request_magic_link(
     raw = _token("mdl")
     session.add(LoginToken(email=email, token_hash=hash_token(raw), expires_at=utcnow() + LOGIN_TTL))
     session.commit()
-    link = f"{base_url}/auth/magic-link/verify?token={raw}"
+    if app_url and not next_path:
+        link = f"{app_url.rstrip('/')}/auth/verify?token={raw}"
+    else:
+        link = f"{base_url}/auth/magic-link/verify?token={raw}"
     if next_path:
         link += f"&next={quote(next_path, safe='')}"
     mailer.send(email, "Your sign-in link", "Open this link to sign in. It expires in 15 minutes.", link)
@@ -146,6 +157,7 @@ def invite(
     org: Organization | None = None,
     org_role: OrgRole | None = None,
     commit: bool = True,
+    app_url: str | None = None,
 ) -> tuple[Invitation, str]:
     """Create and email an invitation. Returns it with its accept link (shown in mock mode only)."""
     email = normalize_email(email)
@@ -161,7 +173,7 @@ def invite(
         expires_at=utcnow() + INVITATION_TTL,
     )
     session.add(inv)
-    link = f"{base_url}/invitations/accept?token={raw}"
+    link = f"{(app_url or base_url).rstrip('/')}/invitations/accept?token={raw}"
     if agreement is not None:
         what = "receive payments under" if kind == InvitationKind.counterparty else "review"
         subject = f"You're invited to {what} '{agreement.title}'"
@@ -196,9 +208,31 @@ def accept_invitation(
     org_id: str | None,
     new_org: OrganizationCreate | None,
 ) -> Accepted:
+    inv = session.exec(select(Invitation).where(Invitation.token_hash == hash_token(raw))).first()
+    return _accept(session, principal, inv, org_id, new_org)
+
+
+def accept_invitation_by_id(
+    session: Session,
+    principal: Principal,
+    invitation_id: str,
+    org_id: str | None,
+    new_org: OrganizationCreate | None,
+) -> Accepted:
+    """Accept from the signed-in invitee's inbox, without the emailed token. Safe because the signed-in
+    email must match the invitation's (checked in _accept), which is what the token proves."""
+    return _accept(session, principal, session.get(Invitation, invitation_id), org_id, new_org)
+
+
+def _accept(
+    session: Session,
+    principal: Principal,
+    inv: Invitation | None,
+    org_id: str | None,
+    new_org: OrganizationCreate | None,
+) -> Accepted:
     if principal.user is None:
         raise IdentityError("sign in as a person to accept invitations", 403)
-    inv = session.exec(select(Invitation).where(Invitation.token_hash == hash_token(raw))).first()
     if inv is None or inv.revoked_at is not None or inv.accepted_at is not None or as_utc(inv.expires_at) < utcnow():
         raise IdentityError("this invitation is invalid, expired, revoked or already used", 404)
     if normalize_email(principal.user.email) != inv.email:

@@ -1,0 +1,105 @@
+.field { display: grid; gap: var(--space-1); min-width: 0; }
+.label { font-weight: 700; font-size: var(--text-md); color: var(--text-primary); }
+.optional { font-weight: 400; color: var(--text-secondary); font-size: var(--text-sm); margin-left: var(--space-1); }
+.description { color: var(--text-secondary); font-size: var(--text-sm); max-width: var(--measure); }
+.error { color: var(--danger); font-size: var(--text-sm); font-weight: 600; display: flex; gap: var(--space-1); align-items: flex-start; }
+.error svg { margin-top: 0.2em; }
+
+.input,
+.group {
+  width: 100%;
+  min-height: var(--target-min);
+  padding: var(--space-2) var(--space-3);
+  border: var(--rule) solid var(--border-control);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  line-height: var(--leading-body);
+}
+.input::placeholder { color: var(--text-secondary); opacity: 1; }
+.input[data-hovered], .group[data-hovered] { border-color: var(--rule-strong); }
+.input[data-invalid], .group[data-invalid] { border-color: var(--danger); border-width: var(--rule-thick); padding: calc(var(--space-2) - 1px) calc(var(--space-3) - 1px); }
+.input[data-disabled], .group[data-disabled] { background: var(--surface-sunken); color: var(--text-secondary); }
+.input[data-focus-visible], .input:focus-visible, .group[data-focus-within] { box-shadow: var(--focus-shadow); outline: none; }
+textarea.input { min-height: 6rem; resize: vertical; }
+.figures { font-family: var(--font-figures); font-variant-numeric: tabular-nums; }
+
+.group { display: flex; align-items: center; gap: var(--space-1); padding-top: 0; padding-bottom: 0; }
+.group .bare { flex: 1; min-width: 0; border: 0; background: transparent; padding: var(--space-2) 0; outline: none; box-shadow: none; }
+.prefix { color: var(--text-secondary); font-family: var(--font-figures); font-size: var(--text-sm); letter-spacing: var(--tracking-caps); }
+
+.segment { padding: 0 1px; border-radius: var(--radius); font-family: var(--font-figures); font-variant-numeric: tabular-nums; }
+.segment[data-placeholder] { color: var(--text-secondary); }
+.segment[data-focused] { background: var(--accent); color: var(--on-accent); outline: none; }
+.segment[data-type="literal"] { color: var(--text-secondary); }
+
+/* Select */
+.trigger {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+  width: 100%; min-height: var(--target-min); padding: var(--space-2) var(--space-3);
+  border: var(--rule) solid var(--border-control); border-radius: var(--radius);
+  background: var(--surface-raised); color: var(--text-primary); cursor: pointer; text-align: left;
+}
+.trigger[data-hovered] { border-color: var(--rule-strong); }
+.trigger[data-invalid] { border-color: var(--danger); }
+.trigger [data-placeholder] { color: var(--text-secondary); }
+.popover {
+  min-width: var(--trigger-width);
+  max-height: 20rem; overflow: auto;
+  background: var(--surface-raised); border: var(--rule) solid var(--rule-strong); border-radius: var(--radius);
+  box-shadow: var(--overlay-shadow); padding: var(--space-1);
+}
+.listbox { outline: none; display: grid; gap: 1px; }
+.option {
+  display: flex; align-items: center; gap: var(--space-2);
+  min-height: var(--target-compact); padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius); cursor: default; outline: none;
+}
+.option[data-focused] { background: var(--surface-sunken); }
+.option[data-selected] { font-weight: 700; }
+.option[data-focus-visible] { box-shadow: inset 0 0 0 var(--focus-width) var(--focus-ring); }
+.check { width: 16px; visibility: hidden; color: var(--accent); }
+.option[data-selected] .check { visibility: visible; }
+.optionDesc { display: block; color: var(--text-secondary); font-size: var(--text-sm); font-weight: 400; }
+
+/* Checkbox, radio, switch */
+.choiceGroup { display: grid; gap: var(--space-2); border: 0; padding: 0; margin: 0; }
+.choiceGroup .options { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+.choiceGroup .stack { display: grid; gap: var(--space-2); }
+.choice { display: inline-flex; align-items: flex-start; gap: var(--space-2); cursor: pointer; min-height: 24px; padding: var(--space-1) 0; }
+.choice[data-disabled] { cursor: not-allowed; color: var(--text-secondary); }
+.box, .dot {
+  flex: none; width: 20px; height: 20px; margin-top: 0.15em;
+  display: grid; place-items: center;
+  border: var(--rule-thick) solid var(--border-control); background: var(--surface-raised); color: var(--on-accent);
+}
+.box { border-radius: var(--radius); }
+.dot { border-radius: 50%; }
+.choice[data-selected] .box { background: var(--accent); border-color: var(--accent); }
+.choice[data-selected] .dot { border-color: var(--accent); }
+.choice[data-selected] .dot::after { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+.choice[data-focus-visible] .box, .choice[data-focus-visible] .dot, .choice[data-focus-visible] .track { box-shadow: var(--focus-shadow); }
+.choice[data-invalid] .box { border-color: var(--danger); }
+.box svg { visibility: hidden; }
+.choice[data-selected] .box svg { visibility: visible; }
+
+.track {
+  flex: none; width: 40px; height: 24px; border-radius: 12px; margin-top: 0.05em;
+  border: var(--rule-thick) solid var(--border-control); background: var(--surface-sunken);
+  position: relative; transition: background-color var(--dur-slide);
+}
+.track::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--border-control); transition: transform var(--dur-slide);
+}
+.choice[data-selected] .track { background: var(--accent); border-color: var(--accent); }
+.choice[data-selected] .track::after { transform: translateX(16px); background: var(--on-accent); }
+.choiceText { display: grid; }
+.choiceHint { color: var(--text-secondary); font-size: var(--text-sm); }
+
+@media (forced-colors: active) {
+  .choice[data-selected] .box, .choice[data-selected] .track { background: Highlight; border-color: Highlight; }
+  .track::after, .choice[data-selected] .dot::after { background: CanvasText; }
+  .segment[data-focused] { background: Highlight; color: HighlightText; }
+}
