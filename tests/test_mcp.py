@@ -98,8 +98,12 @@ def browser_sign_in(client, consent_url: str, email: str) -> None:
     page = client.post("/oauth/sign-in", data={"email": email, "next": path(consent_url)})
     link = re.search(r"href='([^']+)'", page.text).group(1).replace("&amp;", "&")
     q = parse_qs(urlsplit(link).query)
+    form = client.get(path(link)).text  # the link's page sets the browser-binding cookie and nonce
+    nonce = re.search(r"name=nonce value='([^']+)'", form).group(1)
     r = client.post(
-        "/auth/magic-link/complete", data={"token": q["token"][0], "next": q["next"][0]}, follow_redirects=False
+        "/auth/magic-link/complete",
+        data={"token": q["token"][0], "next": q["next"][0], "nonce": nonce},
+        follow_redirects=False,
     )
     assert r.status_code == 303 and "mde_session" in r.cookies
 

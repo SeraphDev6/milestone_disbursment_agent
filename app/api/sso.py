@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from sqlmodel import Field, SQLModel, select
 
 from app.api.auth import SessionCreated
-from app.api.browser import safe_next, set_session_cookie
+from app.api.browser import SSO_COOKIE, bind_browser, bound_to_browser, safe_next, set_session_cookie, sso_binding
 from app.api.deps import PrincipalDep, SessionDep
 from app.models import OrgRole, UserRead
 from app.models.identity import EMAIL_PATTERN
@@ -86,21 +86,31 @@ def verify_domain(
 
 
 @router.post("/auth/sso/start", summary="Start signing in with your organization's identity provider")
-def start(body: SSOStart, session: SessionDep, request: Request) -> SSORedirect:
+def start(body: SSOStart, session: SessionDep, request: Request, response: Response) -> SSORedirect:
     next_path = _start_next(request, body.to_app)
-    return SSORedirect(authorize_url=sso.start(session, body.email, request.app.state.oidc, _base(request), next_path))
+    url = sso.start(session, body.email, request.app.state.oidc, _base(request), next_path)
+    if next_path:  # the callback will sign a browser in: only the one that started here
+        bind_browser(response, request, SSO_COOKIE, sso_binding(request, sso.state_of(url)))
+    return SSORedirect(authorize_url=url)
 
 
 @router.get("/auth/sso/start", include_in_schema=False)
 def start_redirect(email: str, session: SessionDep, request: Request, to_app: bool = False) -> RedirectResponse:
     url = sso.start(session, email, request.app.state.oidc, _base(request), _start_next(request, to_app))
-    return RedirectResponse(url, status_code=303)
+    response = RedirectResponse(url, status_code=303)
+    bind_browser(response, request, SSO_COOKIE, sso_binding(request, sso.state_of(url)))
+    return response
 
 
 @router.get("/auth/sso/callback", summary="Where the identity provider returns; issues a session token")
 def callback(code: str, state: str, session: SessionDep, request: Request) -> Response:
     app_state = request.app.state
-    user, token, next_path = sso.finish(session, code, state, app_state.oidc, app_state.secrets, _base(request))
+    # Browser flows (the web app, MCP consent) finish only in the browser that started them. The plain API
+    # flow returns the token in the body, which signs nobody's browser in, so it needs no binding.
+    bound = bound_to_browser(request, SSO_COOKIE, sso_binding(request, state))
+    user, token, next_path = sso.finish(
+        session, code, state, app_state.oidc, app_state.secrets, _base(request), browser_bound=bound
+    )
     if next_path == APP_RETURN:  # the web app is bearer-only: hand it the token in the fragment (never sent on)
         app_url = app_state.settings.public_app_url.rstrip("/")
         return RedirectResponse(f"{app_url}/auth/sso#token={token}", status_code=303)

@@ -203,7 +203,9 @@ original per-agreement party keys.
 
 **Sign-in**
 - **Magic link** for everyone: request a link for an email, open it, get a session token (bearer). In mock
-  mode the link is returned in the response so the demo works without an email provider.
+  mode the link is returned in the response so the demo works without an email provider. The API's own sign-in
+  page (used for MCP consent) and browser SSO flows can only be completed in the browser that started them: a
+  short-lived SameSite cookie must match, so a cross-site request can't sign someone's browser in as somebody else.
 - **Org SSO (OIDC)**: an org admin configures issuer, client id/secret (encrypted at rest with `SECRET_KEY`) and
   the email domains it owns. A domain only counts once proven with a DNS TXT record
   (`_mde-verification.<domain> TXT "mde-verification=<token>"`); public mail domains can't be claimed and a
@@ -312,7 +314,7 @@ FastAPI REST is the single source; the OpenAPI spec generates the MCP tools, the
 | `POST /subscriptions` | Register an outbound webhook URL for events | any party | — |
 
 - **Human steps stay off MCP on purpose:** an agent can draft, pre-check, submit and ask, but confirming criteria, approving low-confidence releases and disputing are a person's call.
-- **Outbound events (built):** every audit event is queued in the same transaction as the change (transactional outbox) for matching subscriptions, then delivered signed (`X-MDE-Signature` over `timestamp.body`), retried with exponential backoff up to 10 attempts. Subscriber URLs must be https (http allowed in mock mode) and may not resolve to private, loopback, link-local or reserved addresses; redirects are not followed.
+- **Outbound events (built):** every audit event is queued in the same transaction as the change (transactional outbox) for matching subscriptions, then delivered signed (`X-MDE-Signature` over `timestamp.body`), retried with exponential backoff up to 10 attempts. Subscriber URLs must be https (http allowed in mock mode) and may not resolve to private, loopback, link-local or reserved addresses; the post goes to the address that was vetted (no second DNS lookup) with TLS verified against the hostname; redirects are not followed.
 - **Auth:** API keys per party, carrying the party's role, for the hackathon; OAuth later for Zapier. The review endpoint rejects the payee's key.
 
 ## Adapters

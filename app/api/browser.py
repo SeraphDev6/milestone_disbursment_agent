@@ -6,6 +6,7 @@ authorize step runs in a browser. Forms carry a CSRF token tied to the session a
 
 import hashlib
 import hmac
+import secrets
 from html import escape
 from typing import Annotated
 from urllib.parse import quote, urlsplit
@@ -25,6 +26,9 @@ from app.services.ratelimit import RateLimited
 
 router = APIRouter(include_in_schema=False)
 COOKIE = "mde_session"
+LOGIN_COOKIE = "mde_login"  # ties a sign-in link's page to the browser that will press its button
+SSO_COOKIE = "mde_sso"  # ties an SSO attempt to the browser that started it
+BIND_TTL = 10 * 60
 
 
 # --- helpers ---------------------------------------------------------------------------
@@ -37,9 +41,28 @@ def safe_next(path: str | None) -> str:
     return path
 
 
+def _secure(request: Request) -> bool:
+    return request.app.state.settings.public_base_url.startswith("https://")
+
+
 def set_session_cookie(response: Response, request: Request, token: str) -> None:
-    secure = request.app.state.settings.public_base_url.startswith("https://")
-    response.set_cookie(COOKIE, token, httponly=True, secure=secure, samesite="lax", max_age=30 * 24 * 3600)
+    response.set_cookie(COOKIE, token, httponly=True, secure=_secure(request), samesite="lax", max_age=30 * 24 * 3600)
+
+
+def bind_browser(response: Response, request: Request, name: str, value: str) -> None:
+    """A short-lived, SameSite=Lax cookie that a cross-site request can't carry, so a sign-in can only finish in
+    the browser that started it (login CSRF: an attacker signing a victim's browser in as the attacker)."""
+    response.set_cookie(name, value, httponly=True, secure=_secure(request), samesite="lax", max_age=BIND_TTL)
+
+
+def sso_binding(request: Request, state: str) -> str:
+    key = request.app.state.settings.secret_key.get_secret_value().encode()
+    return hmac.new(key, f"sso:{state}".encode(), hashlib.sha256).hexdigest()
+
+
+def bound_to_browser(request: Request, name: str, expected: str) -> bool:
+    actual = request.cookies.get(name)
+    return bool(actual) and hmac.compare_digest(actual, expected)
 
 
 def browser_principal(request: Request, session) -> tuple[Principal, str] | None:
@@ -71,26 +94,42 @@ def page(title: str, body_html: str, code: int = 200) -> HTMLResponse:
 
 
 @router.get("/auth/magic-link/verify")
-def magic_link_page(token: str, next: str | None = None) -> HTMLResponse:
-    # A GET never signs in: email clients prefetch links. The button POSTs.
-    return page(
+def magic_link_page(request: Request, token: str, next: str | None = None) -> HTMLResponse:
+    # A GET never signs in: email clients prefetch links. The button POSTs, with a nonce that must match the
+    # cookie set here, so the POST can only come from this browser.
+    nonce = secrets.token_urlsafe(24)
+    response = page(
         "Finish signing in",
         "<form method=post action='/auth/magic-link/complete'>"
         f"<input type=hidden name=token value='{escape(token)}'><input type=hidden name=next value='{escape(safe_next(next))}'>"
+        f"<input type=hidden name=nonce value='{nonce}'>"
         "<button style='font-size:1rem;padding:.5rem 1rem'>Sign in</button></form>",
     )
+    bind_browser(response, request, LOGIN_COOKIE, nonce)
+    return response
 
 
 @router.post("/auth/magic-link/complete")
 def magic_link_complete(
-    request: Request, session: SessionDep, token: Annotated[str, Form()], next: Annotated[str, Form()] = "/"
+    request: Request,
+    session: SessionDep,
+    token: Annotated[str, Form()],
+    next: Annotated[str, Form()] = "/",
+    nonce: Annotated[str, Form()] = "",
 ) -> Response:
+    if not nonce or not bound_to_browser(request, LOGIN_COOKIE, nonce):
+        return page(
+            "Open the link again",
+            "<p>This page wasn't opened from your sign-in link. Open the link from your email and press Sign in.</p>",
+            403,
+        )
     try:
         _, session_token = identity.verify_magic_link(session, token)
     except identity.IdentityError as e:
         return page("Sign-in link didn't work", f"<p>{escape(e.message)}</p>", e.status_code)
     response = RedirectResponse(safe_next(next), status_code=303)
     set_session_cookie(response, request, session_token)
+    response.delete_cookie(LOGIN_COOKIE)
     return response
 
 
@@ -106,7 +145,9 @@ def oauth_sign_in(
         return page("Too many sign-in attempts", f"<p>Try again in {e.retry_after // 60 + 1} minutes.</p>", 429)
     if sso.connection_for_email(session, email) is not None:
         url = sso.start(session, email, request.app.state.oidc, request.app.state.settings.public_base_url, target)
-        return RedirectResponse(url, status_code=303)
+        response = RedirectResponse(url, status_code=303)
+        bind_browser(response, request, SSO_COOKIE, sso_binding(request, sso.state_of(url)))
+        return response
     try:
         link = identity.request_magic_link(
             session, mailer(request), email, request.app.state.settings.public_base_url, next_path=target

@@ -18,6 +18,7 @@ from tests.conftest import hermetic_settings
 from tests.helpers import PAYEE_EMAIL, PAYER_EMAIL, connect_paypal, create_active, h, sign_in
 from tests.test_escrow import agreement, fund, gw, release, verify, webhook
 from tests.test_payouts import captured, run_payouts, tranche
+from tests.test_sso import idp, setup_sso  # noqa: F401
 from tests.test_verification import submit
 
 
@@ -406,3 +407,78 @@ def test_email_senders_render_text_and_html():
     assert text.endswith("https://x.example/y\n") and "<p>Line one.</p><p>Line two.</p>" in html
     assert isinstance(make_mailer(hermetic_settings(email_provider="resend", resend_api_key="k")), ResendMailer)
     assert isinstance(make_mailer(hermetic_settings(email_provider="smtp", smtp_host="mail.example")), SmtpMailer)
+
+
+# --- review follow-ups: pinned webhook posts, browser-bound sign-in --------------------
+
+
+def test_outbound_posts_go_to_the_vetted_address_with_the_hostname_for_tls():
+    from app.services.outbound import httpx_poster, pinned_url
+
+    assert pinned_url("https://hooks.example.com/x?y=1", "93.184.216.34") == (
+        "https://93.184.216.34/x?y=1",
+        "hooks.example.com",
+    )
+    assert pinned_url("https://hooks.example.com:8443/x", "2606:2800::1") == (
+        "https://[2606:2800::1]:8443/x",
+        "hooks.example.com",
+    )
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(204)
+
+    status = httpx_poster(
+        "https://hooks.example.com/mde",
+        b"{}",
+        {"X-MDE-Event": "e"},
+        "93.184.216.34",
+        transport=httpx.MockTransport(handler),
+    )
+    [req] = seen
+    assert status == 204 and req.url.host == "93.184.216.34" and req.headers["host"] == "hooks.example.com"
+    assert req.extensions["sni_hostname"] == "hooks.example.com"
+
+
+def test_magic_link_page_only_completes_in_the_browser_that_opened_it(client):
+    import re
+
+    client.post("/auth/magic-link", json={"email": "pat@harbor.example.org"})
+    link = client.app.state.mailer.sent[-1].link.replace("http://localhost:8000", "")
+    token = link.split("token=")[1]
+    # an attacker auto-submitting their own token from another browser: no binding cookie
+    other = TestClient(client.app)
+    r = other.post("/auth/magic-link/complete", data={"token": token, "nonce": "guess"}, follow_redirects=False)
+    assert r.status_code == 403 and "mde_session" not in r.cookies
+    # the real browser: opens the page (cookie + nonce), then presses the button
+    form = client.get(link)
+    nonce = re.search(r"name=nonce value='([^']+)'", form.text).group(1)
+    assert "mde_login" in form.cookies
+    r = client.post("/auth/magic-link/complete", data={"token": token, "nonce": nonce}, follow_redirects=False)
+    assert r.status_code == 303 and "mde_session" in r.cookies
+
+
+def test_sso_browser_flow_only_completes_in_the_browser_that_started_it(client, idp):  # noqa: F811
+    client.app.state.settings.public_app_url = "http://web.test/app"
+    setup_sso(client, idp)
+    email = "pat@harbor.example.org"
+    # the web-app flow: the start response binds this browser; the callback from the IdP completes here
+    started = client.post("/auth/sso/start", json={"email": email, "to_app": True})
+    assert "mde_sso" in started.cookies
+    code, state = idp.authorize(started.json()["authorize_url"], email)
+    stranger = TestClient(client.app)  # the victim's browser, sent the attacker's callback URL
+    r = stranger.get("/auth/sso/callback", params={"code": code, "state": state}, follow_redirects=False)
+    assert r.status_code == 403 and "start again" in r.json()["detail"]
+    # the attempt is burned, even for the browser that started it
+    r = client.get("/auth/sso/callback", params={"code": code, "state": state}, follow_redirects=False)
+    assert r.status_code == 401
+    # done properly, in one browser
+    started = client.post("/auth/sso/start", json={"email": email, "to_app": True})
+    code, state = idp.authorize(started.json()["authorize_url"], email)
+    r = client.get("/auth/sso/callback", params={"code": code, "state": state}, follow_redirects=False)
+    assert r.status_code == 303 and "#token=" in r.headers["location"]
+    # the plain API flow returns the token in the body and signs no browser in, so it needs no binding
+    url = stranger.post("/auth/sso/start", json={"email": email}).json()["authorize_url"]
+    code, state = idp.authorize(url, email)
+    assert TestClient(client.app).get("/auth/sso/callback", params={"code": code, "state": state}).status_code == 200

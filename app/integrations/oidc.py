@@ -49,8 +49,12 @@ class OIDCClient:
         self._resolve = resolve or (None if transport is not None else resolve_host)
 
     def _vet(self, url: str, what: str) -> str:
+        if self._resolve is None:  # test transport: hosts don't exist in DNS, so only the scheme is checked
+            if not (url.startswith("https://") or (self._allow_local and url.startswith("http://"))):
+                raise OIDCError(f"identity provider's {what} is not allowed: must be https")
+            return url
         try:
-            check_destination(url, allow_http=self._allow_local, resolve=self._resolve or (lambda host: []))
+            check_destination(url, allow_http=self._allow_local, resolve=self._resolve)
         except DestinationError as e:
             raise OIDCError(f"identity provider's {what} is not allowed: {e}") from e
         return url

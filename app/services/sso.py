@@ -10,6 +10,7 @@ Security rules:
 import hashlib
 import secrets
 from datetime import timedelta
+from urllib.parse import parse_qs, urlsplit
 
 from sqlmodel import Session, col, select
 
@@ -146,6 +147,11 @@ def enforced_for(session: Session, email: str) -> bool:
 # --- sign-in round trip ----------------------------------------------------------------
 
 
+def state_of(authorize_url: str) -> str:
+    """The `state` parameter of an authorize URL from `start`."""
+    return parse_qs(urlsplit(authorize_url).query)["state"][0]
+
+
 def start(session: Session, email: str, oidc: OIDCClient, base_url: str, next_path: str | None = None) -> str:
     """Returns the identity provider URL to send the person to."""
     conn = connection_for_email(session, email)
@@ -179,13 +185,24 @@ def start(session: Session, email: str, oidc: OIDCClient, base_url: str, next_pa
 
 
 def finish(
-    session: Session, code: str, state: str, oidc: OIDCClient, box: SecretBox, base_url: str
+    session: Session,
+    code: str,
+    state: str,
+    oidc: OIDCClient,
+    box: SecretBox,
+    base_url: str,
+    *,
+    browser_bound: bool = True,
 ) -> tuple[User, str, str | None]:
+    """`browser_bound`: the callback arrived in the browser that started this attempt (its binding cookie
+    matched). An attempt that will sign a browser in (it has a next_path) is refused without it and burned."""
     row = session.exec(select(SSOLoginState).where(SSOLoginState.state_hash == _hash(state))).first()
     if row is None or row.used_at is not None or as_utc(row.expires_at) < utcnow():
         raise SSOError("this sign-in attempt is invalid or expired; start again", 401)
     row.used_at = utcnow()
     session.commit()
+    if row.next_path and not browser_bound:
+        raise SSOError("this sign-in must finish in the browser that started it; start again", 403)
     conn = session.get(SSOConnection, row.connection_id)
     try:
         id_token = oidc.exchange(

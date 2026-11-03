@@ -5,7 +5,9 @@ X-MDE-Timestamp so receivers can reject replays. Deliveries retry with exponenti
 dead after MAX_ATTEMPTS.
 
 Subscriber URLs are user input, so destinations that resolve to private, loopback, link-local or reserved
-addresses are refused (server-side request forgery). Plain http is allowed only in mock mode.
+addresses are refused (server-side request forgery). Plain http is allowed only in mock mode. The post goes to
+the address that was vetted, not to a second lookup of the name, so a DNS answer can't change between the check
+and the connection (rebinding); TLS still verifies the certificate against the hostname.
 """
 
 import hashlib
@@ -31,7 +33,7 @@ BATCH = 50
 TIMEOUT = 10.0
 
 Resolver = Callable[[str], list[str]]
-Poster = Callable[[str, bytes, dict[str, str]], int]
+Poster = Callable[[str, bytes, dict[str, str], str | None], int]  # url, body, headers, vetted address
 
 
 class DestinationError(ValueError):
@@ -42,7 +44,9 @@ def resolve_host(host: str) -> list[str]:
     return sorted({info[4][0] for info in socket.getaddrinfo(host, None)})
 
 
-def check_destination(url: str, *, allow_http: bool, resolve: Resolver = resolve_host) -> None:
+def check_destination(url: str, *, allow_http: bool, resolve: Resolver = resolve_host) -> list[str]:
+    """Refuse a URL that isn't https (http in mock mode) or that resolves to a non-public address. Returns the
+    vetted addresses so the caller can connect to one of them rather than resolve the name again."""
     parts = urlsplit(url)
     if parts.scheme not in ("https", "http") or (parts.scheme == "http" and not allow_http):
         raise DestinationError("webhook URLs must use https")
@@ -58,16 +62,35 @@ def check_destination(url: str, *, allow_http: bool, resolve: Resolver = resolve
             if allow_http and ip.is_loopback:
                 continue  # local development in mock mode
             raise DestinationError(f"{parts.hostname} resolves to a non-public address")
+    if not addresses:
+        raise DestinationError(f"{parts.hostname} has no address")
+    return addresses
+
+
+def pinned_url(url: str, address: str) -> tuple[str, str]:
+    """`url` with its host replaced by `address`, plus the original host for the Host header and TLS name."""
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    literal = f"[{address}]" if ":" in address else address
+    netloc = f"{literal}:{parts.port}" if parts.port else literal
+    return parts._replace(netloc=netloc).geturl(), host
 
 
 def sign(secret: str, timestamp: str, body: bytes) -> str:
     return "sha256=" + hmac.new(secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
 
 
-def httpx_poster(url: str, body: bytes, headers: dict[str, str]) -> int:
-    # No redirects: a public URL could otherwise bounce the request to an internal one.
-    with httpx.Client(timeout=TIMEOUT, follow_redirects=False) as client:
-        return client.post(url, content=body, headers=headers).status_code
+def httpx_poster(url: str, body: bytes, headers: dict[str, str], address: str | None = None, *, transport=None) -> int:
+    # No redirects: a public URL could otherwise bounce the request to an internal one. With a vetted address
+    # the connection goes there; the Host header and the TLS server name stay the hostname.
+    extensions = {}
+    if address:
+        url, host = pinned_url(url, address)
+        headers = {**headers, "Host": host}
+        if url.startswith("https://"):
+            extensions["sni_hostname"] = host
+    with httpx.Client(timeout=TIMEOUT, follow_redirects=False, transport=transport) as client:
+        return client.post(url, content=body, headers=headers, extensions=extensions).status_code
 
 
 def backoff(attempts: int) -> timedelta:
@@ -99,7 +122,7 @@ def deliver_due(
             row.status, row.last_error = "dead", "subscription removed"
             continue
         try:
-            check_destination(sub.url, allow_http=allow_http, resolve=resolve)
+            addresses = check_destination(sub.url, allow_http=allow_http, resolve=resolve)
             body = json.dumps(row.payload, separators=(",", ":"), sort_keys=True).encode()
             ts = str(int(now.timestamp()))
             status = post(
@@ -113,6 +136,7 @@ def deliver_due(
                     "X-MDE-Timestamp": ts,
                     "X-MDE-Signature": sign(sub.secret, ts, body),
                 },
+                addresses[0],
             )
             error = None if 200 <= status < 300 else f"HTTP {status}"
         except DestinationError as e:

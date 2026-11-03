@@ -138,7 +138,9 @@ def test_events_are_signed_and_filtered(client, draft):
 
     sent = []
     with client.app.state.sessionmaker() as s:
-        n = deliver_due(s, utcnow(), post=lambda url, body, hdrs: sent.append((url, body, hdrs)) or 200, resolve=PUBLIC)
+        n = deliver_due(
+            s, utcnow(), post=lambda url, body, hdrs, addr: sent.append((url, body, hdrs)) or 200, resolve=PUBLIC
+        )
     assert n == len(sent) > 0
     types = {json.loads(b)["data"]["to_status"] for _, b, _ in sent}
     assert {"evidence_received", "verifying", "needs_review"} <= types
