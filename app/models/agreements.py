@@ -142,6 +142,9 @@ class MilestoneRead(MilestoneBase):
     release_due_at: datetime | None = Field(
         default=None, description="When the dispute window closes and the payee is paid, unless contested."
     )
+    pay_path: str | None = Field(
+        default=None, description="Invoice mode: where the payer pays this tranche (relative to the API), while open."
+    )
 
 
 # --- Agreement -------------------------------------------------------------------------

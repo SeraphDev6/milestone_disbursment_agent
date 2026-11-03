@@ -20,7 +20,9 @@ class SettlementBase(SQLModel):
     idempotency_key: str = Field(
         max_length=80, unique=True, description="'{milestone_id}-{attempt}'; sent as PayPal-Request-Id."
     )
-    paypal_ref: str | None = Field(default=None, max_length=64, index=True, description="Capture id or invoice id.")
+    paypal_ref: str | None = Field(
+        default=None, max_length=64, index=True, description="Capture id, invoice id, or pay-now order id."
+    )
     status: SettlementStatus = Field(
         sa_type=enum_type(SettlementStatus, 16), description="Mirrored from PayPal responses and webhooks."
     )
@@ -32,6 +34,7 @@ class Settlement(SettlementBase, table=True):
     id: str = id_field()
     milestone_id: str | None = fk("milestones.id")
     error: str | None = Field(default=None, max_length=500)
+    payer_url: str | None = Field(default=None, max_length=500)  # invoice mode: PayPal's invoice page for the payer
     created_at: datetime = timestamp()
     updated_at: datetime = Field(
         default_factory=utcnow, sa_type=DateTime(timezone=True), sa_column_kwargs={"onupdate": utcnow}
@@ -43,6 +46,9 @@ class Settlement(SettlementBase, table=True):
 class SettlementRead(SettlementBase):
     id: str
     milestone_status: MilestoneStatus
+    pay_url: str | None = Field(
+        default=None, description="Invoice mode: send the payer here to pay this tranche (while it's open)."
+    )
 
 
 class DisbursementBase(SQLModel):
@@ -84,7 +90,8 @@ class LedgerEntry(SQLModel, table=True):
     id: str = id_field()
     agreement_id: str | None = fk("agreements.id")
     milestone_id: str | None = Field(default=None, max_length=36, index=True)
-    # authorized, captured, voided, expired (holds); disbursed, refunded (after capture); invoiced, paid, invoice_cancelled
+    # authorized, captured, voided, expired (holds); disbursed, refunded (after capture);
+    # invoiced, paid (to the payee), collected (into the platform, paid out after), invoice_cancelled
     kind: str = Field(max_length=24)
     amount: Decimal = Field(max_digits=14, decimal_places=2)
     paypal_ref: str = Field(max_length=64)

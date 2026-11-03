@@ -39,8 +39,8 @@ def funding_summary(row: Agreement) -> FundingSummary:
         return by_kind.get(kind, Decimal(0))
 
     held = k("authorized") - k("captured") - k("voided") - k("expired")
-    in_window = k("captured") - k("disbursed") - k("refunded")
-    invoiced = k("invoiced") - k("paid") - k("invoice_cancelled")
+    in_window = k("captured") + k("collected") - k("disbursed") - k("refunded")
+    invoiced = k("invoiced") - k("paid") - k("collected") - k("invoice_cancelled")
     released = k("disbursed") + k("paid")
     cents = Decimal("0.01")
     return FundingSummary(
@@ -51,6 +51,12 @@ def funding_summary(row: Agreement) -> FundingSummary:
         refunded=k("refunded").quantize(cents),
         unfunded=(row.total_amount - held - in_window - invoiced - released).quantize(cents),
     )
+
+
+def pay_path(s) -> str | None:
+    from app.services.settlement import pay_path as path
+
+    return path(s)
 
 
 def _paypal_connected(party) -> bool | None:
@@ -87,7 +93,12 @@ def agreement_read(row: Agreement) -> AgreementRead:
                 )
                 for p in row.parties
             ],
-            "milestones": [MilestoneRead.model_validate(m) for m in row.milestones],
+            "milestones": [
+                MilestoneRead.model_validate(
+                    m, update={"pay_path": pay_path(m.settlements[-1]) if m.settlements else None}
+                )
+                for m in row.milestones
+            ],
             "funding": funding_summary(row),
             "lint": lint_agreement(row),
             "pending_invitations": _pending(row),

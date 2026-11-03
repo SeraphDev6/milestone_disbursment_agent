@@ -313,7 +313,7 @@ def _apply_capture_status(session: Session, s: Settlement, status: str, actor: s
 def release(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: datetime) -> Settlement:
     """Settle a verified tranche: capture its hold (escrow) or send a PayPal invoice (invoice mode)."""
     if m.agreement.settlement_mode == SettlementMode.invoice_on_verify:
-        return _release_by_invoice(session, gw, m, actor)
+        return _release_by_invoice(session, gw, m, actor, now)
 
     last = m.settlements[-1] if m.settlements else None
     if m.status == MilestoneStatus.settling and last and last.status == SettlementStatus.submitted:
@@ -596,6 +596,13 @@ def disburse_due(session: Session, gw: PayPalGateway, now: datetime, actor: str 
 
 
 # --- invoice mode ----------------------------------------------------------------------
+#
+# When a tranche verifies, the payer is asked to pay it:
+# - connected payee (direct): a pay-now link, /pay/{settlement id}, which creates a fresh PayPal order with the
+#   payee's merchant id as payee on each visit (links never go stale); the money goes straight to the payee.
+# - otherwise (platform): a PayPal invoice from the platform account; when it's paid, the payee is paid with
+#   PayPal Payouts. Invoicing as the payee needs PayPal's INVOICE_READ_WRITE partner feature, which isn't
+#   self-serve (sandbox: FEATURES_UNAUTHORIZED).
 
 INVOICE_TIMEOUT = timedelta(days=30)
 
@@ -604,18 +611,21 @@ def _party(m: Milestone, role: Role) -> Party:
     return next(p for p in m.agreement.parties if p.role == role)
 
 
-def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor: str) -> Settlement:
-    """Invoice-on-verify: the payer gets a PayPal invoice for the tranche when it verifies.
+def pay_path(s: Settlement) -> str | None:
+    """Where the payer pays an open invoice-mode request, relative to the API."""
+    if s.mode == SettlementMode.invoice_on_verify and s.status == SettlementStatus.submitted:
+        return f"/pay/{s.id}"
+    return None
 
-    Invoicing v2 bills as the account that owns the API credentials, so the invoicer shown is the payee's
-    PayPal email and, outside a single-payee demo, the payee must grant the platform third-party access.
-    """
+
+def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: datetime) -> Settlement:
     last = m.settlements[-1] if m.settlements else None
     if m.status == MilestoneStatus.settling and last and last.status == SettlementStatus.submitted:
-        if last.paypal_ref:
-            raise ServiceError("the invoice is out; the tranche settles when the payer pays it", 409)
-        s = last  # outcome of the previous send is unknown: resume with the same idempotency key
+        if m.payout_route == PayoutRoute.direct or last.paypal_ref:
+            raise ServiceError(f"payment is requested; the payer pays at {pay_path(last)}", 409)
+        s = last  # outcome of the previous invoice send is unknown: resume with the same idempotency key
     elif m.status in RELEASABLE:
+        route, merchant_id = _route(session, gw, m, actor, now)
         attempt = last.attempt + 1 if last else 1
         s = Settlement(
             milestone=m,
@@ -625,21 +635,31 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor
             status=SettlementStatus.submitted,
         )
         session.add(s)
-        transition(session, m, MilestoneStatus.settling, actor, "invoice_requested", attempt=attempt)
+        m.payout_route, m.payee_merchant_id = route, merchant_id
+        transition(
+            session, m, MilestoneStatus.settling, actor, "invoice_requested", attempt=attempt, payout_route=route
+        )
         session.commit()
+        if route == PayoutRoute.direct:
+            _ledger(session, m, "invoiced", f"request:{s.id}")
+            _note(session, m, actor, "payment_requested", settlement_id=s.id, pay_path=pay_path(s))
+            session.commit()
+            return s
     else:
         raise ServiceError(f"a tranche that is {m.status} can't be invoiced")
 
     a = m.agreement
+    payer_email = _party(m, Role.payer).paypal_email
+    if not payer_email:
+        raise ServiceError("the payer has no PayPal email to invoice")
     try:
         invoice = gw.create_and_send_invoice(
-            invoicer_email=_party(m, Role.payee).paypal_email,
-            recipient_email=_party(m, Role.payer).paypal_email,
+            recipient_email=payer_email,
             item_name=f"{a.title}: {m.title}",
             amount=m.amount,
             currency=a.currency,
             note=f"'{m.title}' met all {len(m.criteria)} acceptance criteria. Verdict and evidence are in the "
-            "agreement's audit log.",
+            "agreement's audit log. Paid to the payee once received.",
             reference=s.idempotency_key,
             request_id=s.idempotency_key,
         )
@@ -659,23 +679,105 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor
         raise _paypal_failure(e) from e
 
     s.paypal_ref = invoice.invoice_id
+    s.payer_url = invoice.payer_view_url
     _ledger(session, m, "invoiced", invoice.invoice_id)
     _note(session, m, actor, "invoice_sent", invoice_id=invoice.invoice_id, payer_view_url=invoice.payer_view_url)
     session.commit()
     return s
 
 
-def _close_invoice(session: Session, s: Settlement, paid: bool, actor: str, status: str = "") -> str:
+def payment_link(session: Session, gw: PayPalGateway, settlement_id: str, base_url: str) -> str:
+    """The payer opened /pay/{id}: send them to a fresh PayPal order (direct) or the PayPal invoice (platform)."""
+    s = session.get(Settlement, settlement_id)
+    if s is None or s.mode != SettlementMode.invoice_on_verify:
+        raise ServiceError("unknown payment request", 404)
+    if s.status == SettlementStatus.succeeded:
+        raise ServiceError("this tranche is already paid", 409)
+    if s.status != SettlementStatus.submitted:
+        raise ServiceError("this payment request was closed; the payee can ask for a new one", 410)
+    m = s.milestone
+    if m.payout_route != PayoutRoute.direct:
+        if not s.payer_url:
+            raise ServiceError("the invoice is still being sent; try again in a minute", 409)
+        return s.payer_url
+    a = m.agreement
+    try:
+        order = gw.create_payment_order(
+            reference_id=m.id,
+            description=f"{a.title}: {m.title}",
+            amount=m.amount,
+            currency=a.currency,
+            payee_merchant_id=m.payee_merchant_id,
+            return_url=f"{base_url}/paypal/paid",
+            cancel_url=f"{base_url}/paypal/cancel",
+            request_id=f"{s.idempotency_key}-order-{uuid.uuid4().hex[:12]}",
+        )
+    except PayPalError as e:
+        raise _paypal_failure(e) from e
+    s.paypal_ref = order.order_id  # only the latest order can complete the payment
+    _note(session, m, "payer:pay_link", "payment_started", order_id=order.order_id)
+    session.commit()
+    return order.approve_url
+
+
+def complete_payment(session: Session, gw: PayPalGateway, order_id: str, now: datetime) -> Milestone:
+    """The payer approved a pay-now order and came back: capture it. Idempotent."""
+    s = session.exec(
+        select(Settlement).where(Settlement.paypal_ref == order_id, Settlement.mode == SettlementMode.invoice_on_verify)
+    ).first()
+    if s is None:
+        raise ServiceError("unknown or superseded payment; open the latest pay link", 404)
+    if s.status != SettlementStatus.submitted:
+        return s.milestone
+    actor = "payer:paypal_return"
+    try:
+        capture = gw.capture_order(order_id, request_id=f"{order_id}-capture")
+    except PayPalError as e:
+        _note(session, s.milestone, actor, "payment_failed", order_id=order_id, error=str(e)[:300])
+        session.commit()
+        raise _paypal_failure(e) from e
+    _apply_payment_status(session, s, capture.capture_id, capture.status, actor, now)
+    session.commit()
+    if capture.status not in ("COMPLETED", "PENDING"):
+        raise ServiceError("PayPal declined the payment; try again from the pay link", 402)
+    return s.milestone
+
+
+def _apply_payment_status(
+    session: Session, s: Settlement, capture_id: str, status: str, actor: str, now: datetime
+) -> str:
+    m = s.milestone
+    if status == "COMPLETED":
+        return _close_invoice(session, s, True, actor, now, ref=capture_id)
+    if status == "PENDING":
+        _note(session, m, actor, "payment_pending", capture_id=capture_id)
+        return "payment pending"
+    _note(session, m, actor, "payment_declined", capture_id=capture_id, status=status)  # payer may try again
+    return "payment declined"
+
+
+def _close_invoice(
+    session: Session, s: Settlement, paid: bool, actor: str, now: datetime, status: str = "", ref: str | None = None
+) -> str:
     m = s.milestone
     if s.status != SettlementStatus.submitted:
         return "ignored: invoice already closed"
+    ref = ref or s.paypal_ref or "unknown"
+    if paid and m.payout_route == PayoutRoute.platform:
+        # Paid into the platform account: pay the payee with Payouts now.
+        s.status = SettlementStatus.succeeded
+        m.captured_at = m.release_due_at = now
+        _ledger(session, m, "collected", ref)
+        transition(session, m, MilestoneStatus.held, actor, "invoice_paid", invoice_id=s.paypal_ref, attempt=s.attempt)
+        session.info.setdefault("payout_due", set()).add(m.id)
+        return "invoice paid"
     if paid:
         s.status = SettlementStatus.succeeded
-        _ledger(session, m, "paid", s.paypal_ref or "unknown")
-        transition(session, m, MilestoneStatus.settled, actor, "settled", invoice_id=s.paypal_ref, attempt=s.attempt)
+        _ledger(session, m, "paid", ref)
+        transition(session, m, MilestoneStatus.settled, actor, "settled", paypal_ref=ref, attempt=s.attempt)
         return "invoice paid"
     s.status = status or SettlementStatus.failed
-    _ledger(session, m, "invoice_cancelled", s.paypal_ref or "unknown")
+    _ledger(session, m, "invoice_cancelled", s.paypal_ref or f"request:{s.id}")
     transition(
         session,
         m,
@@ -695,24 +797,27 @@ def expire_stale_invoices(
     actor: str = "system:expiry",
     timeout: timedelta = INVOICE_TIMEOUT,
 ) -> int:
-    """Cancel invoices left unpaid past the timeout so the tranche can be re-invoiced or reviewed."""
+    """Close payment requests left unpaid past the timeout (cancelling PayPal invoices) so the tranche can be
+    asked for again or reviewed. A pay-now order the payer never approved simply lapses at PayPal."""
     count = 0
     stale = session.exec(
         select(Settlement).where(
             Settlement.mode == SettlementMode.invoice_on_verify,
             Settlement.status == SettlementStatus.submitted,
-            col(Settlement.paypal_ref).is_not(None),
         )
     ).all()
     for s in stale:
         if now - as_utc(s.created_at) <= timeout:
             continue
-        try:
-            gw.cancel_invoice(s.paypal_ref, request_id=f"{s.paypal_ref}-cancel")
-        except PayPalError as e:
-            if e.ambiguous:
-                continue  # try again next run
-        _close_invoice(session, s, paid=False, actor=actor, status=SettlementStatus.expired)
+        if s.milestone.payout_route != PayoutRoute.direct:
+            if not s.paypal_ref:
+                continue  # invoice send outcome unknown; release resumes it
+            try:
+                gw.cancel_invoice(s.paypal_ref, request_id=f"{s.paypal_ref}-cancel")
+            except PayPalError as e:
+                if e.ambiguous:
+                    continue  # try again next run
+        _close_invoice(session, s, paid=False, actor=actor, now=now, status=SettlementStatus.expired)
         count += 1
     session.commit()
     return count
@@ -768,6 +873,18 @@ def _dispatch(session: Session, event_type: str, res: dict, now: datetime) -> st
         return "hold voided"
 
     if event_type in CAPTURE_EVENTS:
+        order_id = _related(res, "order_id")
+        paid = (
+            session.exec(
+                select(Settlement).where(
+                    Settlement.paypal_ref == order_id, Settlement.mode == SettlementMode.invoice_on_verify
+                )
+            ).first()
+            if order_id
+            else None
+        )
+        if paid is not None:  # invoice mode, pay-now order
+            return _apply_payment_status(session, paid, rid, CAPTURE_EVENTS[event_type], actor, now)
         s = session.exec(select(Settlement).where(Settlement.paypal_ref == rid)).first()
         if s is None:
             # Capture response was lost (ambiguous failure): match through the authorization.
@@ -819,12 +936,12 @@ def _dispatch(session: Session, event_type: str, res: dict, now: datetime) -> st
         s = session.exec(select(Settlement).where(Settlement.paypal_ref == rid)).first()
         if s is None or s.mode != SettlementMode.invoice_on_verify:
             return "ignored: no settlement for this invoice"
-        return _close_invoice(session, s, paid=event_type == "INVOICING.INVOICE.PAID", actor=actor)
+        return _close_invoice(session, s, paid=event_type == "INVOICING.INVOICE.PAID", actor=actor, now=now)
 
     return "ignored: event type not handled"
 
 
-def handle_webhook(session: Session, event: dict, now: datetime) -> str:
+def handle_webhook(session: Session, event: dict, now: datetime, gw: PayPalGateway | None = None) -> str:
     event_id, event_type = event.get("id"), event.get("event_type")
     if not event_id or not event_type:
         raise ServiceError("webhook event missing id or event_type", 400)
@@ -838,4 +955,11 @@ def handle_webhook(session: Session, event: dict, now: datetime) -> str:
     except IntegrityError:
         session.rollback()  # the same event delivered concurrently; the other copy won
         return "duplicate"
+    for mid in session.info.pop("payout_due", set()):  # invoice paid into the platform: pay the payee now
+        m = session.get(Milestone, mid)
+        if gw is not None and m is not None and m.status == MilestoneStatus.held:
+            try:
+                pay_out(session, gw, m, "webhook:paypal", now)
+            except ServiceError:
+                pass  # recorded on the tranche; the payouts job retries
     return outcome

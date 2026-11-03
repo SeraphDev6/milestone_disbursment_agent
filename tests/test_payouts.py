@@ -328,3 +328,103 @@ def test_disbursement_rows_record_every_attempt(client, draft):
 
         rows = s.exec(select(Disbursement).where(Disbursement.milestone_id == m1)).all()
         assert [(d.attempt, d.status) for d in rows] == [(1, "failed"), (2, "succeeded")]
+
+
+# --- invoice mode with a connected payee: pay-now link ---------------------------------
+
+
+@pytest.fixture
+def pay_link_agreement(client, draft):
+    from tests.test_reporting import complete_tranche_1
+
+    aid, (m1, m2), ctx = create_active(client, {**draft, "settlement_mode": "invoice_on_verify"}, auto_release=True)
+    connect_paypal(client, ctx)
+    complete_tranche_1(client, m1, ctx)  # verifies and auto-requests payment
+    return aid, (m1, m2), ctx
+
+
+def open_pay_link(client, aid, ctx) -> str:
+    path = agreement(client, aid, ctx)["milestones"][0]["pay_path"]
+    r = client.get(path, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    return r.headers["location"]  # PayPal approval page (mock)
+
+
+def test_pay_link_pays_the_payee_directly(client, pay_link_agreement):
+    aid, (m1, _), ctx = pay_link_agreement
+    a = agreement(client, aid, ctx)
+    assert a["milestones"][0]["status"] == "settling" and a["funding"]["invoiced"] == "10000.00"
+    assert not gw(client).invoices  # no PayPal invoice: PayPal won't let us invoice as the payee
+
+    page = client.get(open_pay_link(client, aid, ctx))  # payer approves; PayPal returns to /paypal/paid
+    assert page.status_code == 200 and "Paid" in page.text
+    a = agreement(client, aid, ctx)
+    assert a["milestones"][0]["status"] == "settled" and a["milestones"][0]["pay_path"] is None
+    assert a["funding"] == funding(released="10000.00")
+    [order] = gw(client).orders.values()
+    assert order["intent"] == "CAPTURE" and order["payee"].startswith("MOCKMERCHANT") and not gw(client).payouts
+
+    again = client.get(open_path(client, m1), follow_redirects=False)
+    assert again.status_code == 409 and "already paid" in again.text
+
+
+def open_path(client, mid) -> str:
+    with client.app.state.sessionmaker() as s:
+        from sqlmodel import select
+
+        from app.models import Settlement
+
+        return f"/pay/{s.exec(select(Settlement).where(Settlement.milestone_id == mid)).one().id}"
+
+
+def test_only_the_latest_order_completes_payment(client, pay_link_agreement):
+    aid, (m1, _), ctx = pay_link_agreement
+    first = open_pay_link(client, aid, ctx)
+    second = open_pay_link(client, aid, ctx)
+    page = client.get(first)
+    assert page.status_code == 404 and "superseded" in page.text
+    assert client.get(second).status_code == 200
+    assert tranche(client, m1).status == "settled"
+
+
+def test_release_points_at_the_pay_link(client, pay_link_agreement):
+    _aid, (m1, _), ctx = pay_link_agreement
+    r = client.post(f"/milestones/{m1}/release", headers=h(ctx["payer"]))
+    assert r.status_code == 409 and "/pay/" in r.json()["detail"]
+
+
+def test_pending_payment_settles_by_webhook(client, pay_link_agreement):
+    aid, (m1, _), ctx = pay_link_agreement
+    url = open_pay_link(client, aid, ctx)
+    order_id = parse_qs(urlsplit(url).query)["token"][0]
+    gw(client).next_capture_status = "PENDING"
+    assert "processing" in client.get(url).text
+    event = {
+        "id": "WH-PAY",
+        "event_type": "PAYMENT.CAPTURE.COMPLETED",
+        "resource": {"id": "CAP-9", "supplementary_data": {"related_ids": {"order_id": order_id}}},
+    }
+    assert webhook(client, event).json() == {"outcome": "invoice paid"}
+    assert tranche(client, m1).status == "settled"
+
+
+def test_declined_payment_can_be_retried(client, pay_link_agreement):
+    aid, (m1, _), ctx = pay_link_agreement
+    gw(client).next_capture_status = "DECLINED"
+    page = client.get(open_pay_link(client, aid, ctx))
+    assert page.status_code == 402 and "declined" in page.text
+    gw(client).next_capture_status = "COMPLETED"
+    assert client.get(open_pay_link(client, aid, ctx)).status_code == 200
+    assert tranche(client, m1).status == "settled"
+
+
+def test_unpaid_pay_link_expires_without_calling_paypal(client, pay_link_agreement):
+    from app.services.settlement import expire_stale_invoices
+
+    aid, (m1, _), ctx = pay_link_agreement
+    with client.app.state.sessionmaker() as s:
+        assert expire_stale_invoices(s, gw(client), utcnow() + timedelta(days=31)) == 1
+    assert tranche(client, m1).status == "settlement_failed"
+    r = client.get(open_path(client, m1))
+    assert r.status_code == 410
+    assert agreement(client, aid, ctx)["funding"]["invoiced"] == "0.00"

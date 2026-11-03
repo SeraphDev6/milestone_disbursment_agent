@@ -4,13 +4,13 @@ import json
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlmodel import Field, SQLModel
 
 from app.api.deps import MilestoneAccessDep, SessionDep, gateway
 from app.api.views import agreement_read, html_page
 from app.db import utcnow
-from app.models import AgreementRead, DisbursementRead, SettlementRead
+from app.models import AgreementRead, DisbursementRead, MilestoneStatus, SettlementRead
 from app.services import ServiceError, settlement
 from app.services.access import Action
 
@@ -56,7 +56,40 @@ def release(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep, re
     access, m = auth
     access.require(Action.release)
     s = settlement.release(session, gateway(request), m, access.actor, utcnow())
-    return SettlementRead.model_validate(s, update={"milestone_status": m.status})
+    return settlement_read(s, m, request)
+
+
+def settlement_read(s, m, request: Request) -> SettlementRead:
+    path = settlement.pay_path(s)
+    base = request.app.state.settings.public_base_url
+    return SettlementRead.model_validate(
+        s, update={"milestone_status": m.status, "pay_url": f"{base}{path}" if path else None}
+    )
+
+
+@router.get("/pay/{settlement_id}", include_in_schema=False)
+def pay(settlement_id: str, session: SessionDep, request: Request) -> Response:
+    """The payer's link for an invoice-mode tranche: a fresh PayPal order (or the PayPal invoice) each visit."""
+    try:
+        url = settlement.payment_link(
+            session, gateway(request), settlement_id, request.app.state.settings.public_base_url
+        )
+    except ServiceError as e:
+        return html_page("Nothing to pay", e.message, e.status_code)
+    return RedirectResponse(url, status_code=303)
+
+
+@router.get("/paypal/paid", include_in_schema=False)
+def paypal_paid(token: str, session: SessionDep, request: Request) -> HTMLResponse:
+    try:
+        m = settlement.complete_payment(session, gateway(request), token, utcnow())
+    except ServiceError as e:
+        return html_page("Payment didn't complete", e.message, e.status_code)
+    if m.status == MilestoneStatus.settled:
+        return html_page("Paid", f"{m.agreement.currency} {m.amount} for '{m.title}' was paid. You can close this tab.")
+    return html_page(
+        "Payment processing", "PayPal is still processing this payment; the tranche settles when it clears."
+    )
 
 
 class ContestIn(SQLModel):
@@ -124,4 +157,4 @@ async def paypal_webhook(request: Request, session: SessionDep) -> dict[str, str
     headers = {k.lower(): v for k, v in request.headers.items()}
     if not gateway(request).verify_webhook(headers, event):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "webhook signature not verified")
-    return {"outcome": settlement.handle_webhook(session, event, utcnow())}
+    return {"outcome": settlement.handle_webhook(session, event, utcnow(), gateway(request))}

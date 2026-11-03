@@ -9,6 +9,9 @@ Escrow uses Orders v2 with intent=AUTHORIZE, one order per tranche. Two payout r
 - platform: the payee never connected, so the order pays the platform account and the payee is paid with
   PayPal Payouts to their email.
 
+Invoice mode: a connected payee is paid through a pay-now order (intent=CAPTURE, payee = their merchant id); an
+unconnected one through a PayPal invoice from the platform account, then Payouts.
+
 Two implementations share one interface:
 - MockPayPal: in-memory, deterministic MOCK ids, approval simulated by our own /mock route.
 - SandboxPayPal: PayPal REST over httpx. Kept behind this interface so it can be swapped for the
@@ -128,6 +131,21 @@ class PayPalGateway(Protocol):
 
     def authorize_order(self, order_id: str, *, request_id: str) -> Authorization: ...
 
+    def create_payment_order(
+        self,
+        *,
+        reference_id: str,
+        description: str,
+        amount: Decimal,
+        currency: str,
+        payee_merchant_id: str,
+        return_url: str,
+        cancel_url: str,
+        request_id: str,
+    ) -> CreatedOrder: ...  # intent=CAPTURE: the payer pays the payee now (invoice mode, connected payee)
+
+    def capture_order(self, order_id: str, *, request_id: str) -> Capture: ...
+
     def reauthorize(
         self, authorization_id: str, *, amount: Decimal, currency: str, payee_merchant_id: str | None, request_id: str
     ) -> Authorization: ...
@@ -166,7 +184,6 @@ class PayPalGateway(Protocol):
     def create_and_send_invoice(
         self,
         *,
-        invoicer_email: str,
         recipient_email: str,
         item_name: str,
         amount: Decimal,
@@ -280,6 +297,49 @@ class MockPayPal:
             return CreatedOrder(oid, f"{self.base_url}/mock/paypal/approve?token={oid}")
 
         return self._idempotent(request_id, create)
+
+    def create_payment_order(
+        self, *, reference_id, description, amount, currency, payee_merchant_id, return_url, cancel_url, request_id
+    ) -> CreatedOrder:
+        def create():
+            oid = self._id("ORDER")
+            self.orders[oid] = {
+                "status": "CREATED",
+                "intent": "CAPTURE",
+                "amount": amount,
+                "currency": currency,
+                "payee": payee_merchant_id,
+                "return_url": return_url,
+                "reference_id": reference_id,
+            }
+            return CreatedOrder(oid, f"{self.base_url}/mock/paypal/approve?token={oid}")
+
+        return self._idempotent(request_id, create)
+
+    def capture_order(self, order_id, *, request_id) -> Capture:
+        def capture():
+            order = self.orders.get(order_id)
+            if order is None or order.get("intent") != "CAPTURE":
+                raise PayPalError("RESOURCE_NOT_FOUND: order", status=404)
+            if order["status"] == "COMPLETED":
+                raise PayPalError("ORDER_ALREADY_CAPTURED", status=422)
+            if order["status"] != "APPROVED":
+                raise PayPalError("ORDER_NOT_APPROVED: payer has not approved the order", status=422)
+            status = self.next_capture_status
+            cid = self._id("CAPTURE")
+            if status in ("COMPLETED", "PENDING"):
+                order["status"] = "COMPLETED"
+                self.captures[cid] = {
+                    "order_id": order_id,
+                    "amount": order["amount"],
+                    "payee": order["payee"],
+                    "delayed": False,
+                    "disbursed": True,
+                    "refunded": False,
+                }
+            return Capture(cid, status)
+
+        return self._idempotent(request_id, capture)
 
     def authorize_order(self, order_id, *, request_id) -> Authorization:
         def authorize():
@@ -420,7 +480,7 @@ class MockPayPal:
     # --- invoices and webhooks ---
 
     def create_and_send_invoice(
-        self, *, invoicer_email, recipient_email, item_name, amount, currency, note, reference, request_id
+        self, *, recipient_email, item_name, amount, currency, note, reference, request_id
     ) -> Invoice:
         def create():
             iid = self._id("INV")
@@ -428,7 +488,7 @@ class MockPayPal:
                 "status": "SENT",
                 "amount": amount,
                 "currency": currency,
-                "invoicer": invoicer_email,
+                "invoicer": "platform",
                 "recipient": recipient_email,
                 "reference": reference,
             }
@@ -546,6 +606,41 @@ class SandboxPayPal:
     def create_authorize_order(
         self, *, reference_id, description, amount, currency, payee_merchant_id, return_url, cancel_url, request_id
     ) -> CreatedOrder:
+        return self._create_order(
+            "AUTHORIZE",
+            reference_id,
+            description,
+            amount,
+            currency,
+            payee_merchant_id,
+            return_url,
+            cancel_url,
+            request_id,
+        )
+
+    def create_payment_order(
+        self, *, reference_id, description, amount, currency, payee_merchant_id, return_url, cancel_url, request_id
+    ) -> CreatedOrder:
+        return self._create_order(
+            "CAPTURE",
+            reference_id,
+            description,
+            amount,
+            currency,
+            payee_merchant_id,
+            return_url,
+            cancel_url,
+            request_id,
+        )
+
+    def capture_order(self, order_id, *, request_id) -> Capture:
+        data = self._call("POST", f"/v2/checkout/orders/{order_id}/capture", request_id=request_id)
+        capture = data["purchase_units"][0]["payments"]["captures"][0]
+        return Capture(capture["id"], capture["status"])
+
+    def _create_order(
+        self, intent, reference_id, description, amount, currency, payee_merchant_id, return_url, cancel_url, request_id
+    ) -> CreatedOrder:
         unit = {
             "reference_id": reference_id,
             "custom_id": reference_id,
@@ -555,7 +650,7 @@ class SandboxPayPal:
         if payee_merchant_id:
             unit["payee"] = {"merchant_id": payee_merchant_id}
         body = {
-            "intent": "AUTHORIZE",
+            "intent": intent,
             "purchase_units": [unit],
             "payment_source": {
                 "paypal": {
@@ -736,10 +831,10 @@ class SandboxPayPal:
     # --- invoices and webhooks ---
 
     def create_and_send_invoice(
-        self, *, invoicer_email, recipient_email, item_name, amount, currency, note, reference, request_id
+        self, *, recipient_email, item_name, amount, currency, note, reference, request_id
     ) -> Invoice:
-        """Invoicing v2 bills as the account that owns these API credentials. invoicer_email must be that
-        account (the payee's, in a single-payee demo) unless the payee granted third-party permissions."""
+        """Sent from the platform's own account. Invoicing for a payee would need the INVOICE_READ_WRITE partner
+        feature, which PayPal enables per app (sandbox: FEATURES_UNAUTHORIZED); not available self-serve."""
         body = {
             "detail": {
                 "currency_code": currency,
@@ -747,7 +842,6 @@ class SandboxPayPal:
                 "reference": reference[:120],
                 "payment_term": {"term_type": "DUE_ON_RECEIPT"},
             },
-            "invoicer": {"email_address": invoicer_email},
             "primary_recipients": [{"billing_info": {"email_address": recipient_email}}],
             "items": [
                 {
@@ -762,13 +856,14 @@ class SandboxPayPal:
         invoice_id = data.get("id") or data.get("href", "").rsplit("/", 1)[-1]
         if not invoice_id:
             raise PayPalError("PayPal returned no invoice id")
-        sent = self._call(
+        self._call(
             "POST",
             f"/v2/invoicing/invoices/{invoice_id}/send",
             request_id=f"{request_id}-send",
             json={"send_to_invoicer": False, "send_to_recipient": True},
         )
-        return Invoice(invoice_id, sent.get("href"))
+        sent = self._call("GET", f"/v2/invoicing/invoices/{invoice_id}")
+        return Invoice(invoice_id, (sent.get("detail", {}).get("metadata") or {}).get("recipient_view_url"))
 
     def cancel_invoice(self, invoice_id, *, request_id) -> None:
         self._call(

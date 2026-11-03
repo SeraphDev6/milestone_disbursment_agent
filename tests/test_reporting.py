@@ -4,6 +4,7 @@ import hmac
 import io
 import json
 from datetime import timedelta
+from decimal import Decimal
 
 import pytest
 from pypdf import PdfReader
@@ -45,12 +46,15 @@ def test_verified_tranche_is_invoiced_then_paid(client, invoice_agreement):
 
     [inv_id] = client.app.state.paypal.invoices
     inv = client.app.state.paypal.invoices[inv_id]
-    assert (inv["invoicer"], inv["recipient"]) == ("grantee@example.org", "funder@example.org")
+    # Payee never connected PayPal: the platform invoices the payer, then pays the payee with Payouts.
+    assert (inv["invoicer"], inv["recipient"]) == ("platform", "funder@example.org")
     assert client.post(f"/milestones/{m1}/release", headers=h(keys["payer"])).status_code == 409  # already out
 
     page = client.post(f"/mock/paypal/invoices/{inv_id}/pay")
     assert "PAID" in page.text
     assert status_of(client, aid, keys) == "settled"
+    [payout] = client.app.state.paypal.payouts.values()
+    assert payout["email"] == "grantee@example.org" and payout["amount"] == Decimal("10000.00")
     assert funding(client, aid, keys) == {
         "held": "0.00",
         "in_dispute_window": "0.00",

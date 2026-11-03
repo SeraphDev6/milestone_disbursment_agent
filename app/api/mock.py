@@ -61,7 +61,7 @@ def pay_invoice(invoice_id: str, request: Request, session: SessionDep) -> Redir
             "event_type": "INVOICING.INVOICE.PAID",
             "resource": {"id": invoice_id},
         }
-        settlement.handle_webhook(session, event, utcnow())
+        settlement.handle_webhook(session, event, utcnow(), request.app.state.paypal)
     return RedirectResponse(f"/mock/paypal/invoices/{invoice_id}", status_code=303)
 
 
