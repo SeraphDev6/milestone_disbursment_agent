@@ -3,8 +3,8 @@ from decimal import Decimal
 
 import pytest
 
-from app.db import MilestoneRow, utcnow
-from app.paypal import MOCK_WEBHOOK_SIGNATURE, PayPalError
+from app.db.models import MilestoneRow, utcnow
+from app.integrations.paypal import MOCK_WEBHOOK_SIGNATURE, PayPalError
 
 
 def h(key):
@@ -126,7 +126,7 @@ def test_hold_expires_after_29_days(client, active):
 
 
 def test_expiry_job(client, active):
-    from app.escrow import expire_stale_holds
+    from app.services.settlement import expire_stale_holds
 
     _, (m1, m2), keys = active
     fund(client, m1, keys)
@@ -225,7 +225,7 @@ def test_return_url_is_idempotent(client, active):
     with client.app.state.sessionmaker() as s:
         from sqlalchemy import func, select
 
-        from app.db import LedgerRow
+        from app.db.models import LedgerRow
 
         assert s.scalar(select(func.count()).select_from(LedgerRow).where(LedgerRow.kind == "authorized")) == 1
 

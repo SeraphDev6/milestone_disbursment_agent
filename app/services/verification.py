@@ -13,12 +13,12 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
-from app import checks, escrow
-from app.ai import AIError, AIRuntime
-from app.db import AuditEventRow, EvidenceRow, MilestoneRow, PartyRow, VerdictRow, as_utc, record_audit, utcnow
-from app.domain import (
+from app.ai.agents import AIError, AIRuntime
+from app.db.models import AuditEventRow, EvidenceRow, MilestoneRow, PartyRow, VerdictRow, as_utc, record_audit, utcnow
+from app.domain import checks
+from app.domain.models import (
     AgreementStatus,
     Criterion,
     CriterionResult,
@@ -28,8 +28,8 @@ from app.domain import (
     SettlementMode,
     VerificationMethod,
 )
-from app.escrow import EscrowError
-from app.paypal import PayPalGateway
+from app.integrations.paypal import PayPalGateway
+from app.services import ServiceError, settlement
 
 ACCEPTS_EVIDENCE = {
     MilestoneStatus.pending.value,
@@ -41,7 +41,7 @@ ACCEPTS_EVIDENCE = {
 MAX_RERUNS = 3
 
 
-class VerificationError(EscrowError):
+class VerificationError(ServiceError):
     """Same HTTP mapping as escrow errors."""
 
 
@@ -92,7 +92,7 @@ def judge(
     evidence: list[EvidenceEvent],
     attachments: dict[str, tuple[bytes, str]] | None = None,
 ) -> Judgment:
-    from app.ai import VERIFY_PROMPT_VERSION
+    from app.ai.agents import VERIFY_PROMPT_VERSION
 
     results: dict[str, CriterionResult] = {}
     for c in criteria:
@@ -169,8 +169,8 @@ def _settle_if_possible(session: Session, gw: PayPalGateway, m: MilestoneRow, ac
         session.commit()
         return
     try:
-        escrow.release(session, gw, m, actor, now)
-    except EscrowError as e:
+        settlement.release(session, gw, m, actor, now)
+    except ServiceError as e:
         record_audit(session, a.id, actor, "release_failed", milestone_id=m.id, detail={"error": e.message})
         session.commit()
 
@@ -217,7 +217,7 @@ def submit_evidence(
     )
     m.evidence.append(row)
     if m.status in (MilestoneStatus.pending.value, MilestoneStatus.funded.value, MilestoneStatus.needs_review.value):
-        escrow._transition(
+        settlement.transition(
             session,
             m,
             MilestoneStatus.evidence_received,
@@ -251,7 +251,7 @@ def run_verification(
         if m is None or m.status != MilestoneStatus.evidence_received.value:
             return None
         snapshot = {e.id for e in m.evidence}
-        escrow._transition(
+        settlement.transition(
             session, m, MilestoneStatus.verifying, actor, "verification_started", evidence_count=len(snapshot)
         )
         session.commit()
@@ -261,7 +261,7 @@ def run_verification(
             rows = [e for e in m.evidence if e.id in snapshot]
             j = judge(ai, criteria, [to_event(e) for e in rows], attachments_of(rows))
         except AIError as e:
-            escrow._transition(
+            settlement.transition(
                 session, m, MilestoneStatus.evidence_received, actor, "verification_failed", error=str(e)[:500]
             )
             session.commit()
@@ -269,7 +269,7 @@ def run_verification(
 
         session.refresh(m)
         if {e.id for e in m.evidence} - snapshot:
-            escrow._transition(session, m, MilestoneStatus.evidence_received, actor, "verification_superseded")
+            settlement.transition(session, m, MilestoneStatus.evidence_received, actor, "verification_superseded")
             session.commit()
             continue
 
@@ -290,7 +290,7 @@ def run_verification(
         session.add(verdict)
         session.flush()
         if gate == "auto_release":
-            escrow._transition(
+            settlement.transition(
                 session,
                 m,
                 MilestoneStatus.verified,
@@ -302,7 +302,7 @@ def run_verification(
             session.commit()
             _settle_if_possible(session, gw, m, "system:gate", now)
         else:
-            escrow._transition(
+            settlement.transition(
                 session,
                 m,
                 MilestoneStatus.needs_review,
@@ -315,6 +315,14 @@ def run_verification(
             session.commit()
         return verdict
     return None
+
+
+def verify_in_background(
+    factory: sessionmaker, ai: AIRuntime, gw: PayPalGateway, milestone_id: str, actor: str
+) -> None:
+    """Entry point for background tasks: runs verification in its own session."""
+    with factory() as session:
+        run_verification(session, ai, gw, milestone_id, actor, utcnow())
 
 
 def precheck(session: Session, ai: AIRuntime, m: MilestoneRow, items: list[EvidenceIn], actor: str) -> VerdictRow:
@@ -383,13 +391,13 @@ def review(
     verdict = latest_verdict(m)
     detail = {"note": note, "verdict_id": verdict.id if verdict else None}
     if approve:
-        escrow._transition(session, m, MilestoneStatus.verified, actor, "review_approved", **detail)
+        settlement.transition(session, m, MilestoneStatus.verified, actor, "review_approved", **detail)
         session.commit()
         _settle_if_possible(session, gw, m, actor, now)
     else:
         back = MilestoneStatus.funded if m.paypal_authorization_id else MilestoneStatus.pending
         unmet = [r for r in (verdict.criteria_results if verdict else []) if not r["met"]]
-        escrow._transition(
+        settlement.transition(
             session,
             m,
             back,
@@ -413,5 +421,5 @@ def dispute(session: Session, m: MilestoneRow, party: PartyRow, reason: str) -> 
     )
     if last_review is None or last_review.action != "review_rejected":
         raise VerificationError("only a rejected tranche can be disputed")
-    escrow._transition(session, m, MilestoneStatus.disputed, f"party:{party.id}", "disputed", reason=reason)
+    settlement.transition(session, m, MilestoneStatus.disputed, f"party:{party.id}", "disputed", reason=reason)
     session.commit()

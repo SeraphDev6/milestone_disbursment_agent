@@ -8,10 +8,10 @@ from datetime import timedelta
 import pytest
 from pypdf import PdfReader
 
-from app.db import SettlementRow, utcnow
-from app.escrow import expire_stale_invoices
-from app.outbound import MAX_ATTEMPTS, DestinationError, check_destination, deliver_due
-from app.paypal import MOCK_WEBHOOK_SIGNATURE, PayPalError
+from app.db.models import SettlementRow, utcnow
+from app.integrations.paypal import MOCK_WEBHOOK_SIGNATURE, PayPalError
+from app.services.outbound import MAX_ATTEMPTS, DestinationError, check_destination, deliver_due
+from app.services.settlement import expire_stale_invoices
 from tests.test_verification import BUDGET, SIGN_IN, create_active, h, status_of, submit
 
 
@@ -155,7 +155,7 @@ def test_failed_deliveries_back_off_then_die(client, draft):
         for _ in range(MAX_ATTEMPTS):
             later += timedelta(hours=7)
             deliver_due(s, later, post=lambda *a: 500, resolve=PUBLIC)
-        from app.db import OutboxRow
+        from app.db.models import OutboxRow
 
         assert {r.status for r in s.query(OutboxRow)} == {"dead"}
 

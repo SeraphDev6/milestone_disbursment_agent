@@ -26,9 +26,9 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.profiles import ModelProfile
 from pydantic_ai.settings import ModelSettings
 
-from app.checks import CHECKS
-from app.criteria import DEFERRED_PHRASES, VAGUE_TERMS
-from app.domain import Criterion, EvidenceEvent
+from app.domain.checks import CHECKS
+from app.domain.criteria import DEFERRED_PHRASES, VAGUE_TERMS
+from app.domain.models import Criterion, EvidenceEvent
 
 CLAUDE_MODEL = "claude-opus-5-5"
 EXTRACT_PROMPT_VERSION = "extract-v1"

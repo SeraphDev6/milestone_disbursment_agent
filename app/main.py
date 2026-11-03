@@ -4,25 +4,14 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import sessionmaker
 
-from app import adapter_routes, escrow_routes, evidence_routes, reporting_routes, routes
-from app.adapters.github import GitHubClient
-from app.ai import claude_runtime, mock_runtime
+from app.ai.agents import claude_runtime, mock_runtime
+from app.api import api_router, mock_router
 from app.config import Mode, Settings, get_settings, use_claude
-from app.db import Base, make_engine
-from app.escrow import EscrowError
-from app.outbound import resolve_host, start_delivery_loop
-from app.paypal import MockPayPal, PayPalGateway, SandboxPayPal
-
-
-def make_gateway(settings: Settings) -> PayPalGateway:
-    if settings.mode is Mode.mock:
-        return MockPayPal(base_url=settings.public_base_url)
-    return SandboxPayPal(
-        client_id=settings.paypal_client_id,
-        client_secret=settings.paypal_client_secret,
-        base_url=settings.paypal_base_url,
-        webhook_id=settings.paypal_webhook_id,
-    )
+from app.db.models import Base, make_engine
+from app.integrations.github import GitHubClient
+from app.integrations.paypal import make_gateway
+from app.services import ServiceError
+from app.services.outbound import resolve_host, start_delivery_loop
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -54,26 +43,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.paypal = make_gateway(settings)
-    if use_claude(settings):
-        key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
-        app.state.ai = claude_runtime(key)
-    else:
-        app.state.ai = mock_runtime()
+    key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
+    app.state.ai = claude_runtime(key) if use_claude(settings) else mock_runtime()
     app.state.github = GitHubClient(token=settings.github_token)
     app.state.resolve = resolve_host
 
-    @app.exception_handler(EscrowError)
-    async def _escrow_error(request: Request, exc: EscrowError) -> JSONResponse:
+    @app.exception_handler(ServiceError)
+    async def _service_error(request: Request, exc: ServiceError) -> JSONResponse:
         return JSONResponse({"detail": exc.message}, status_code=exc.status_code)
 
-    app.include_router(routes.router)
-    app.include_router(escrow_routes.router)
-    app.include_router(evidence_routes.router)
-    app.include_router(adapter_routes.router)
-    app.include_router(reporting_routes.router)
+    app.include_router(api_router)
     if settings.mode is Mode.mock:
-        app.include_router(escrow_routes.mock_router)
-        app.include_router(reporting_routes.mock_router)
+        app.include_router(mock_router)
     return app
 
 

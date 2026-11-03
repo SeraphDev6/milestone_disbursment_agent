@@ -426,3 +426,17 @@ class SandboxPayPal:
         except PayPalError:
             return False
         return data.get("verification_status") == "SUCCESS"
+
+
+def make_gateway(settings) -> PayPalGateway:
+    """Mock in mock mode, PayPal REST (sandbox by default) otherwise."""
+    from app.config import Mode
+
+    if settings.mode is Mode.mock:
+        return MockPayPal(base_url=settings.public_base_url)
+    return SandboxPayPal(
+        client_id=settings.paypal_client_id,
+        client_secret=settings.paypal_client_secret,
+        base_url=settings.paypal_base_url,
+        webhook_id=settings.paypal_webhook_id,
+    )

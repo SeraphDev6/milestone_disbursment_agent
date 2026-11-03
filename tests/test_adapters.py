@@ -11,8 +11,8 @@ from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.profiles import ModelProfile
 from reportlab.pdfgen import canvas
 
-from app.adapters.github import GitHubError
-from app.ai import AIRuntime, CriterionJudgment, VerifierOutput
+from app.ai.agents import AIRuntime, CriterionJudgment, VerifierOutput
+from app.integrations.github import GitHubError
 from tests.test_verification import BUDGET, SIGN_IN, create_active, h, status_of
 
 

@@ -3,8 +3,8 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from app.criteria import assign_criterion_ids, criteria_hash, lint_agreement
-from app.domain import AgreementDraft, Measure
+from app.domain.criteria import assign_criterion_ids, criteria_hash, lint_agreement
+from app.domain.models import AgreementDraft, Measure
 
 
 def codes(draft: dict, level: str | None = None) -> set[str]:

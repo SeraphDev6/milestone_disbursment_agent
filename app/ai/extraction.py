@@ -4,9 +4,9 @@ from decimal import Decimal, InvalidOperation
 
 from pydantic import BaseModel, Field, ValidationError
 
-from app.ai import AIRuntime, ExtractionOutput
-from app.criteria import assign_criterion_ids, lint_tranches
-from app.domain import Criterion, LintReport, MilestoneDraft
+from app.ai.agents import AIRuntime, ExtractionOutput
+from app.domain.criteria import assign_criterion_ids, lint_tranches
+from app.domain.models import Criterion, LintReport, MilestoneDraft
 
 
 class Provenance(BaseModel):

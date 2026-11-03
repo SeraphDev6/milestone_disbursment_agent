@@ -1,38 +1,23 @@
+"""Connections to the outside: GitHub as an evidence source, and outbound webhook subscriptions."""
+
 import json
 import secrets
-from datetime import date, datetime
+from datetime import datetime
 from typing import Annotated
 
-from fastapi import (
-    APIRouter,
-    BackgroundTasks,
-    Depends,
-    File,
-    Form,
-    Header,
-    HTTPException,
-    Request,
-    Response,
-    UploadFile,
-    status,
-)
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from app import verification
-from app.adapters import github
-from app.adapters.upload import UploadError, parse_upload
-from app.db import EvidenceRow, FileRow, IntegrationRow, MilestoneRow, PartyRow, WebhookEventRow, record_audit, utcnow
-from app.domain import AgreementStatus, EvidenceType, MilestoneStatus, Role
-from app.escrow_routes import _require
-from app.evidence_routes import EvidenceAccepted, _verify_in_background
-from app.routes import MilestonePartyDep, PartyDep, SessionDep, _hash_key
+from app.api.deps import PartyDep, SessionDep, require_role
+from app.config import Mode
+from app.db.models import IntegrationRow, MilestoneRow, SubscriptionRow, WebhookEventRow, record_audit
+from app.domain.models import AgreementStatus, MilestoneStatus, Role
+from app.integrations import github
+from app.services import verification
+from app.services.outbound import DestinationError, check_destination
 
-router = APIRouter(tags=["adapters"])
-
-MAX_FILES = 10
-MAX_FILE_BYTES = 20 * 1024 * 1024
-MAX_REQUEST_BYTES = 25 * 1024 * 1024
+router = APIRouter()
 
 
 # --- GitHub ----------------------------------------------------------------------------
@@ -60,12 +45,13 @@ class GitHubIntegration(BaseModel):
 
 @router.post(
     "/agreements/{agreement_id}/integrations/github",
+    tags=["integrations"],
     summary="Payee connects a GitHub repo: merged PRs labelled with a milestone become its evidence",
 )
 def register_github(
     agreement_id: str, body: GitHubRegistration, party: PartyDep, session: SessionDep, request: Request
 ) -> GitHubIntegration:
-    _require(party, Role.payee)
+    require_role(party, Role.payee)
     a = party.agreement
     if a.status in (AgreementStatus.cancelled.value, AgreementStatus.completed.value):
         raise HTTPException(status.HTTP_409_CONFLICT, f"agreement is {a.status}")
@@ -127,11 +113,12 @@ def _ingest_pr(state, integration_id: str, pr: github.MergedPR, milestone_ids: l
             if created and m.status == MilestoneStatus.evidence_received.value:
                 to_verify.append(m.id)
     for mid in to_verify:
-        with state.sessionmaker() as session:
-            verification.run_verification(session, state.ai, state.paypal, mid, "system:verifier", utcnow())
+        verification.verify_in_background(state.sessionmaker, state.ai, state.paypal, mid, "system:verifier")
 
 
-@router.post("/webhooks/github/{integration_id}", summary="GitHub repo webhook intake (HMAC-verified)")
+@router.post(
+    "/webhooks/github/{integration_id}", tags=["integrations"], summary="GitHub repo webhook intake (HMAC-verified)"
+)
 async def github_webhook(
     integration_id: str,
     request: Request,
@@ -189,123 +176,74 @@ async def github_webhook(
     return {"outcome": outcome}
 
 
-# --- Uploads ---------------------------------------------------------------------------
+# --- outbound webhook subscriptions ----------------------------------------------------
+
+
+class SubscriptionIn(BaseModel):
+    url: str = Field(..., max_length=1000, description="HTTPS endpoint that receives signed JSON events.")
+    events: list[str] = Field(
+        default_factory=lambda: ["*"],
+        description="Event types (milestone.status_changed), prefixes ending in '.' (milestone.), or '*'.",
+    )
+
+
+class SubscriptionView(BaseModel):
+    id: str
+    url: str
+    events: list[str]
+    active: bool
+    created_at: datetime
+
+
+class SubscriptionCreated(SubscriptionView):
+    secret: str = Field(
+        ..., description="Shown once. Verify X-MDE-Signature with HMAC-SHA256(secret, ts + '.' + body)."
+    )
+
+
+def _sub_view(s: SubscriptionRow) -> SubscriptionView:
+    return SubscriptionView(id=s.id, url=s.url, events=s.events, active=s.active, created_at=s.created_at)
 
 
 @router.post(
-    "/milestones/{milestone_id}/uploads",
-    status_code=status.HTTP_202_ACCEPTED,
-    summary="Payee uploads evidence files (PDF, CSV, XLSX, TXT, MD, images); verification runs in the background",
+    "/agreements/{agreement_id}/subscriptions", tags=["events"], summary="Subscribe a URL to this agreement's events"
 )
-async def upload_evidence(
-    milestone_id: str,
-    auth: MilestonePartyDep,
-    session: SessionDep,
-    request: Request,
-    background: BackgroundTasks,
-    files: Annotated[list[UploadFile], File(description="Up to 10 files, 20 MB each, 25 MB total.")],
-    note: Annotated[str | None, Form(max_length=2000, description="Optional context, shown as a payee note.")] = None,
-    dated: Annotated[date | None, Form(description="The evidence's own date, if the files don't carry one.")] = None,
-) -> list[EvidenceAccepted]:
-    party, m = auth
-    _require(party, Role.payee)
-    if len(files) > MAX_FILES:
-        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, f"up to {MAX_FILES} files per upload")
-
-    parsed, total = [], 0
-    for f in files:
-        data = await f.read(MAX_FILE_BYTES + 1)
-        total += len(data)
-        if len(data) > MAX_FILE_BYTES or total > MAX_REQUEST_BYTES:
-            raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "files up to 20 MB each, 25 MB per upload")
-        try:
-            parsed += parse_upload(f.filename or "upload", data, note, dated)  # nothing stored until all parse
-        except UploadError as e:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
-
-    results = []
-    for item in parsed:
-        file_row = session.scalar(select(FileRow).where(FileRow.sha256 == item.sha256)) or FileRow(
-            filename=item.evidence.title,
-            media_type=item.media_type,
-            sha256=item.sha256,
-            size=len(item.data),
-            data=item.data,
-        )
-        session.add(file_row)
-        session.flush()
-        row, created = verification.submit_evidence(
-            session, m, item.evidence, source="upload", actor=f"party:{party.id}", file_id=file_row.id
-        )
-        results.append(EvidenceAccepted(evidence_id=row.id, duplicate=not created, milestone_status=m.status))
-    if any(not r.duplicate for r in results) and m.status == MilestoneStatus.evidence_received.value:
-        background.add_task(_verify_in_background, request, m.id, "system:verifier")
-    return results
-
-
-# --- Reading evidence back ------------------------------------------------------------
-
-
-class EvidenceSummary(BaseModel):
-    id: str
-    source: str
-    evidence_type: EvidenceType
-    title: str
-    excerpt: str = Field(..., description="First 500 characters of the text the checks and verifier read.")
-    dated: date | None
-    check_results: dict[str, bool]
-    artifact_uris: list[str]
-    has_file: bool
-    received_at: datetime
-
-
-@router.get(
-    "/milestones/{milestone_id}/evidence",
-    openapi_extra={"x-mcp-tool": "list_evidence"},
-    summary="Evidence on file for a tranche",
-)
-def list_evidence(milestone_id: str, auth: MilestonePartyDep) -> list[EvidenceSummary]:
-    _, m = auth
-    return [
-        EvidenceSummary(
-            id=e.id,
-            source=e.source,
-            evidence_type=EvidenceType(e.evidence_type),
-            title=e.title,
-            excerpt=e.content[:500],
-            dated=e.dated,
-            check_results=e.check_results,
-            artifact_uris=e.artifact_uris,
-            has_file=e.file_id is not None,
-            received_at=e.received_at,
-        )
-        for e in m.evidence
-    ]
-
-
-def _evidence_party(
-    evidence_id: str, session: SessionDep, x_api_key: Annotated[str | None, Header()] = None
-) -> tuple[PartyRow, EvidenceRow]:
-    if not x_api_key:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "X-API-Key header required")
-    party = session.scalar(select(PartyRow).where(PartyRow.api_key_hash == _hash_key(x_api_key)))
-    ev = session.get(EvidenceRow, evidence_id)
-    m = session.get(MilestoneRow, ev.milestone_id) if ev else None
-    if party is None or ev is None or m is None or m.agreement_id != party.agreement_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "evidence not found")
-    return party, ev
-
-
-@router.get("/evidence/{evidence_id}/file", summary="Download the original uploaded file")
-def download_file(
-    evidence_id: str, auth: Annotated[tuple[PartyRow, EvidenceRow], Depends(_evidence_party)]
-) -> Response:
-    _, ev = auth
-    if ev.file is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "this evidence has no uploaded file")
-    safe_name = "".join(ch for ch in ev.file.filename if ch.isalnum() or ch in "._- ")[:100] or "evidence"
-    return Response(
-        ev.file.data,
-        media_type=ev.file.media_type,
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}"', "X-Content-Type-Options": "nosniff"},
+def subscribe(
+    agreement_id: str, body: SubscriptionIn, party: PartyDep, session: SessionDep, request: Request
+) -> SubscriptionCreated:
+    state = request.app.state
+    try:
+        check_destination(body.url, allow_http=state.settings.mode is Mode.mock, resolve=state.resolve)
+    except DestinationError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
+    sub = SubscriptionRow(
+        agreement_id=agreement_id,
+        url=body.url,
+        events=body.events or ["*"],
+        secret=secrets.token_hex(32),
+        created_by=f"party:{party.id}",
     )
+    session.add(sub)
+    session.flush()
+    record_audit(session, agreement_id, f"party:{party.id}", "subscription_created", detail={"url": body.url})
+    session.commit()
+    return SubscriptionCreated(**_sub_view(sub).model_dump(), secret=sub.secret)
+
+
+@router.get("/agreements/{agreement_id}/subscriptions", tags=["events"], summary="Subscriptions on this agreement")
+def list_subscriptions(agreement_id: str, party: PartyDep, session: SessionDep) -> list[SubscriptionView]:
+    subs = session.scalars(select(SubscriptionRow).where(SubscriptionRow.agreement_id == agreement_id)).all()
+    return [_sub_view(s) for s in subs]
+
+
+@router.delete("/agreements/{agreement_id}/subscriptions/{subscription_id}", tags=["events"], status_code=204)
+def unsubscribe(agreement_id: str, subscription_id: str, party: PartyDep, session: SessionDep) -> Response:
+    sub = session.get(SubscriptionRow, subscription_id)
+    if sub is None or sub.agreement_id != agreement_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "subscription not found")
+    if sub.created_by != f"party:{party.id}" and party.role != Role.payer.value:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "only its creator or the payer can remove a subscription")
+    sub.active = False
+    record_audit(session, agreement_id, f"party:{party.id}", "subscription_removed", detail={"url": sub.url})
+    session.commit()
+    return Response(status_code=204)

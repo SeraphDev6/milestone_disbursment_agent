@@ -18,7 +18,7 @@ from typing import Protocol
 
 import httpx
 
-from app.domain import EvidenceIn, EvidenceType
+from app.domain.models import EvidenceIn, EvidenceType
 
 LABEL_PREFIX = "mde-"
 PASSING = {"success", "neutral", "skipped"}

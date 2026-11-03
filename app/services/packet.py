@@ -17,7 +17,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db import AgreementRow, AuditEventRow, LedgerRow, MilestoneRow
+from app.db.models import AgreementRow, AuditEventRow, LedgerRow, MilestoneRow
 
 
 def _iso(dt: datetime | None) -> str | None:

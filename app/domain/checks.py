@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from app.domain import Comparator, Criterion, CriterionResult, EvidenceEvent, EvidenceType
+from app.domain.models import Comparator, Criterion, CriterionResult, EvidenceEvent, EvidenceType
 
 
 @dataclass(frozen=True)

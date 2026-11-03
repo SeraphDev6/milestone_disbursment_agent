@@ -18,9 +18,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.db import LedgerRow, MilestoneRow, PartyRow, SettlementRow, WebhookEventRow, as_utc, record_audit
-from app.domain import AgreementStatus, MilestoneStatus, Role, SettlementMode, SettlementStatus
-from app.paypal import CreatedOrder, PayPalError, PayPalGateway
+from app.db.models import LedgerRow, MilestoneRow, PartyRow, SettlementRow, WebhookEventRow, as_utc, record_audit
+from app.domain.models import AgreementStatus, MilestoneStatus, Role, SettlementMode, SettlementStatus
+from app.integrations.paypal import CreatedOrder, PayPalError, PayPalGateway
+from app.services import ServiceError
 
 HONOR_PERIOD = timedelta(days=3)
 AUTH_VALIDITY = timedelta(days=29)
@@ -29,17 +30,10 @@ NO_LIVE_HOLD_STATES = {MilestoneStatus.settling.value, MilestoneStatus.settled.v
 RELEASABLE = {MilestoneStatus.verified.value, MilestoneStatus.settlement_failed.value}
 
 
-class EscrowError(Exception):
-    def __init__(self, message: str, status_code: int = 409):
-        super().__init__(message)
-        self.message = message
-        self.status_code = status_code
-
-
 # --- helpers ---------------------------------------------------------------------------
 
 
-def _transition(session: Session, m: MilestoneRow, to: MilestoneStatus, actor: str, action: str, **detail) -> None:
+def transition(session: Session, m: MilestoneRow, to: MilestoneStatus, actor: str, action: str, **detail) -> None:
     previous = m.status
     m.status = to.value
     record_audit(
@@ -68,9 +62,9 @@ def _payee(m: MilestoneRow) -> PartyRow:
     return next(p for p in m.agreement.parties if p.role == Role.payee.value)
 
 
-def _paypal_failure(e: PayPalError) -> EscrowError:
+def _paypal_failure(e: PayPalError) -> ServiceError:
     suffix = f" (PayPal debug id {e.debug_id})" if e.debug_id else ""
-    return EscrowError(f"{e}{suffix}", 502)
+    return ServiceError(f"{e}{suffix}", 502)
 
 
 def _mark_funded(session: Session, m: MilestoneRow, authorization_id: str, actor: str, now: datetime) -> bool:
@@ -81,7 +75,7 @@ def _mark_funded(session: Session, m: MilestoneRow, authorization_id: str, actor
     m.reauthorized_at = None
     _ledger(session, m, "authorized", authorization_id)
     if m.status == MilestoneStatus.pending.value:
-        _transition(session, m, MilestoneStatus.funded, actor, "funded", authorization_id=authorization_id)
+        transition(session, m, MilestoneStatus.funded, actor, "funded", authorization_id=authorization_id)
     else:
         # Re-funded after an expired hold; verification state is kept.
         _note(session, m, actor, "refunded_hold", authorization_id=authorization_id)
@@ -96,7 +90,7 @@ def _drop_hold(session: Session, m: MilestoneRow, kind: str, actor: str) -> None
     m.reauthorized_at = None
     m.paypal_order_id = None
     if m.status == MilestoneStatus.funded.value:
-        _transition(session, m, MilestoneStatus.pending, actor, f"hold_{kind}", authorization_id=ref)
+        transition(session, m, MilestoneStatus.pending, actor, f"hold_{kind}", authorization_id=ref)
     else:
         _note(session, m, actor, f"hold_{kind}", authorization_id=ref)
 
@@ -107,13 +101,13 @@ def _drop_hold(session: Session, m: MilestoneRow, kind: str, actor: str) -> None
 def start_funding(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str, base_url: str) -> CreatedOrder:
     a = m.agreement
     if a.status != AgreementStatus.active.value:
-        raise EscrowError(f"agreement is {a.status}; both parties must confirm criteria before funding")
+        raise ServiceError(f"agreement is {a.status}; both parties must confirm criteria before funding")
     if a.settlement_mode != SettlementMode.escrow_release.value:
-        raise EscrowError("this agreement settles by invoice; there is nothing to fund")
+        raise ServiceError("this agreement settles by invoice; there is nothing to fund")
     if m.paypal_authorization_id is not None:
-        raise EscrowError("tranche already has a live hold")
+        raise ServiceError("tranche already has a live hold")
     if m.status in NO_LIVE_HOLD_STATES:
-        raise EscrowError(f"tranche is {m.status}")
+        raise ServiceError(f"tranche is {m.status}")
     try:
         order = gw.create_authorize_order(
             reference_id=m.id,
@@ -137,7 +131,7 @@ def complete_funding(session: Session, gw: PayPalGateway, order_id: str, actor: 
     """Called when the payer returns from PayPal approval. Idempotent."""
     m = session.scalar(select(MilestoneRow).where(MilestoneRow.paypal_order_id == order_id))
     if m is None:
-        raise EscrowError("unknown or superseded funding order", 404)
+        raise ServiceError("unknown or superseded funding order", 404)
     if m.paypal_authorization_id is not None:
         return m
     try:
@@ -147,7 +141,7 @@ def complete_funding(session: Session, gw: PayPalGateway, order_id: str, actor: 
     if auth.status not in ("CREATED", "PENDING"):
         _note(session, m, actor, "authorization_refused", order_id=order_id, status=auth.status)
         session.commit()
-        raise EscrowError(f"PayPal did not place the hold (status {auth.status})", 402)
+        raise ServiceError(f"PayPal did not place the hold (status {auth.status})", 402)
     _mark_funded(session, m, auth.authorization_id, actor, now)
     session.commit()
     return m
@@ -155,7 +149,7 @@ def complete_funding(session: Session, gw: PayPalGateway, order_id: str, actor: 
 
 def void(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str) -> None:
     if m.status != MilestoneStatus.funded.value or m.paypal_authorization_id is None:
-        raise EscrowError("only a funded tranche with no evidence submitted can be voided")
+        raise ServiceError("only a funded tranche with no evidence submitted can be voided")
     try:
         gw.void_authorization(m.paypal_authorization_id, request_id=f"{m.paypal_authorization_id}-void")
     except PayPalError as e:
@@ -180,11 +174,11 @@ def expire_stale_holds(session: Session, now: datetime, actor: str = "system:exp
 
 def _ensure_live_hold(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str, now: datetime) -> None:
     if m.paypal_authorization_id is None or m.funded_at is None:
-        raise EscrowError("tranche isn't funded; the payer must fund it first")
+        raise ServiceError("tranche isn't funded; the payer must fund it first")
     if now - as_utc(m.funded_at) > AUTH_VALIDITY:
         _drop_hold(session, m, "expired", actor)
         session.commit()
-        raise EscrowError("the PayPal hold expired after 29 days; the payer must fund this tranche again")
+        raise ServiceError("the PayPal hold expired after 29 days; the payer must fund this tranche again")
     if m.reauthorized_at is None and now - as_utc(m.funded_at) > HONOR_PERIOD:
         old = m.paypal_authorization_id
         try:
@@ -204,7 +198,7 @@ def _apply_capture_status(session: Session, s: SettlementRow, status: str, actor
             return
         s.status = SettlementStatus.succeeded.value
         _ledger(session, m, "captured", s.paypal_ref or "unknown")
-        _transition(session, m, MilestoneStatus.settled, actor, "settled", capture_id=s.paypal_ref, attempt=s.attempt)
+        transition(session, m, MilestoneStatus.settled, actor, "settled", capture_id=s.paypal_ref, attempt=s.attempt)
     elif status == "PENDING":
         _note(session, m, actor, "capture_pending", capture_id=s.paypal_ref, attempt=s.attempt)
     else:
@@ -212,7 +206,7 @@ def _apply_capture_status(session: Session, s: SettlementRow, status: str, actor
             return
         s.status = SettlementStatus.failed.value
         s.error = f"capture {status}"
-        _transition(
+        transition(
             session,
             m,
             MilestoneStatus.settlement_failed,
@@ -232,7 +226,7 @@ def release(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str, no
     last = m.settlements[-1] if m.settlements else None
     if m.status == MilestoneStatus.settling.value and last and last.status == SettlementStatus.submitted.value:
         if last.paypal_ref:
-            raise EscrowError("capture is pending at PayPal; the webhook will settle it", 409)
+            raise ServiceError("capture is pending at PayPal; the webhook will settle it", 409)
         s = last  # previous attempt's outcome unknown: resume with the same idempotency key
     elif m.status in RELEASABLE:
         _ensure_live_hold(session, gw, m, actor, now)
@@ -245,10 +239,10 @@ def release(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str, no
             status=SettlementStatus.submitted.value,
         )
         session.add(s)
-        _transition(session, m, MilestoneStatus.settling, actor, "release_requested", attempt=attempt)
+        transition(session, m, MilestoneStatus.settling, actor, "release_requested", attempt=attempt)
         session.commit()  # record intent before money moves
     else:
-        raise EscrowError(f"a tranche that is {m.status} can't be released")
+        raise ServiceError(f"a tranche that is {m.status} can't be released")
 
     try:
         capture = gw.capture_authorization(
@@ -259,11 +253,11 @@ def release(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str, no
         if e.ambiguous:
             _note(session, m, actor, "capture_outcome_unknown", attempt=s.attempt, error=s.error)
             session.commit()
-            raise EscrowError(
+            raise ServiceError(
                 "PayPal didn't confirm the capture; release again to resume with the same idempotency key", 502
             ) from e
         s.status = SettlementStatus.failed.value
-        _transition(
+        transition(
             session, m, MilestoneStatus.settlement_failed, actor, "settlement_failed", attempt=s.attempt, error=s.error
         )
         session.commit()
@@ -293,7 +287,7 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: MilestoneRow, ac
     last = m.settlements[-1] if m.settlements else None
     if m.status == MilestoneStatus.settling.value and last and last.status == SettlementStatus.submitted.value:
         if last.paypal_ref:
-            raise EscrowError("the invoice is out; the tranche settles when the payer pays it", 409)
+            raise ServiceError("the invoice is out; the tranche settles when the payer pays it", 409)
         s = last  # outcome of the previous send is unknown: resume with the same idempotency key
     elif m.status in RELEASABLE:
         attempt = last.attempt + 1 if last else 1
@@ -305,10 +299,10 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: MilestoneRow, ac
             status=SettlementStatus.submitted.value,
         )
         session.add(s)
-        _transition(session, m, MilestoneStatus.settling, actor, "invoice_requested", attempt=attempt)
+        transition(session, m, MilestoneStatus.settling, actor, "invoice_requested", attempt=attempt)
         session.commit()
     else:
-        raise EscrowError(f"a tranche that is {m.status} can't be invoiced")
+        raise ServiceError(f"a tranche that is {m.status} can't be invoiced")
 
     a = m.agreement
     try:
@@ -328,11 +322,11 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: MilestoneRow, ac
         if e.ambiguous:
             _note(session, m, actor, "invoice_outcome_unknown", attempt=s.attempt, error=s.error)
             session.commit()
-            raise EscrowError(
+            raise ServiceError(
                 "PayPal didn't confirm the invoice; release again to resume with the same key", 502
             ) from e
         s.status = SettlementStatus.failed.value
-        _transition(
+        transition(
             session, m, MilestoneStatus.settlement_failed, actor, "settlement_failed", attempt=s.attempt, error=s.error
         )
         session.commit()
@@ -352,11 +346,11 @@ def _close_invoice(session: Session, s: SettlementRow, paid: bool, actor: str, s
     if paid:
         s.status = SettlementStatus.succeeded.value
         _ledger(session, m, "paid", s.paypal_ref or "unknown")
-        _transition(session, m, MilestoneStatus.settled, actor, "settled", invoice_id=s.paypal_ref, attempt=s.attempt)
+        transition(session, m, MilestoneStatus.settled, actor, "settled", invoice_id=s.paypal_ref, attempt=s.attempt)
         return "invoice paid"
     s.status = status or SettlementStatus.failed.value
     _ledger(session, m, "invoice_cancelled", s.paypal_ref or "unknown")
-    _transition(
+    transition(
         session,
         m,
         MilestoneStatus.settlement_failed,
@@ -455,7 +449,7 @@ def _dispatch(session: Session, event_type: str, res: dict, now: datetime) -> st
 def handle_webhook(session: Session, event: dict, now: datetime) -> str:
     event_id, event_type = event.get("id"), event.get("event_type")
     if not event_id or not event_type:
-        raise EscrowError("webhook event missing id or event_type", 400)
+        raise ServiceError("webhook event missing id or event_type", 400)
     if session.get(WebhookEventRow, event_id) is not None:
         return "duplicate"
     res = event.get("resource") or {}

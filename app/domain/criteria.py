@@ -13,8 +13,8 @@ import re
 from collections.abc import Sequence
 from decimal import Decimal
 
-from app.checks import CHECKS
-from app.domain import (
+from app.domain.checks import CHECKS
+from app.domain.models import (
     AgreementDraft,
     Comparator,
     Criterion,

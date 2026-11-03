@@ -15,7 +15,7 @@ from openpyxl import load_workbook
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
-from app.domain import EvidenceIn, EvidenceType
+from app.domain.models import EvidenceIn, EvidenceType
 
 MAX_CONTENT_CHARS = 200_000  # EvidenceIn limit; longer text is cut with an explicit marker, original kept
 IMAGE_TYPES = {
