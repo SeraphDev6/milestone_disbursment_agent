@@ -28,7 +28,8 @@ def connect(org_id: str, principal: PrincipalDep, session: SessionDep, request: 
 @router.get("/orgs/{org_id}/paypal", summary="Whether this org's PayPal account is connected and can be paid")
 def status(org_id: str, principal: PrincipalDep, session: SessionDep) -> PayPalAccountRead:
     principal.require_org(org_id, OrgRole.viewer)
-    return payee_accounts.read(payee_accounts.account_for(session, org_id), org_id)
+    org = session.get(Organization, org_id)
+    return payee_accounts.read(payee_accounts.account_for(session, org_id), org_id, org.paypal_email if org else None)
 
 
 @router.post("/orgs/{org_id}/paypal/refresh", summary="Re-read this org's PayPal account status from PayPal (admin)")
@@ -37,8 +38,11 @@ def refresh(org_id: str, principal: PrincipalDep, session: SessionDep, request: 
     row = payee_accounts.account_for(session, org_id)
     if row is None:
         raise ServiceError("PayPal isn't connected; start with POST /orgs/{org_id}/paypal/connect", 404)
+    org = session.get(Organization, org_id)
     return payee_accounts.read(
-        payee_accounts.refresh(session, gateway(request), row, principal.actor, utcnow()), org_id
+        payee_accounts.refresh(session, gateway(request), row, principal.actor, utcnow()),
+        org_id,
+        org.paypal_email if org else None,
     )
 
 

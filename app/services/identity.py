@@ -8,7 +8,7 @@ from urllib.parse import quote
 from sqlmodel import Session, select
 
 from app.db import as_utc, record_audit, utcnow
-from app.integrations.email import ConsoleMailer
+from app.integrations.email import Mailer
 from app.models import (
     Agreement,
     AgreementStatus,
@@ -51,7 +51,7 @@ def normalize_email(email: str) -> str:
 
 def request_magic_link(
     session: Session,
-    mailer: ConsoleMailer,
+    mailer: Mailer,
     email: str,
     base_url: str,
     next_path: str | None = None,
@@ -147,7 +147,7 @@ def create_api_key(session: Session, org_id: str, data: ApiKeyCreate, actor: str
 
 def invite(
     session: Session,
-    mailer: ConsoleMailer,
+    mailer: Mailer,
     *,
     kind: InvitationKind,
     email: str,
@@ -231,8 +231,7 @@ def _accept(
     org_id: str | None,
     new_org: OrganizationCreate | None,
 ) -> Accepted:
-    if principal.user is None:
-        raise IdentityError("sign in as a person to accept invitations", 403)
+    principal.require_person("accept invitations")
     if inv is None or inv.revoked_at is not None or inv.accepted_at is not None or as_utc(inv.expires_at) < utcnow():
         raise IdentityError("this invitation is invalid, expired, revoked or already used", 404)
     if normalize_email(principal.user.email) != inv.email:

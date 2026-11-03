@@ -64,6 +64,13 @@ RULES: dict[Action, dict[Role, OrgRole]] = {
 }
 
 
+# What an MCP client acting for a person may do on an agreement: exactly the tools it was shown at consent.
+# Everything else (confirming criteria, funding, reviewing, releasing, contesting, disputing, inviting, editing
+# tranches, managing subscriptions) stays with the person, whatever their role, even if the client calls the
+# REST endpoint directly with its access token.
+MCP_ACTIONS = frozenset({Action.view, Action.submit_evidence, Action.compliance_packet})
+
+
 class AccessError(ServiceError):
     pass
 
@@ -88,6 +95,19 @@ class Principal:
         via = f"+mcp:{self.oauth_client_id[:24]}" if self.oauth_client_id else ""
         return f"user:{self.user.id}{via}"
 
+    @property
+    def via_mcp(self) -> bool:
+        return self.oauth_client_id is not None
+
+    def require_person(self, what: str) -> User:
+        """Steps that bind a person or an organization (creating orgs, accepting invitations) are not for API
+        keys or MCP clients."""
+        if self.user is None:
+            raise AccessError(f"only a signed-in person can {what}", 403)
+        if self.via_mcp:
+            raise AccessError(f"an MCP client can't {what}; do it in the web app", 403)
+        return self.user
+
     def role_in(self, org_id: str) -> OrgRole | None:
         return self.roles.get(org_id)
 
@@ -97,6 +117,10 @@ class Principal:
             raise AccessError("organization not found", 404)  # same answer as "doesn't exist"
         if not role.at_least(minimum):
             raise AccessError(f"needs {minimum} or above in this organization (you are {role})", 403)
+        if self.via_mcp and minimum.at_least(OrgRole.admin):
+            raise AccessError(
+                "an MCP client can't manage the organization (members, keys, SSO); do it in the web app", 403
+            )
         return role
 
 
@@ -113,12 +137,16 @@ class Access:
         return f"{self.principal.actor}@org:{self.party.org_id}"
 
     def can(self, action: Action) -> bool:
+        if self.principal.via_mcp and action not in MCP_ACTIONS:
+            return False
         minimum = RULES[action].get(self.party.role)
         return minimum is not None and self.org_role.at_least(minimum)
 
     def require(self, action: Action) -> None:
         if self.can(action):
             return
+        if self.principal.via_mcp and action not in MCP_ACTIONS:
+            raise AccessError(f"an MCP client can't {action.replace('_', ' ')}; that step stays with a person", 403)
         minimum = RULES[action].get(self.party.role)
         if minimum is None:
             raise AccessError(f"a {self.party.role} on this agreement can't {action.replace('_', ' ')}", 403)

@@ -15,12 +15,13 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from mcp.server.auth.provider import AuthorizationParams, construct_redirect_uri
 from sqlmodel import select
 
-from app.api.deps import SessionDep, mailer, show_links
+from app.api.deps import SessionDep, client_ip, mailer, rate_limit, show_links
 from app.db import as_utc, utcnow
 from app.models import Membership, OrgRole
 from app.models.oauth import OAuthClient, OAuthPendingAuthorization
 from app.services import identity, sso
 from app.services.access import AccessError, Principal, hash_token, principal_from_token
+from app.services.ratelimit import RateLimited
 
 router = APIRouter(include_in_schema=False)
 COOKIE = "mde_session"
@@ -98,6 +99,11 @@ def oauth_sign_in(
     request: Request, session: SessionDep, email: Annotated[str, Form()], next: Annotated[str, Form()] = "/"
 ) -> Response:
     target = safe_next(next)
+    try:
+        rate_limit(request, "magic_link", client_ip(request))
+        rate_limit(request, "magic_link", "email:" + email.strip().lower())
+    except RateLimited as e:
+        return page("Too many sign-in attempts", f"<p>Try again in {e.retry_after // 60 + 1} minutes.</p>", 429)
     if sso.connection_for_email(session, email) is not None:
         url = sso.start(session, email, request.app.state.oidc, request.app.state.settings.public_base_url, target)
         return RedirectResponse(url, status_code=303)

@@ -174,7 +174,9 @@ Webhooks are the source of truth for whether money actually moved. All of it run
 - **Authorization windows:** [valid 29 days, honored for 3](https://developer.paypal.com/docs/platforms/checkout/standard/customize/auth-capture/). Reauthorizing issues a new authorization id; store it. After day 29 the milestone returns to `pending` to be re-funded. Sandbox authorizations don't expire, so the demo is unaffected; production funds each milestone when its work starts.
 - **Ledger:** `LedgerEntry` rows mirror PayPal objects per agreement: authorized, captured, voided, expired (holds); disbursed, refunded (after capture); invoiced, paid (to the payee), collected (into the platform, paid out after), invoice_cancelled. The funding summary reports held, in the dispute window, invoiced, released, refunded and unfunded.
 - **Webhook intake:** verify every event with `verify-webhook-signature`, dedupe on PayPal event id, and ignore events for unknown references. Handled: authorization created/voided, capture completed/pending/denied/refunded, payouts item events, referenced payout completed/failed, invoice paid/cancelled, merchant onboarding completed, partner consent revoked (the payee falls back to the platform route for new tranches).
-- **Jobs:** `python -m app.jobs daily` (hold expiry, invoice timeouts) and `payouts` (hourly: pay tranches whose window closed, follow Payouts); the app also runs `payouts` in-process every `PAYOUTS_INTERVAL_SECONDS`.
+- **Jobs:** `python -m app.jobs daily` (hold expiry, invoice timeouts, overdue sweep) and `payouts` (hourly: pay tranches whose window closed, follow Payouts, end contests unresolved 28 days after capture the way PayPal does); the app also runs `payouts` in-process every `PAYOUTS_INTERVAL_SECONDS` (0 with several instances; `render.yaml` runs both as cron jobs).
+- **Customer disputes:** `CUSTOMER.DISPUTE.CREATED/UPDATED/RESOLVED` are recorded on the tranche (matched through the ledger's capture id). A dispute against a tranche still in its window pauses the payout as a contest; resolution stays with a reviewer. Money PayPal reverses itself arrives through the capture and refund events.
+- **Funding route decision:** a payee that never connected is paid through the platform; one that started connecting but isn't ready is re-checked at funding, and a PayPal error there refuses funding (retry) rather than moving the money through the platform. `MODE=live` refuses the platform route altogether.
 - **Invoicing as the payee isn't available:** PayPal sends invoices as the account that owns the API credentials. Invoicing on a payee's behalf needs the `INVOICE_READ_WRITE` partner feature; requesting it in onboarding returns `FEATURES_UNAUTHORIZED` ("not configured on the REST app"), there's no dashboard switch for it, and other teams found it needs PayPal's partner approval ([Niryat](https://github.com/Jaisheesh-2006/Niryat/blob/HEAD/docs/paypal-sandbox-findings.md), [ProjectX](https://github.com/Mrjoel97/ProjectX/blob/HEAD/docs/connectors/paypal-suitability.md)). So invoice mode uses a pay-now link for connected payees and a platform invoice plus Payouts otherwise. The payer gets a PayPal checkout page rather than a native PayPal invoice (no PayPal reminders); our compliance packet is the invoice record.
 - **Invoice timeout:** an invoice unpaid after a configurable period (default 30 days) moves the settlement to `expired` and the milestone to `settlement_failed` with a reminder option.
 - **Going live:** partner onboarding outside sandbox needs PayPal to approve the platform as a partner and issue a BN code (`PAYPAL_BN_CODE`, sent as `PayPal-Partner-Attribution-Id`). The platform route avoids that but holds money in transit, which raises money-transmission questions; a production version would run direct only.
@@ -249,8 +251,15 @@ original per-agreement party keys.
 - Worker: invitations, criteria, pre-check, evidence, what's missing, disputes, payout status.
 - Reviewer: invitations, criteria sign-off, review queue, compliance packets.
 
-**Cut for the hackathon:** SAML, SCIM, email delivery provider (links are returned in mock mode and logged
-otherwise), two-person approval rules, per-agreement access lists beyond side x role.
+**Email (built Nov 3):** `EMAIL_PROVIDER=resend|smtp` behind one `send`; console only in mock mode (links are
+returned in responses). Notifications go to the tranche's assignee on that side, else every member of the party's
+org: review needed (payer side, or reviewers only with `require_reviewer_approval`), rejection with what's missing,
+verified-but-unfunded, pay link (invoice mode), overdue (both sides), unclaimed payout (payee), failed payout (payer).
+
+**Rate limits (built Nov 3):** per IP and per address on sign-in links, per caller on extraction and pre-check,
+per IP on `/pay/{id}`; in memory per instance, HTTP 429 with Retry-After.
+
+**Cut for the hackathon:** SAML, SCIM, two-person approval rules, per-agreement access lists beyond side x role.
 
 ## MCP server
 
@@ -269,6 +278,9 @@ are not tools.
   takes effect on the next call), and are valid only for this server's `/mcp` resource. Refresh tokens last
   30 days and rotate on every use; presenting a used refresh token revokes the whole family.
 - Headless agents use org API keys as bearer tokens. Session tokens from the web app aren't accepted on `/mcp`.
+- An access token acts only through the tools shown at consent, even on the REST API directly: human-only
+  actions (confirm, fund, void, review, release, contest, resolve, dispute, invite, edit tranches, subscriptions)
+  and org management (members, API keys, SSO, creating orgs, accepting invitations) are refused with 403.
 - Audit entries for MCP calls name the person, the client and the org (`user:<id>+mcp:<client>@org:<id>`).
 
 ## API surface

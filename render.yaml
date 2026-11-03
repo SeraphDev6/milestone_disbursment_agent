@@ -1,13 +1,53 @@
-# Render Blueprint. Worker (verification queue) and cron (authorization expiry,
-# invoice timeouts) services are added when those jobs exist (build plan Nov 5-8).
+# Render Blueprint: the web service (API + web app), Postgres, and the two scheduled jobs.
+#
+# Set the secrets marked `sync: false` in the Render dashboard after the first deploy. MODE starts as mock so the
+# demo works without keys; switch it to sandbox (with the PayPal keys, SECRET_KEY, ANTHROPIC_API_KEY and an email
+# provider) when ready. One web instance runs the outbound-webhook loop in-process; payouts and the daily sweep run
+# as cron jobs here so several instances never race on the same tranche (PAYOUTS_INTERVAL_SECONDS=0 on the web).
 services:
   - type: web
     name: milestone-engine
     runtime: python
     plan: free
     buildCommand: pip install uv && uv sync --frozen --no-dev && cd web && npm ci && npm run build
-    startCommand: uv run --no-dev uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: uv run --no-dev uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips '*'
     healthCheckPath: /health
+    envVars:
+      - fromGroup: milestone-engine-env
+      - key: PAYOUTS_INTERVAL_SECONDS
+        value: "0"
+      - key: PUBLIC_APP_URL
+        # RENDER_EXTERNAL_URL + /app; set explicitly once the service has its final hostname or a custom domain.
+        sync: false
+
+  # Hourly: pay tranches whose dispute window closed, follow Payouts in flight, mirror PayPal's 28-day release.
+  - type: cron
+    name: milestone-engine-payouts
+    runtime: python
+    plan: starter
+    schedule: "7 * * * *"
+    buildCommand: pip install uv && uv sync --frozen --no-dev
+    startCommand: uv run --no-dev python -m app.jobs payouts
+    envVars:
+      - fromGroup: milestone-engine-env
+      - key: AUTO_MIGRATE
+        value: "false"
+
+  # Daily: drop expired PayPal holds (29 days), close invoices unpaid for 30 days, mark tranches overdue.
+  - type: cron
+    name: milestone-engine-daily
+    runtime: python
+    plan: starter
+    schedule: "15 6 * * *"
+    buildCommand: pip install uv && uv sync --frozen --no-dev
+    startCommand: uv run --no-dev python -m app.jobs daily
+    envVars:
+      - fromGroup: milestone-engine-env
+      - key: AUTO_MIGRATE
+        value: "false"
+
+envVarGroups:
+  - name: milestone-engine-env
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.8"
@@ -17,12 +57,32 @@ services:
         fromDatabase:
           name: milestone-engine-db
           property: connectionString
+      - key: PUBLIC_BASE_URL
+        # The web service's public URL (Render also exposes it as RENDER_EXTERNAL_URL, which the app reads when
+        # this is unset; the cron jobs don't get that variable, so set it here once the hostname is known).
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
       - key: PAYPAL_CLIENT_ID
         sync: false
       - key: PAYPAL_CLIENT_SECRET
         sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: PAYPAL_PARTNER_MERCHANT_ID
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: EMAIL_PROVIDER
+        value: console
+      - key: EMAIL_FROM
+        value: "Milestone Engine <no-reply@example.org>"
+      - key: RESEND_API_KEY
+        sync: false
 
 databases:
   - name: milestone-engine-db
-    plan: free
+    # Render deletes a free Postgres 30 days after creation (14 days' grace), which is before judging ends
+    # (Dec 21); the smallest paid plan keeps the data.
+    plan: basic-256mb
     postgresMajorVersion: "16"

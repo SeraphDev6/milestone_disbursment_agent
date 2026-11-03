@@ -22,12 +22,26 @@ def account_for(session: Session, org_id: str) -> PayPalAccount | None:
     return session.exec(select(PayPalAccount).where(PayPalAccount.org_id == org_id)).first()
 
 
-def read(row: PayPalAccount | None, org_id: str) -> PayPalAccountRead:
+def read(row: PayPalAccount | None, org_id: str, org_email: str | None = None) -> PayPalAccountRead:
     if row is None:
         return PayPalAccountRead(
-            org_id=org_id, started=False, ready=False, issues=["PayPal isn't connected"], checked_at=None
+            org_id=org_id,
+            started=False,
+            ready=False,
+            issues=["PayPal isn't connected"],
+            checked_at=None,
+            paypal_email=org_email,
         )
-    return PayPalAccountRead.model_validate(row, update={"started": True, "ready": row.ready, "issues": row.issues()})
+    notes = []
+    if row.primary_email and org_email and row.primary_email.lower() != org_email.lower():
+        notes.append(
+            f"the connected PayPal account's email ({row.primary_email}) differs from the org's PayPal email "
+            f"({org_email}); tranches funded before connecting are paid to the org's email"
+        )
+    return PayPalAccountRead.model_validate(
+        row,
+        update={"started": True, "ready": row.ready, "issues": row.issues(), "paypal_email": org_email, "notes": notes},
+    )
 
 
 def _audit_all_agreements(session: Session, org_id: str, actor: str, action: str, **detail) -> None:
@@ -67,6 +81,7 @@ def refresh(session: Session, gw: PayPalGateway, row: PayPalAccount, actor: str,
             row.payments_receivable = status.payments_receivable
             row.primary_email_confirmed = status.primary_email_confirmed
             row.permissions_granted = status.permissions_granted
+            row.primary_email = status.primary_email or row.primary_email
     except PayPalError as e:
         raise ServiceError(f"couldn't read the PayPal account's status: {e}", 502) from e
     row.checked_at = now

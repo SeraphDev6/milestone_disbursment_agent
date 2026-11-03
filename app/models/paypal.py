@@ -16,6 +16,9 @@ class PayPalAccountBase(SQLModel):
     permissions_granted: bool = Field(
         default=False, description="The account granted this platform payments, refunds and delayed disbursement."
     )
+    primary_email: str | None = Field(
+        default=None, max_length=320, description="The connected account's own primary email, as PayPal reports it."
+    )
 
 
 class PayPalAccount(PayPalAccountBase, table=True):
@@ -60,6 +63,12 @@ class PayPalAccountRead(PayPalAccountBase):
     ready: bool = Field(description="True when tranches can be held and paid straight to this account.")
     issues: list[str] = Field(description="What still blocks payments, in plain words.")
     checked_at: datetime | None
+    paypal_email: str | None = Field(
+        default=None,
+        description="The org's PayPal email (used for Payouts when the account isn't connected). Compare with "
+        "primary_email: when they differ, money can reach two different PayPal accounts.",
+    )
+    notes: list[str] = Field(default_factory=list, description="Things worth knowing that don't block payments.")
 
 
 class PayPalConnectStarted(SQLModel):

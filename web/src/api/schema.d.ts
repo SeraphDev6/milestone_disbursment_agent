@@ -2090,6 +2090,12 @@ export interface components {
              * @description Invoice mode: where the payer pays this tranche (relative to the API), while open.
              */
             pay_path?: string | null;
+            /**
+             * Refund Failed
+             * @description A contest was resolved for the payer but PayPal refused the refund; the tranche stays contested and resolving it again with decision=refund retries.
+             * @default false
+             */
+            refund_failed?: boolean;
         };
         /**
          * MilestoneStatus
@@ -2202,6 +2208,11 @@ export interface components {
              * @default false
              */
             permissions_granted?: boolean;
+            /**
+             * Primary Email
+             * @description The connected account's own primary email, as PayPal reports it.
+             */
+            primary_email?: string | null;
             /** Org Id */
             org_id: string;
             /**
@@ -2221,6 +2232,16 @@ export interface components {
             issues: string[];
             /** Checked At */
             checked_at: string | null;
+            /**
+             * Paypal Email
+             * @description The org's PayPal email (used for Payouts when the account isn't connected). Compare with primary_email: when they differ, money can reach two different PayPal accounts.
+             */
+            paypal_email?: string | null;
+            /**
+             * Notes
+             * @description Things worth knowing that don't block payments.
+             */
+            notes?: string[];
         };
         /** PayPalConnectStarted */
         PayPalConnectStarted: {

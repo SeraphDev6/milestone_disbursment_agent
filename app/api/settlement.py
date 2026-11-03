@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlmodel import Field, SQLModel
 
-from app.api.deps import MilestoneAccessDep, SessionDep, gateway
+from app.api.deps import MilestoneAccessDep, SessionDep, client_ip, gateway, rate_limit
 from app.api.views import agreement_read, html_page
 from app.db import utcnow
 from app.models import AgreementRead, DisbursementRead, MilestoneStatus, SettlementRead
@@ -71,6 +71,7 @@ def settlement_read(s, m, request: Request) -> SettlementRead:
 def pay(settlement_id: str, session: SessionDep, request: Request) -> Response:
     """The payer's link for an invoice-mode tranche: a fresh PayPal order (or the PayPal invoice) each visit."""
     try:
+        rate_limit(request, "pay_link", client_ip(request))
         url = settlement.payment_link(
             session, gateway(request), settlement_id, request.app.state.settings.public_base_url
         )

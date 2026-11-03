@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, Response, UploadFile, status
 from sqlmodel import Field, SQLModel, select
 
-from app.api.deps import EvidenceAccessDep, MilestoneAccessDep, SessionDep, ai, gateway
+from app.api.deps import EvidenceAccessDep, MilestoneAccessDep, SessionDep, ai, gateway, rate_limit
 from app.api.views import EvidenceAccepted
 from app.db import utcnow
 from app.integrations.uploads import UploadError, parse_upload
@@ -167,6 +167,7 @@ def precheck(
 ) -> VerdictRead:
     access, m = auth
     access.require(Action.submit_evidence)
+    rate_limit(request, "precheck", access.principal.actor)
     return VerdictRead.model_validate(verification.precheck(session, ai(request), m, body.evidence, access.actor))
 
 

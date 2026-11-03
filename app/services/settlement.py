@@ -43,10 +43,14 @@ from app.models import (
     WebhookEvent,
 )
 from app.services import ServiceError, payee_accounts
+from app.services.notifications import notify_side, tranche_subject
 
 HONOR_PERIOD = timedelta(days=3)
 AUTH_VALIDITY = timedelta(days=29)
 PAYPAL_AUTO_DISBURSE = timedelta(days=28)  # PayPal pays a delayed-disbursement capture out by itself after this
+# A contested platform-route tranche (money in the platform account) is paid to the payee after the same period
+# unless someone resolved the contest, so both routes end the same way. Direct-route contests end when PayPal pays.
+CONTEST_TIMEOUT = PAYPAL_AUTO_DISBURSE
 
 AFTER_CAPTURE = {
     MilestoneStatus.held,
@@ -114,7 +118,7 @@ def _mark_funded(session: Session, m: Milestone, authorization_id: str, actor: s
     if m.status == MilestoneStatus.pending:
         transition(session, m, MilestoneStatus.funded, actor, "funded", authorization_id=authorization_id)
     else:
-        # Re-funded after an expired hold; verification state is kept.
+        # Funded while overdue, or re-funded after an expired hold; verification state is kept.
         _note(session, m, actor, "refunded_hold", authorization_id=authorization_id)
     return True
 
@@ -146,12 +150,18 @@ def _route(
     if account is not None and not account.ready and account.revoked_at is None:
         try:
             payee_accounts.refresh(session, gw, account, actor, now)
-        except ServiceError:
-            pass  # PayPal unreachable: fall back rather than block funding
+        except ServiceError as e:
+            # The payee started connecting PayPal, so don't quietly move their money through the platform
+            # because PayPal couldn't be reached: refuse and let the caller retry.
+            raise ServiceError(
+                f"couldn't confirm the payee's PayPal account; try again shortly ({e.message})", 502
+            ) from e
     if account is not None and account.ready:
         return PayoutRoute.direct, account.merchant_id
     if not payee.paypal_email:
         raise ServiceError("the payee hasn't connected PayPal or given a PayPal email, so it can't be paid yet")
+    if not getattr(gw, "platform_route_allowed", True):
+        raise ServiceError("the payee must connect PayPal before this tranche can be funded (direct payments only)")
     return PayoutRoute.platform, None
 
 
@@ -209,7 +219,7 @@ def complete_funding(session: Session, gw: PayPalGateway, order_id: str, actor: 
 
 
 def void(session: Session, gw: PayPalGateway, m: Milestone, actor: str) -> None:
-    if m.status != MilestoneStatus.funded or m.paypal_authorization_id is None:
+    if m.status not in (MilestoneStatus.funded, MilestoneStatus.overdue) or m.paypal_authorization_id is None:
         raise ServiceError("only a funded tranche with no evidence submitted can be voided")
     try:
         gw.void_authorization(
@@ -403,6 +413,16 @@ def _apply_payout_status(session: Session, d: Disbursement, status: str, actor: 
                 detail="The payee's email has no PayPal account yet; PayPal holds the payout for 30 days for them "
                 "to claim it, then returns it.",
             )
+            email = _payee(m).paypal_email or "the PayPal email on file"
+            notify_side(
+                session,
+                m,
+                Role.payee,
+                tranche_subject(m, "Claim your payment"),
+                f"{m.agreement.currency} {m.amount} for '{m.title}' was sent to {email}, but that address has no "
+                "PayPal account yet. Open the PayPal email to claim it or create a PayPal account with that "
+                "address. PayPal returns the money after 30 days if it isn't claimed.",
+            )
     elif status == "PENDING":
         _note(session, m, actor, "payout_pending", payout_ref=d.paypal_ref, attempt=d.attempt)
     else:
@@ -411,12 +431,22 @@ def _apply_payout_status(session: Session, d: Disbursement, status: str, actor: 
         transition(
             session, m, MilestoneStatus.payout_failed, actor, "payout_failed", payout_ref=d.paypal_ref, status=status
         )
+        notify_side(
+            session,
+            m,
+            Role.payer,
+            tranche_subject(m, "Payout failed"),
+            f"Paying the payee for '{m.title}' failed at PayPal ({d.error}). The money was captured and is not lost; "
+            "retry the payout from the tranche once the cause is fixed (for example the payee's PayPal email).",
+        )
 
 
 def pay_out(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: datetime) -> Disbursement:
     """Pay a captured tranche to the payee: when the dispute window closes, when the payer waives it, after a
     contest is resolved for the payee, or to retry a failed payout. Idempotent per attempt."""
     kinds = {DisbursementKind.referenced_payout, DisbursementKind.payout}
+    if _open(m, {DisbursementKind.refund}) is not None:
+        raise ServiceError("a refund to the payer is pending at PayPal; the payee can't be paid as well", 409)
     d = _open(m, kinds)
     if d is not None and d.paypal_ref:
         if d.kind == DisbursementKind.payout:  # Payouts settle asynchronously: ask PayPal where it is
@@ -556,9 +586,15 @@ def resolve(
     """End a contest: pay the payee, or refund the payer. Who may choose which is decided by the caller's rights."""
     if m.status != MilestoneStatus.contested:
         raise ServiceError(f"tranche is {m.status}; only a contested tranche can be resolved")
+    pending_refund = _open(m, {DisbursementKind.refund})
     if decision == "refund":
+        if pending_refund is not None and pending_refund.paypal_ref:
+            raise ServiceError("a refund to the payer is pending at PayPal; its webhook will finish it", 409)
         _note(session, m, actor, "contest_resolved", decision=decision, note=note)
         return _refund(session, gw, m, actor)
+    if pending_refund is not None:
+        # Both sides conceding at once (or a refund whose outcome is still unknown): never pay the payee as well.
+        raise ServiceError("a refund to the payer is under way; the payee can't be paid as well", 409)
     transition(session, m, MilestoneStatus.held, actor, "contest_resolved", decision=decision, note=note)
     session.commit()
     return pay_out(session, gw, m, actor, now)
@@ -573,14 +609,26 @@ def disburse_due(session: Session, gw: PayPalGateway, now: datetime, actor: str 
     ).all():
         try:
             if m.status == MilestoneStatus.contested:
-                if (
-                    m.payout_route == PayoutRoute.direct
-                    and m.captured_at
-                    and now - as_utc(m.captured_at) > PAYPAL_AUTO_DISBURSE
-                ):
+                if not m.captured_at or now - as_utc(m.captured_at) <= PAYPAL_AUTO_DISBURSE:
+                    continue
+                if m.payout_route == PayoutRoute.direct:
                     _ledger(session, m, "disbursed", _capture(m).paypal_ref)
                     transition(session, m, MilestoneStatus.settled, actor, "paypal_auto_released")
                     session.commit()
+                    counts["auto_released"] += 1
+                elif _open(m, {DisbursementKind.refund}) is None:
+                    # Platform route: nobody resolved the contest within the same period PayPal allows a direct
+                    # capture, so it ends the same way, paid to the payee. A refund under way is left alone.
+                    transition(
+                        session,
+                        m,
+                        MilestoneStatus.held,
+                        actor,
+                        "contest_timed_out",
+                        detail=f"unresolved for {CONTEST_TIMEOUT.days} days after capture; paying the payee",
+                    )
+                    session.commit()
+                    pay_out(session, gw, m, actor, now)
                     counts["auto_released"] += 1
                 continue
             open_payout = _open(m, {DisbursementKind.referenced_payout, DisbursementKind.payout})
@@ -644,6 +692,7 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor
             _ledger(session, m, "invoiced", f"request:{s.id}")
             _note(session, m, actor, "payment_requested", settlement_id=s.id, pay_path=pay_path(s))
             session.commit()
+            _notify_payment_due(session, m, pay_path(s))
             return s
     else:
         raise ServiceError(f"a tranche that is {m.status} can't be invoiced")
@@ -683,7 +732,25 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor
     _ledger(session, m, "invoiced", invoice.invoice_id)
     _note(session, m, actor, "invoice_sent", invoice_id=invoice.invoice_id, payer_view_url=invoice.payer_view_url)
     session.commit()
+    _notify_payment_due(session, m, pay_path(s))
     return s
+
+
+def _notify_payment_due(session: Session, m: Milestone, path: str | None) -> None:
+    from app.services.notifications import notifier_for
+
+    n = notifier_for(session)
+    if n is None or path is None:
+        return
+    notify_side(
+        session,
+        m,
+        Role.payer,
+        tranche_subject(m, "Payment due"),
+        f"'{m.title}' met all {len(m.criteria)} acceptance criteria. Pay {m.agreement.currency} {m.amount} to the "
+        "payee through PayPal with the link below; the verdict and evidence are in the agreement's audit log.",
+        link=f"{n.base_url}{path}",
+    )
 
 
 def payment_link(session: Session, gw: PayPalGateway, settlement_id: str, base_url: str) -> str:
@@ -850,6 +917,51 @@ REFERENCED_PAYOUT_EVENTS = {
 }
 
 
+DISPUTE_EVENTS = {"CUSTOMER.DISPUTE.CREATED", "CUSTOMER.DISPUTE.UPDATED", "CUSTOMER.DISPUTE.RESOLVED"}
+
+
+def _customer_dispute(session: Session, event_type: str, res: dict, actor: str, now: datetime) -> str:
+    """A PayPal customer dispute or chargeback against one of our captures. Recorded on the tranche; a held
+    tranche's payout is paused (as a contest) so a reviewer decides. Money PayPal reverses on its own shows up
+    through the capture and refund events."""
+    dispute_id = res.get("dispute_id") or res.get("id")
+    txns = [
+        t.get("seller_transaction_id") or t.get("buyer_transaction_id") for t in res.get("disputed_transactions") or []
+    ]
+    entry = next(
+        (
+            e
+            for txn in txns
+            if txn
+            for e in session.exec(select(LedgerEntry).where(LedgerEntry.paypal_ref == txn)).all()
+            if e.milestone_id
+        ),
+        None,
+    )
+    m = session.get(Milestone, entry.milestone_id) if entry else None
+    if m is None:
+        return "ignored: no tranche for this dispute"
+    detail = {
+        "dispute_id": dispute_id,
+        "reason": res.get("reason"),
+        "status": res.get("status"),
+        "outcome": (res.get("dispute_outcome") or {}).get("outcome_code"),
+        "amount": (res.get("dispute_amount") or {}).get("value"),
+    }
+    if (
+        event_type == "CUSTOMER.DISPUTE.CREATED"
+        and m.status == MilestoneStatus.held
+        and _open(m, {DisbursementKind.referenced_payout, DisbursementKind.payout}) is None
+    ):
+        transition(session, m, MilestoneStatus.contested, actor, "contested", **detail)
+        return "dispute opened: payout paused"
+    action = {"CREATED": "paypal_dispute_opened", "UPDATED": "paypal_dispute_updated"}.get(
+        event_type.rsplit(".", 1)[-1], "paypal_dispute_resolved"
+    )
+    _note(session, m, actor, action, **detail)
+    return f"dispute {event_type.rsplit('.', 1)[-1].lower()} recorded"
+
+
 def _related(resource: dict, key: str) -> str | None:
     return (resource.get("supplementary_data") or {}).get("related_ids", {}).get(key)
 
@@ -925,6 +1037,9 @@ def _dispatch(session: Session, event_type: str, res: dict, now: datetime) -> st
             return "ignored: no refund for this event"
         _apply_refund_status(session, d, res.get("status", "COMPLETED"), actor)
         return "refund recorded"
+
+    if event_type in DISPUTE_EVENTS:
+        return _customer_dispute(session, event_type, res, actor, now)
 
     if event_type == "MERCHANT.ONBOARDING.COMPLETED":
         return payee_accounts.onboarding_completed(session, res.get("merchant_id"), res.get("tracking_id"))

@@ -8,7 +8,7 @@ from sqlmodel import Session
 
 from app.ai.agents import AIRuntime
 from app.db import get_session
-from app.integrations.email import ConsoleMailer
+from app.integrations.email import Mailer
 from app.integrations.paypal import PayPalGateway
 from app.models import Agreement, Evidence, Milestone
 from app.services.access import Access, Principal, access_for, principal_from_token
@@ -86,12 +86,25 @@ def ai(request: Request) -> AIRuntime:
     return request.app.state.ai
 
 
-def mailer(request: Request) -> ConsoleMailer:
+def mailer(request: Request) -> Mailer:
     return request.app.state.mailer
 
 
 def show_links(request: Request) -> bool:
     """Return sign-in and invitation links in responses (mock mode only, where no email is sent)."""
-    from app.config import Mode
+    return request.app.state.settings.is_mock
 
-    return request.app.state.settings.mode is Mode.mock
+
+def client_ip(request: Request) -> str:
+    """The caller's address for rate limits: the first X-Forwarded-For hop when the deployment trusts its proxy."""
+    if request.app.state.settings.trust_proxy_headers:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def rate_limit(request: Request, scope: str, key: str) -> None:
+    """Count one request against `scope` (a `rate_limit_*_per_hour` setting name) for `key`; 429 when exceeded."""
+    limit = getattr(request.app.state.settings, f"rate_limit_{scope}_per_hour")
+    request.app.state.ratelimiter.check(scope, key, limit)

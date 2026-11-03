@@ -94,6 +94,7 @@ class MerchantStatus:
     payments_receivable: bool
     primary_email_confirmed: bool
     permissions_granted: bool
+    primary_email: str | None = None  # the connected account's own email (may differ from the org's Payouts email)
 
 
 PAYOUT_ITEM_STATUS = {  # Payouts item transaction_status -> ours
@@ -276,6 +277,7 @@ class MockPayPal:
             status.get("payments_receivable", True),
             status.get("primary_email_confirmed", True),
             status.get("permissions_granted", True),
+            primary_email=status.get("primary_email", ref.get("email")),
         )
         return mid
 
@@ -469,9 +471,11 @@ class MockPayPal:
         return f"{self.base_url}/mock/paypal/onboard?tracking_id={tracking_id}"
 
     def find_merchant(self, tracking_id) -> str | None:
+        self._maybe_fail()
         return self.referrals.get(tracking_id, {}).get("merchant_id")
 
     def merchant_status(self, merchant_id) -> MerchantStatus:
+        self._maybe_fail()
         status = self.merchants.get(merchant_id)
         if status is None:
             raise PayPalError("RESOURCE_NOT_FOUND: merchant", status=404)
@@ -527,7 +531,10 @@ class SandboxPayPal:
         partner_merchant_id: str | None = None,
         bn_code: str | None = None,
         timeout: float = 20.0,
+        platform_route_allowed: bool = True,
     ):
+        # Live deployments pay connected payees only: the platform route holds money in transit.
+        self.platform_route_allowed = platform_route_allowed
         self._client = httpx.Client(base_url=base_url, timeout=timeout)
         self._client_id = client_id
         self._auth = (client_id, client_secret)
@@ -588,8 +595,9 @@ class SandboxPayPal:
                 err = r.json()
                 first = (err.get("details") or [{}])[0]
                 detail = first.get("issue") or err.get("name") or err.get("message")
-                # Payouts: "Batch with given sender_batch_id already exists" (seen in sandbox)
-                duplicate = "sender_batch_id" in f"{first} {err.get('message', '')}"
+                # Payouts answers a reused sender_batch_id with HTTP 400 "Batch with given sender_batch_id already
+                # exists" (seen in sandbox; the field name's case varies across PayPal's docs).
+                duplicate = "sender_batch_id" in f"{first} {err.get('message', '')}".lower()
             except ValueError:
                 detail, duplicate = r.text[:200], False
             raise PayPalError(
@@ -826,6 +834,7 @@ class SandboxPayPal:
             bool(data.get("payments_receivable")),
             bool(data.get("primary_email_confirmed")),
             all(any(s.endswith(required) for s in scopes) for required in REQUIRED_SCOPES),
+            primary_email=data.get("primary_email"),
         )
 
     # --- invoices and webhooks ---
@@ -903,9 +912,10 @@ def make_gateway(settings) -> PayPalGateway:
         return MockPayPal(base_url=settings.public_base_url)
     return SandboxPayPal(
         client_id=settings.paypal_client_id,
-        client_secret=settings.paypal_client_secret,
-        base_url=settings.paypal_base_url,
+        client_secret=settings.paypal_client_secret.get_secret_value(),
+        base_url=settings.paypal_api_url,
         webhook_id=settings.paypal_webhook_id,
         partner_merchant_id=settings.paypal_partner_merchant_id,
         bn_code=settings.paypal_bn_code,
+        platform_route_allowed=settings.mode is not Mode.live,
     )

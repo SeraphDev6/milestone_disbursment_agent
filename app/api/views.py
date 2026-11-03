@@ -59,6 +59,15 @@ def pay_path(s) -> str | None:
     return path(s)
 
 
+def _refund_failed(m) -> bool:
+    from app.models import DisbursementKind, SettlementStatus
+
+    if m.status != MilestoneStatus.contested:
+        return False
+    last = next((d for d in reversed(m.disbursements) if d.kind == DisbursementKind.refund), None)
+    return last is not None and last.status == SettlementStatus.failed
+
+
 def _paypal_connected(party) -> bool | None:
     from app.services.payee_accounts import account_for
 
@@ -95,7 +104,11 @@ def agreement_read(row: Agreement) -> AgreementRead:
             ],
             "milestones": [
                 MilestoneRead.model_validate(
-                    m, update={"pay_path": pay_path(m.settlements[-1]) if m.settlements else None}
+                    m,
+                    update={
+                        "pay_path": pay_path(m.settlements[-1]) if m.settlements else None,
+                        "refund_failed": _refund_failed(m),
+                    },
                 )
                 for m in row.milestones
             ],

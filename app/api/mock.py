@@ -72,6 +72,7 @@ def mark_verified(milestone_id: str, auth: MilestoneAccessDep, session: SessionD
     allowed = {
         MilestoneStatus.pending,
         MilestoneStatus.funded,
+        MilestoneStatus.overdue,
         MilestoneStatus.evidence_received,
         MilestoneStatus.needs_review,
     }

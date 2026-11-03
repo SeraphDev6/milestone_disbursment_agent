@@ -27,15 +27,18 @@ from app.models import (
     EvidenceCreate,
     Milestone,
     MilestoneStatus,
+    Role,
     SettlementMode,
     Verdict,
     VerificationMethod,
 )
 from app.services import ServiceError, settlement
+from app.services.notifications import notify_side, tranche_subject
 
 ACCEPTS_EVIDENCE = {
     MilestoneStatus.pending,
     MilestoneStatus.funded,
+    MilestoneStatus.overdue,
     MilestoneStatus.evidence_received,
     MilestoneStatus.needs_review,
     MilestoneStatus.verifying,
@@ -141,6 +144,14 @@ def _settle_if_possible(session: Session, gw: PayPalGateway, m: Milestone, actor
     if a.settlement_mode == SettlementMode.escrow_release and m.paypal_authorization_id is None:
         record_audit(session, a.id, actor, "release_waiting", milestone_id=m.id, detail={"reason": "not funded"})
         session.commit()
+        notify_side(
+            session,
+            m,
+            Role.payer,
+            tranche_subject(m, "Verified, waiting for funding"),
+            f"'{m.title}' met all its acceptance criteria but has no PayPal hold. Fund the tranche to release "
+            f"{a.currency} {m.amount} to the payee.",
+        )
         return
     try:
         settlement.release(session, gw, m, actor, now)
@@ -188,7 +199,12 @@ def submit_evidence(
         },
     )
     m.evidence.append(row)
-    if m.status in (MilestoneStatus.pending, MilestoneStatus.funded, MilestoneStatus.needs_review):
+    if m.status in (
+        MilestoneStatus.pending,
+        MilestoneStatus.funded,
+        MilestoneStatus.overdue,
+        MilestoneStatus.needs_review,
+    ):
         settlement.transition(
             session,
             m,
@@ -274,8 +290,62 @@ def run_verification(
                 confidence=verdict.model_confidence,
             )
             session.commit()
+            _notify_review_needed(session, m, verdict)
         return verdict
     return None
+
+
+def _notify_review_needed(session: Session, m: Milestone, verdict: Verdict) -> None:
+    unmet = [r for r in verdict.criteria_results if not r.met]
+    summary = (
+        f"The verifier found all {len(verdict.criteria_results)} criteria met with confidence "
+        f"{verdict.model_confidence:.0%}; a person must approve the release."
+        if verdict.met
+        else f"{len(unmet)} of {len(verdict.criteria_results)} criteria were not met: "
+        + "; ".join(f"{r.criterion_id}: {r.missing or 'not met'}" for r in unmet[:5])
+    )
+    subject = tranche_subject(m, "Review needed")
+    body = f"Evidence for '{m.title}' was verified. {summary}\n\nRationale: {verdict.rationale}"
+    sides = [Role.reviewer] if m.agreement.require_reviewer_approval else [Role.payer, Role.reviewer]
+    for role in sides:
+        notify_side(session, m, role, subject, body)
+
+
+def mark_overdue(session: Session, now: datetime, actor: str = "system:overdue") -> int:
+    """A tranche whose due date passed with no evidence goes `overdue` and both sides hear about it. Run daily.
+    Evidence and funding are still accepted; evidence arriving moves it on as usual."""
+    today = now.date()
+    count = 0
+    for m in session.exec(
+        select(Milestone).where(
+            col(Milestone.status).in_((MilestoneStatus.pending, MilestoneStatus.funded)),
+            col(Milestone.due_date).is_not(None),
+            col(Milestone.due_date) < today,
+        )
+    ).all():
+        if m.evidence or m.agreement.status != AgreementStatus.active:
+            continue
+        settlement.transition(session, m, MilestoneStatus.overdue, actor, "overdue", due_date=m.due_date.isoformat())
+        session.commit()
+        subject = tranche_subject(m, "Overdue")
+        notify_side(
+            session,
+            m,
+            Role.payee,
+            subject,
+            f"'{m.title}' was due on {m.due_date:%B %d, %Y} and no evidence has been submitted. Submit it when "
+            "ready; the tranche still accepts evidence.",
+        )
+        notify_side(
+            session,
+            m,
+            Role.payer,
+            subject,
+            f"'{m.title}' was due on {m.due_date:%B %d, %Y} and the payee hasn't submitted evidence. No money "
+            "has moved.",
+        )
+        count += 1
+    return count
 
 
 def verify_in_background(
@@ -358,6 +428,18 @@ def review(
             missing=[{"criterion_id": r.criterion_id, "missing": r.missing} for r in unmet],
         )
         session.commit()
+        missing = (
+            "\n".join(f"- {r.criterion_id}: {r.missing or 'not met'}" for r in unmet) or "- (see the reviewer's note)"
+        )
+        notify_side(
+            session,
+            m,
+            Role.payee,
+            tranche_subject(m, "Evidence rejected"),
+            f"The evidence for '{m.title}' was not accepted."
+            + (f" Note from the reviewer: {note}" if note else "")
+            + f"\n\nWhat's missing:\n{missing}\n\nSubmit the missing evidence and the tranche is verified again.",
+        )
 
 
 def dispute(session: Session, m: Milestone, actor: str, reason: str) -> None:

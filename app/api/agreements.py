@@ -10,7 +10,7 @@ from starlette.concurrency import run_in_threadpool
 from app.ai.agents import AIError
 from app.ai.extraction import ExtractionResult, extract
 from app.api.auth import invitation_read
-from app.api.deps import AgreementAccessDep, OrgKeyDep, PrincipalDep, SessionDep, ai, mailer, show_links
+from app.api.deps import AgreementAccessDep, OrgKeyDep, PrincipalDep, SessionDep, ai, mailer, rate_limit, show_links
 from app.api.views import agreement_read
 from app.db import record_audit, utcnow
 from app.domain.criteria import assign_criterion_ids, criteria_hash, lint_agreement
@@ -96,6 +96,7 @@ class AgreementText(SQLModel):
 async def extract_agreement_text(
     body: AgreementText, request: Request, _: OrgKeyDep, principal: PrincipalDep
 ) -> ExtractionResult:
+    rate_limit(request, "extract", principal.actor)
     try:
         return await run_in_threadpool(extract, ai(request), body.text, "text/plain", body.title)
     except AIError as e:
@@ -109,6 +110,7 @@ async def extract_agreement_text(
 async def extract_agreement(
     request: Request, _: OrgKeyDep, principal: PrincipalDep, file: Annotated[UploadFile, File()]
 ) -> ExtractionResult:
+    rate_limit(request, "extract", principal.actor)
     media_type = (file.content_type or "").split(";")[0]
     if media_type not in DOCUMENT_TYPES:
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, f"upload a PDF or text file, not {media_type}")

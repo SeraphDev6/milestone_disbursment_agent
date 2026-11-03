@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 from sqlmodel import Field, SQLModel, select
 
-from app.api.deps import PrincipalDep, SessionDep, bearer_token, mailer, show_links
+from app.api.deps import PrincipalDep, SessionDep, bearer_token, client_ip, mailer, rate_limit, show_links
 from app.db import as_utc, utcnow
 from app.models import (
     Agreement,
@@ -67,6 +67,8 @@ def invitation_read(session, inv: Invitation) -> InvitationRead:
 @router.post("/auth/magic-link", summary="Email a one-time sign-in link")
 def request_link(body: MagicLinkRequest, session: SessionDep, request: Request) -> MagicLinkSent:
     settings = request.app.state.settings
+    rate_limit(request, "magic_link", client_ip(request))
+    rate_limit(request, "magic_link", "email:" + body.email.strip().lower())
     link = identity.request_magic_link(
         session, mailer(request), body.email, settings.public_base_url, app_url=settings.public_app_url
     )

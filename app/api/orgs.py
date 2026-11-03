@@ -105,9 +105,7 @@ def _org(session, principal, org_id: str, minimum: OrgRole) -> Organization:
 
 @router.post("/orgs", status_code=201, summary="Create an organization; you become its owner")
 def create_org(body: OrganizationCreate, principal: PrincipalDep, session: SessionDep) -> OrganizationRead:
-    if principal.user is None:
-        raise AccessError("only a signed-in person can create an organization", 403)
-    org = identity.create_org(session, principal.user, body)
+    org = identity.create_org(session, principal.require_person("create an organization"), body)
     return OrganizationRead.model_validate(org, update={"my_role": OrgRole.owner})
 
 

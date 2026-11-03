@@ -13,6 +13,8 @@ from joserfc import jwt
 from joserfc.errors import JoseError
 from joserfc.jwk import KeySet
 
+from app.services.outbound import DestinationError, Resolver, check_destination, resolve_host
+
 ALLOWED_ALGS = ["RS256", "RS384", "RS512", "ES256", "ES384", "PS256"]
 CLOCK_SKEW = 120  # seconds
 
@@ -28,32 +30,56 @@ def pkce_pair() -> tuple[str, str]:
 
 
 class OIDCClient:
-    def __init__(self, transport: httpx.BaseTransport | None = None, timeout: float = 10.0):
+    """Issuer URLs are configured by org admins (anyone can create an org), so every URL this client contacts,
+    the issuer and the endpoints its discovery document names, must be https and resolve to a public address.
+    `allow_local` (mock mode and tests) permits http://localhost and loopback addresses."""
+
+    def __init__(
+        self,
+        transport: httpx.BaseTransport | None = None,
+        timeout: float = 10.0,
+        *,
+        allow_local: bool = False,
+        resolve: Resolver | None = None,
+    ):
         self._http = httpx.Client(transport=transport, timeout=timeout, follow_redirects=False)
         self._discovery: dict[str, tuple[float, dict]] = {}
+        self._allow_local = allow_local
+        # A custom transport (tests) answers for hosts that don't exist in DNS: only the scheme is checked then.
+        self._resolve = resolve or (None if transport is not None else resolve_host)
 
-    def _get_json(self, url: str) -> dict:
+    def _vet(self, url: str, what: str) -> str:
+        try:
+            check_destination(url, allow_http=self._allow_local, resolve=self._resolve or (lambda host: []))
+        except DestinationError as e:
+            raise OIDCError(f"identity provider's {what} is not allowed: {e}") from e
+        return url
+
+    def _get_json(self, url: str, what: str) -> dict:
+        self._vet(url, what)
         try:
             r = self._http.get(url)
         except httpx.HTTPError as e:
-            raise OIDCError(f"identity provider unreachable: {e}") from e
+            raise OIDCError("identity provider unreachable") from e
         if r.status_code != 200:
-            raise OIDCError(f"identity provider returned {r.status_code} for {url}")
-        return r.json()
+            raise OIDCError(f"identity provider's {what} returned {r.status_code}")
+        try:
+            return r.json()
+        except ValueError as e:
+            raise OIDCError(f"identity provider's {what} is not JSON") from e
 
     def discover(self, issuer: str) -> dict:
         issuer = issuer.rstrip("/")
         cached = self._discovery.get(issuer)
         if cached and time.monotonic() - cached[0] < 3600:
             return cached[1]
-        if not issuer.startswith("https://") and not issuer.startswith("http://localhost"):
-            raise OIDCError("issuer must be an https URL")
-        doc = self._get_json(f"{issuer}/.well-known/openid-configuration")
+        doc = self._get_json(f"{issuer}/.well-known/openid-configuration", "issuer")
         if doc.get("issuer", "").rstrip("/") != issuer:
             raise OIDCError("discovery document's issuer doesn't match the configured issuer")
         for key in ("authorization_endpoint", "token_endpoint", "jwks_uri"):
             if not doc.get(key):
                 raise OIDCError(f"discovery document has no {key}")
+            self._vet(doc[key], key)
         self._discovery[issuer] = (time.monotonic(), doc)
         return doc
 
@@ -87,7 +113,7 @@ class OIDCClient:
         """Trade the authorization code for tokens; returns the raw ID token."""
         try:
             r = self._http.post(
-                self.discover(issuer)["token_endpoint"],
+                self._vet(self.discover(issuer)["token_endpoint"], "token_endpoint"),
                 data={
                     "grant_type": "authorization_code",
                     "code": code,
@@ -98,7 +124,7 @@ class OIDCClient:
                 headers={"Accept": "application/json"},
             )
         except httpx.HTTPError as e:
-            raise OIDCError(f"identity provider unreachable: {e}") from e
+            raise OIDCError("identity provider unreachable") from e
         if r.status_code != 200:
             raise OIDCError(f"code exchange failed ({r.status_code})")
         id_token = r.json().get("id_token")
@@ -108,7 +134,7 @@ class OIDCClient:
 
     def validate(self, issuer: str, client_id: str, id_token: str, nonce: str) -> dict:
         """Signature (provider's JWKS), issuer, audience, expiry, issued-at and nonce. Returns the claims."""
-        keys = KeySet.import_key_set(self._get_json(self.discover(issuer)["jwks_uri"]))
+        keys = KeySet.import_key_set(self._get_json(self.discover(issuer)["jwks_uri"], "jwks_uri"))
         try:
             token = jwt.decode(id_token, keys, algorithms=ALLOWED_ALGS)
         except (JoseError, ValueError) as e:

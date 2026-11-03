@@ -26,8 +26,10 @@ def make_engine(url: str) -> Engine:
     return create_engine(url, pool_pre_ping=True)
 
 
-def make_sessionmaker(engine: Engine) -> sessionmaker[Session]:
-    return sessionmaker(engine, class_=Session, expire_on_commit=False)
+def make_sessionmaker(engine: Engine, info: dict | None = None) -> sessionmaker[Session]:
+    """`info` is copied into every session's `session.info` (the app puts its notifier there, so services can
+    email people without carrying a mailer argument through every call)."""
+    return sessionmaker(engine, class_=Session, expire_on_commit=False, info=dict(info or {}))
 
 
 def get_session(request: Request) -> Iterator[Session]:

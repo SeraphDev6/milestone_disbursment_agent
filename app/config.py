@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Mode(str, Enum):
     mock = "mock"  # no keys needed: fake PayPal ids, canned verifier
     sandbox = "sandbox"  # real PayPal sandbox and a real model
+    live = "live"  # production PayPal: direct route only (needs PayPal partner approval and a BN code)
 
 
 class Settings(BaseSettings):
@@ -17,10 +18,11 @@ class Settings(BaseSettings):
     mode: Mode = Mode.mock
     database_url: str = "sqlite:///./local.db"
     # mock: deterministic stand-in; claude: Claude via Pydantic AI (needs ANTHROPIC_API_KEY).
-    # Unset follows MODE, so sandbox uses Claude and mock uses the stand-in.
+    # Unset follows MODE, so sandbox and live use Claude and mock uses the stand-in.
     llm: Literal["mock", "claude"] | None = None
     anthropic_api_key: SecretStr | None = None
-    # Encrypts secrets stored for later use (orgs' SSO client secrets). Must be set and kept stable in sandbox/prod.
+    # Encrypts secrets stored for later use (orgs' SSO client secrets) and signs browser CSRF tokens. Must be set
+    # and kept stable outside mock mode.
     secret_key: SecretStr = SecretStr("dev-only-insecure-secret-key")
     # When set, creating agreements and extracting documents (which spends model credits) requires X-Org-Key.
     org_api_key: str | None = None
@@ -30,23 +32,44 @@ class Settings(BaseSettings):
     # How often the in-process loop delivers outbound webhooks; 0 turns it off (tests, or a separate worker).
     outbound_interval_seconds: float = 5.0
     # How often the in-process loop pays tranches whose dispute window closed; 0 turns it off (use the
-    # `payouts` job instead).
+    # `payouts` job instead; with several app instances run that job from one scheduler only).
     payouts_interval_seconds: float = 300.0
     github_token: str | None = None  # optional; raises GitHub API rate limits and reads private repos
     paypal_client_id: str | None = None
-    paypal_client_secret: str | None = None
-    paypal_base_url: str = "https://api-m.sandbox.paypal.com"
-    paypal_webhook_id: str | None = None  # from the sandbox app's webhook config; needed to verify webhooks
+    paypal_client_secret: SecretStr | None = None
+    # Unset follows MODE: the sandbox API in sandbox mode, the live API in live mode.
+    paypal_base_url: str | None = None
+    paypal_webhook_id: str | None = None  # from the app's webhook config; needed to verify webhooks
     # The platform's own PayPal merchant id (for partner onboarding status calls). Looked up once when unset.
     paypal_partner_merchant_id: str | None = None
     paypal_bn_code: str | None = None  # partner attribution id, once PayPal issues one for a live partner app
     # Where PayPal sends the payer back after approving. Render sets RENDER_EXTERNAL_URL.
-    # Where the web app lives (e.g. https://host/app). When set, emailed sign-in and invitation links open the web
-    # app (/auth/verify, /invitations/accept) instead of the API's pages, and SSO started from the app returns there.
-    public_app_url: str | None = None
     public_base_url: str = Field(
         "http://localhost:8000", validation_alias=AliasChoices("PUBLIC_BASE_URL", "RENDER_EXTERNAL_URL")
     )
+    # Where the web app lives (e.g. https://host/app). When set, emailed sign-in and invitation links open the web
+    # app (/auth/verify, /invitations/accept) instead of the API's pages, and SSO started from the app returns there.
+    public_app_url: str | None = None
+
+    # Outgoing email. console: log only (mock mode returns links in responses instead). resend: Resend's API.
+    # smtp: any SMTP server (STARTTLS when the server offers it).
+    email_provider: Literal["console", "resend", "smtp"] = "console"
+    email_from: str = "Milestone Engine <no-reply@localhost>"
+    resend_api_key: SecretStr | None = None
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+
+    # Per-client limits on endpoints that send email, spend model credits or create PayPal orders. Counted in
+    # memory per app instance (a shared store is not needed for one web instance). 0 turns a limit off.
+    rate_limit_magic_link_per_hour: int = 20  # per IP (and per email address, at half this)
+    rate_limit_extract_per_hour: int = 30  # per caller
+    rate_limit_precheck_per_hour: int = 60  # per caller
+    rate_limit_pay_link_per_hour: int = 30  # per IP
+    # Trust X-Forwarded-For from the reverse proxy in front of the app (Render, Docker behind a load balancer)
+    # when attributing requests to a client for rate limits.
+    trust_proxy_headers: bool = True
 
     @field_validator("database_url")
     @classmethod
@@ -58,16 +81,37 @@ class Settings(BaseSettings):
         return v
 
     @model_validator(mode="after")
-    def _sandbox_needs_keys(self) -> "Settings":
-        if self.mode is Mode.sandbox and not (self.paypal_client_id and self.paypal_client_secret):
-            raise ValueError("MODE=sandbox requires PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET")
-        if self.mode is Mode.sandbox and self.secret_key.get_secret_value().startswith("dev-only"):
-            raise ValueError("MODE=sandbox requires SECRET_KEY")
+    def _real_modes_need_keys(self) -> "Settings":
+        if self.mode is Mode.mock:
+            return self
+        if not (self.paypal_client_id and self.paypal_client_secret):
+            raise ValueError(f"MODE={self.mode.value} requires PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET")
+        if self.secret_key.get_secret_value().startswith("dev-only"):
+            raise ValueError(f"MODE={self.mode.value} requires SECRET_KEY")
+        if self.email_provider == "resend" and not self.resend_api_key:
+            raise ValueError("EMAIL_PROVIDER=resend requires RESEND_API_KEY")
+        if self.email_provider == "smtp" and not self.smtp_host:
+            raise ValueError("EMAIL_PROVIDER=smtp requires SMTP_HOST")
+        if self.mode is Mode.live:
+            if not self.public_base_url.startswith("https://"):
+                raise ValueError("MODE=live requires an https PUBLIC_BASE_URL")
+            if not self.paypal_webhook_id:
+                raise ValueError("MODE=live requires PAYPAL_WEBHOOK_ID (webhooks are the source of truth)")
         return self
+
+    @property
+    def paypal_api_url(self) -> str:
+        if self.paypal_base_url:
+            return self.paypal_base_url
+        return "https://api-m.paypal.com" if self.mode is Mode.live else "https://api-m.sandbox.paypal.com"
+
+    @property
+    def is_mock(self) -> bool:
+        return self.mode is Mode.mock
 
 
 def use_claude(settings: Settings) -> bool:
-    return settings.llm == "claude" if settings.llm else settings.mode is Mode.sandbox
+    return settings.llm == "claude" if settings.llm else settings.mode is not Mode.mock
 
 
 @lru_cache

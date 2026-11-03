@@ -145,6 +145,11 @@ class MilestoneRead(MilestoneBase):
     pay_path: str | None = Field(
         default=None, description="Invoice mode: where the payer pays this tranche (relative to the API), while open."
     )
+    refund_failed: bool = Field(
+        default=False,
+        description="A contest was resolved for the payer but PayPal refused the refund; the tranche stays contested "
+        "and resolving it again with decision=refund retries.",
+    )
 
 
 # --- Agreement -------------------------------------------------------------------------

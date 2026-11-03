@@ -61,7 +61,19 @@ Everything is done as a signed-in person acting for an organization (see "Organi
 
 A complete example draft is in [`tests/conftest.py`](tests/conftest.py), and [`tests/helpers.py`](tests/helpers.py) walks the whole sign-in, org and invitation flow.
 
-Run `uv run python -m app.jobs daily` once a day: it clears expired PayPal holds (29 days) and cancels invoices left unpaid for 30 days.
+## Running it for real
+
+Two scheduled jobs and a few settings turn the mock demo into a deployment (all in `.env.example`):
+
+- `python -m app.jobs daily` once a day: clears expired PayPal holds (29 days), cancels invoices left unpaid for 30 days, and marks tranches whose due date passed with no evidence `overdue` (both sides are emailed; evidence and funding are still accepted).
+- `python -m app.jobs payouts` hourly: pays tranches whose dispute window closed, follows Payouts still in flight, and ends contests nobody resolved within 28 days of capture the way PayPal does (paid to the payee). The app also runs this in-process every `PAYOUTS_INTERVAL_SECONDS`; with more than one instance set that to 0 and schedule the job once.
+- **Email:** `EMAIL_PROVIDER=resend` (with `RESEND_API_KEY`) or `smtp` (with `SMTP_*`), plus `EMAIL_FROM`. Sign-in links, invitations, review requests, rejections with what's missing, pay links, overdue notices and unclaimed or failed payouts go to the tranche's assignee on that side, or to every member of the party's org. `console` (the default) only logs them.
+- **Rate limits:** sign-in links per IP and per address, extraction and pre-check per caller, pay-link visits per IP (`RATE_LIMIT_*_PER_HOUR`); `TRUST_PROXY_HEADERS` says whether `X-Forwarded-For` names the client.
+- **PayPal disputes:** `CUSTOMER.DISPUTE.*` webhooks are recorded on the tranche; a dispute against a tranche still in its window pauses the payout as a contest for a reviewer to resolve.
+- **Live mode:** `MODE=live` uses PayPal's production API, pays connected payees only (never the platform route), and requires an https `PUBLIC_BASE_URL` and `PAYPAL_WEBHOOK_ID`. It also needs PayPal's partner approval and a BN code.
+- `uv run python scripts/paypal_sandbox_check.py` checks the PayPal credentials, the platform merchant id and the webhook subscription from `.env` without running the app (`--order` also creates a $1 hold link).
+
+MCP clients act only through the tools shown at consent, even when they call the REST API directly with their access token: confirming, funding, reviewing, releasing, contesting, disputing and organization management (members, keys, SSO) stay with people.
 
 ## Code layout
 
@@ -69,15 +81,17 @@ Run `uv run python -m app.jobs daily` once a day: it clears expired PayPal holds
 app/
   main.py          app factory: wires settings, PayPal, AI, GitHub, routers
   config.py        settings (env / .env)
-  jobs.py          scheduled jobs: daily expiry, webhook delivery
+  jobs.py          scheduled jobs: daily expiry and overdue sweep, payouts, webhook delivery
   models/          single source of truth: one SQLModel definition per entity (XBase -> table X, XCreate, XRead),
                    plus enums and the value objects stored as typed JSON (Criterion, Measure, CriterionResult)
   api/             HTTP endpoints by resource, plus shared deps (auth, roles) and response assembly
   db/              engine, sessions, audit log + webhook outbox
   domain/          criteria lint and deterministic checks
   ai/              Pydantic AI agents (extraction, verification) and extraction post-processing
-  services/        settlement (escrow + invoice), verification and gate, outbound webhooks, compliance packet
-  integrations/    PayPal gateway (mock + REST), GitHub, file uploads
+  services/        settlement (escrow + invoice), verification and gate, notifications, rate limits,
+                   outbound webhooks, compliance packet
+  integrations/    PayPal gateway (mock + REST), email (console, Resend, SMTP), GitHub, OIDC, file uploads
+scripts/           paypal_sandbox_check.py: verify PayPal credentials and webhook setup from .env
 web/               React app (Vite, React Aria, AG Grid); served at /app from web/dist
 ```
 
@@ -106,7 +120,7 @@ uv run alembic upgrade head && uv run alembic check
 
 ## Deploy
 
-`render.yaml` is a Render Blueprint: a web service plus Postgres. Set `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` in the Render dashboard when switching to `MODE=sandbox`.
+`render.yaml` is a Render Blueprint: the web service, a Postgres database and two cron jobs (`payouts` hourly, `daily` each morning), sharing one environment group. After the first deploy set the secrets marked `sync: false` in the dashboard (`PUBLIC_BASE_URL`, `PUBLIC_APP_URL`, the PayPal keys, `PAYPAL_WEBHOOK_ID`, `PAYPAL_PARTNER_MERCHANT_ID`, `ANTHROPIC_API_KEY`, an email provider) and switch `MODE` to `sandbox`. Point the PayPal app's webhook at `<PUBLIC_BASE_URL>/webhooks/paypal` and subscribe it to the authorization, capture, payouts, referenced-payout, invoicing, merchant and customer-dispute events (`scripts/paypal_sandbox_check.py` lists any missing). The database is on the smallest paid plan because Render deletes free databases after 30 days.
 
 ## License
 
