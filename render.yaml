@@ -1,0 +1,28 @@
+# Render Blueprint. Worker (verification queue) and cron (authorization expiry,
+# invoice timeouts) services are added when those jobs exist (build plan Nov 5-8).
+services:
+  - type: web
+    name: milestone-engine
+    runtime: python
+    plan: free
+    buildCommand: pip install uv && uv sync --frozen --no-dev
+    startCommand: uv run --no-dev uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: MODE
+        value: mock
+      - key: DATABASE_URL
+        fromDatabase:
+          name: milestone-engine-db
+          property: connectionString
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+
+databases:
+  - name: milestone-engine-db
+    plan: free
+    postgresMajorVersion: "16"
