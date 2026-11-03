@@ -19,6 +19,7 @@ from fastmcp.server.auth import MultiAuth, TokenVerifier
 from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.providers.openapi.routing import MCPType
 from mcp.server.auth.provider import AccessToken
+from mcp.types import ToolAnnotations
 from sqlmodel import select
 
 from app.db import as_utc, utcnow
@@ -81,6 +82,40 @@ def _route_map_fn(route: Any, mcp_type: MCPType) -> MCPType:
     return MCPType.TOOL if route.extensions.get("x-mcp-tool") else MCPType.EXCLUDE
 
 
+# name -> (title, read_only, idempotent, open_world). Clients use these hints to decide when to ask the person
+# before running a tool (ChatGPT and Claude treat tools without readOnlyHint as writes).
+TOOL_HINTS: dict[str, tuple[str, bool, bool, bool]] = {
+    "list_agreements": ("List agreements", True, True, False),
+    "get_agreement_status": ("Get agreement status", True, True, False),
+    "review_queue": ("Review queue", True, True, False),
+    "get_portfolio": ("Funding portfolio", True, True, False),
+    "list_evidence": ("List evidence", True, True, False),
+    "get_verdict": ("Latest verdict", True, True, False),
+    "explain_milestone": ("Explain a tranche (audit log)", True, True, False),
+    "export_compliance_packet": ("Compliance packet", True, True, False),
+    "lint_agreement_criteria": ("Check criteria", True, True, False),
+    "draft_agreement_from_text": ("Draft agreement from text", True, False, False),
+    "precheck_evidence": ("Pre-check evidence", True, False, False),
+    "create_agreement": ("Create agreement and invite", False, False, True),  # emails invitations
+    "submit_evidence": ("Submit evidence", False, True, False),  # identical evidence is deduplicated
+}
+SECURITY_SCHEMES = [{"type": "oauth2", "scopes": [SCOPE]}]  # ChatGPT: per-tool auth declaration
+
+
+def _component_fn(route: Any, component: Any) -> None:
+    name = route.extensions.get("x-mcp-tool")
+    title, read_only, idempotent, open_world = TOOL_HINTS.get(name, (route.summary or name, False, False, False))
+    component.title = title
+    component.annotations = ToolAnnotations(
+        title=title,
+        readOnlyHint=read_only,
+        destructiveHint=False,  # nothing an agent can call deletes or overwrites anything
+        idempotentHint=idempotent,
+        openWorldHint=open_world,
+    )
+    component.meta = {**(component.meta or {}), "securitySchemes": SECURITY_SCHEMES}
+
+
 def build_mcp(app: FastAPI, base_url: str) -> tuple[FastMCP, DatabaseOAuthProvider]:
     oauth = DatabaseOAuthProvider(base_url=base_url, state=app.state)
     auth = MultiAuth(server=oauth, verifiers=[ApiKeyVerifier(app.state, oauth.resource_url)])
@@ -89,6 +124,7 @@ def build_mcp(app: FastAPI, base_url: str) -> tuple[FastMCP, DatabaseOAuthProvid
         name="milestone-disbursement-engine",
         instructions=INSTRUCTIONS,
         route_map_fn=_route_map_fn,
+        mcp_component_fn=_component_fn,
         mcp_names=_tool_names(app),
         httpx_client_kwargs={"event_hooks": {"request": [_attach_caller]}, "base_url": "http://mde.internal"},
         auth=auth,

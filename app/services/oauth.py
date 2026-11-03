@@ -6,12 +6,19 @@ FastMCP / the MCP SDK provide the protocol surface (metadata, dynamic registrati
 - codes are one-time, short-lived, bound to the person, the org and the PKCE challenge;
 - access tokens last an hour, act only within the chosen org, and are only valid for this server's /mcp;
 - refresh tokens rotate on every use; presenting a used one revokes the whole family (theft detection).
+
+Client compatibility (see docs/MCP_CLIENTS.md): clients identify themselves by Dynamic Client Registration
+or by a Client ID Metadata Document (an https URL as client_id, fetched SSRF-safely). CIMD clients are public
+(token auth "none") and their loopback redirects match on any port (RFC 8252), as Claude Code needs.
 """
 
 import secrets
 from datetime import datetime, timedelta
+from urllib.parse import urlsplit
 
 from fastmcp.server.auth import OAuthProvider
+from fastmcp.server.auth.cimd import CIMDDocument, CIMDFetcher, CIMDFetchError, CIMDValidationError
+from mcp.server.auth.handlers.metadata import ProtectedResourceMetadataHandler
 from mcp.server.auth.provider import (
     AccessToken,
     AuthorizationCode,
@@ -20,9 +27,18 @@ from mcp.server.auth.provider import (
     RefreshToken,
     TokenError,
 )
+from mcp.server.auth.routes import MetadataHandler, build_metadata
 from mcp.server.auth.settings import ClientRegistrationOptions, RevocationOptions
-from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from mcp.shared.auth import (
+    InvalidRedirectUriError,
+    InvalidScopeError,
+    OAuthClientInformationFull,
+    OAuthToken,
+    ProtectedResourceMetadata,
+)
+from pydantic import AnyHttpUrl, AnyUrl, PrivateAttr
 from sqlmodel import Session, col, select
+from starlette.routing import Route
 
 from app.db import as_utc, new_id, utcnow
 from app.models import ApiToken, TokenKind
@@ -30,6 +46,10 @@ from app.models.oauth import OAuthClient, OAuthCode, OAuthPendingAuthorization
 from app.services.access import hash_token
 
 SCOPE = "mcp"
+# offline_access is accepted (Claude appends it when advertised; ChatGPT relies on refresh tokens). Refresh
+# tokens are issued either way.
+SCOPES = [SCOPE, "offline_access"]
+TOKEN_AUTH_METHODS = ["none", "client_secret_post", "client_secret_basic"]
 CODE_TTL = timedelta(minutes=5)
 PENDING_TTL = timedelta(minutes=15)
 ACCESS_TTL = timedelta(hours=1)
@@ -40,13 +60,62 @@ def _epoch(dt: datetime | None) -> int | None:
     return int(as_utc(dt).timestamp()) if dt else None
 
 
+def canonical_resource(uri: str) -> str:
+    """RFC 8707 resource as clients send it: tolerate host/scheme case and a trailing slash, nothing else."""
+    from urllib.parse import urlsplit, urlunsplit
+
+    parts = urlsplit(uri.strip())
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), parts.query, ""))
+
+
+class CIMDClient(OAuthClientInformationFull):
+    """A client identified by its Client ID Metadata Document. Public client; redirects checked against the
+    document with RFC 8252 loopback port flexibility."""
+
+    _doc: CIMDDocument = PrivateAttr()
+    _fetcher: CIMDFetcher = PrivateAttr()
+
+    @classmethod
+    def from_document(cls, doc: CIMDDocument, fetcher: CIMDFetcher) -> "CIMDClient":
+        client = cls(
+            client_id=str(doc.client_id),
+            client_name=doc.client_name,
+            client_uri=doc.client_uri,
+            logo_uri=doc.logo_uri,
+            redirect_uris=[AnyUrl(u) for u in doc.redirect_uris],
+            grant_types=["authorization_code", "refresh_token"],
+            response_types=["code"],
+            token_endpoint_auth_method="none",
+            scope=" ".join(SCOPES),
+        )
+        client._doc, client._fetcher = doc, fetcher
+        return client
+
+    def validate_redirect_uri(self, redirect_uri: AnyUrl | None) -> AnyUrl:
+        if redirect_uri is None:
+            if len(self._doc.redirect_uris) == 1 and "localhost" not in self._doc.redirect_uris[0]:
+                return AnyUrl(self._doc.redirect_uris[0])
+            raise InvalidRedirectUriError("redirect_uri is required for this client")
+        if not self._fetcher.validate_redirect_uri(self._doc, str(redirect_uri)):
+            raise InvalidRedirectUriError(f"redirect_uri {redirect_uri} isn't in the client's metadata document")
+        return redirect_uri
+
+    def validate_scope(self, requested_scope: str | None) -> list[str] | None:
+        if requested_scope is None:
+            return [SCOPE]
+        requested = requested_scope.split()
+        if not set(requested) <= set(SCOPES):
+            raise InvalidScopeError(f"unsupported scopes: {' '.join(sorted(set(requested) - set(SCOPES)))}")
+        return requested
+
+
 class DatabaseOAuthProvider(OAuthProvider):
     def __init__(self, *, base_url: str, state):
         super().__init__(
             base_url=base_url,
             issuer_url=base_url,
             client_registration_options=ClientRegistrationOptions(
-                enabled=True, valid_scopes=[SCOPE], default_scopes=[SCOPE]
+                enabled=True, valid_scopes=SCOPES, default_scopes=SCOPES
             ),
             revocation_options=RevocationOptions(enabled=True),
             required_scopes=[SCOPE],
@@ -54,6 +123,39 @@ class DatabaseOAuthProvider(OAuthProvider):
         self._state = state  # app.state: sessionmaker exists only once the app has started
         self.base_url_str = base_url.rstrip("/")
         self.resource_url = f"{self.base_url_str}/mcp"
+        self.cimd_fetcher = CIMDFetcher()  # SSRF-safe (https only, no private IPs, size/time limits, no redirects)
+
+    # --- discovery ---------------------------------------------------------------------
+
+    def get_routes(self, mcp_path: str | None = None) -> list[Route]:
+        """The SDK's routes, plus what clients beyond the spec minimum need:
+        - authorization-server metadata that also advertises CIMD and public clients ("none"), which Claude
+          requires before using CIMD and which ChatGPT's CIMD client intersects with;
+        - protected-resource metadata at the root path too (ChatGPT's documented location)."""
+        routes = super().get_routes(mcp_path)
+        metadata = build_metadata(
+            self.issuer_url, self.service_documentation_url, self.client_registration_options, self.revocation_options
+        ).model_copy(
+            update={
+                "client_id_metadata_document_supported": True,
+                "token_endpoint_auth_methods_supported": TOKEN_AUTH_METHODS,
+            }
+        )
+        as_path = "/.well-known/oauth-authorization-server"
+        prm_paths = {"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"}
+        routes = [r for r in routes if getattr(r, "path", None) not in {as_path, *prm_paths}]
+        routes.append(Route(as_path, MetadataHandler(metadata).handle, methods=["GET", "OPTIONS"]))
+        # Resource metadata lists only what the resource needs (MCP spec: minimal scopes_supported); the
+        # authorization server separately advertises offline_access for refresh tokens.
+        prm = ProtectedResourceMetadata(
+            resource=AnyHttpUrl(self.resource_url),
+            authorization_servers=[AnyHttpUrl(str(self.issuer_url))],
+            scopes_supported=[SCOPE],
+            bearer_methods_supported=["header"],
+        )
+        for path in prm_paths:
+            routes.append(Route(path, ProtectedResourceMetadataHandler(prm).handle, methods=["GET", "OPTIONS"]))
+        return routes
 
     def _session(self) -> Session:
         return self._state.sessionmaker()
@@ -61,11 +163,20 @@ class DatabaseOAuthProvider(OAuthProvider):
     # --- clients -----------------------------------------------------------------------
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
+        if self.cimd_fetcher.is_cimd_client_id(client_id):
+            try:
+                return CIMDClient.from_document(await self.cimd_fetcher.fetch(client_id), self.cimd_fetcher)
+            except (CIMDFetchError, CIMDValidationError):
+                return None
         with self._session() as s:
             row = s.get(OAuthClient, client_id)
             return OAuthClientInformationFull.model_validate(row.info) if row else None
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
+        # Clients often register with just "mcp" (or no scope) and then ask for every scope the metadata
+        # advertises, offline_access included (ChatGPT does). Let any registered client ask for both.
+        scopes = set((client_info.scope or "").split()) | set(SCOPES)
+        client_info = client_info.model_copy(update={"scope": " ".join(s for s in SCOPES if s in scopes)})
         with self._session() as s:
             s.add(OAuthClient(client_id=client_info.client_id, info=client_info.model_dump(mode="json")))
             s.commit()
@@ -73,11 +184,17 @@ class DatabaseOAuthProvider(OAuthProvider):
     # --- authorization -----------------------------------------------------------------
 
     async def authorize(self, client: OAuthClientInformationFull, params: AuthorizationParams) -> str:
-        if params.resource and params.resource.rstrip("/") != self.resource_url:
+        if params.resource and canonical_resource(params.resource) != canonical_resource(self.resource_url):
             raise AuthorizeError(error="invalid_request", error_description="tokens are only issued for this server")
+        shown = {
+            "_client_name": client.client_name,
+            "_cimd_host": urlsplit(client.client_id).hostname if isinstance(client, CIMDClient) else None,
+        }
         with self._session() as s:
             pending = OAuthPendingAuthorization(
-                client_id=client.client_id, params=params.model_dump(mode="json"), expires_at=utcnow() + PENDING_TTL
+                client_id=client.client_id,
+                params=params.model_dump(mode="json") | shown,
+                expires_at=utcnow() + PENDING_TTL,
             )
             s.add(pending)
             s.commit()

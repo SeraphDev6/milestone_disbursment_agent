@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.ai.agents import claude_runtime, mock_runtime
@@ -47,6 +48,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = settings
+    # Bearer-token API (no cookies cross-origin), so any origin may call it. Browser-based MCP clients
+    # (e.g. MCP Inspector) need preflight answers and these headers exposed.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+        expose_headers=["WWW-Authenticate", "Mcp-Session-Id", "Mcp-Protocol-Version"],
+        max_age=600,
+    )
     app.state.paypal = make_gateway(settings)
     key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
     app.state.ai = claude_runtime(key) if use_claude(settings) else mock_runtime()

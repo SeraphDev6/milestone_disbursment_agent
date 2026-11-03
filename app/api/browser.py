@@ -141,6 +141,10 @@ def consent(request: Request, session: SessionDep) -> Response:
     client = session.get(OAuthClient, pending.client_id)
     info = client.info if client else {}
     params = AuthorizationParams.model_validate(pending.params)
+    client_name = pending.params.get("_client_name") or info.get("client_name") or "An MCP client"
+    cimd_host = pending.params.get("_cimd_host")
+    redirect_host = urlsplit(str(params.redirect_uri)).hostname or str(params.redirect_uri)
+    loopback = redirect_host in ("localhost", "127.0.0.1", "::1")
     memberships = session.exec(select(Membership).where(Membership.user_id == principal.user.id)).all()  # type: ignore[union-attr]
     if not memberships:
         return page("No organization yet", "<p>Create or join an organization first, then connect again.</p>", 403)
@@ -152,10 +156,18 @@ def consent(request: Request, session: SessionDep) -> Response:
     csrf = csrf_token(request, session_token, request_id)
     return page(
         "Allow access?",
-        f"<p><b>{escape(info.get('client_name') or 'An MCP client')}</b> "
-        f"(returns to <code>{escape(urlsplit(str(params.redirect_uri)).netloc or str(params.redirect_uri))}</code>) "
-        f"wants to act as <b>{escape(principal.user.email)}</b>.</p>"  # type: ignore[union-attr]
-        "<p>It can read agreements, criteria, evidence, verdicts and audit logs, draft agreements and submit "
+        f"<p><b>{escape(client_name)}</b>"
+        + (f" (identified by <code>{escape(cimd_host)}</code>)" if cimd_host else "")
+        + f" wants to act as <b>{escape(principal.user.email)}</b>. "  # type: ignore[union-attr]
+        f"After you decide, you'll be sent to <code>{escape(redirect_host)}</code>.</p>"
+        + (
+            "<p style='background:#fff4e5;padding:.5rem;border-radius:4px'><b>This app runs on your computer.</b> "
+            "Only allow it if you just started connecting it yourself: any program on this machine could claim "
+            "to be it.</p>"
+            if loopback
+            else ""
+        )
+        + "<p>It can read agreements, criteria, evidence, verdicts and audit logs, draft agreements and submit "
         "evidence, with your role in the organization you pick. It can't confirm criteria, approve releases, "
         "fund, or dispute: those stay with people.</p>"
         f"<form method=post action='/oauth/consent'><input type=hidden name=request value='{escape(request_id)}'>"
