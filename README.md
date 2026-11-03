@@ -37,7 +37,8 @@ Everything is done as a signed-in person acting for an organization (see "Organi
 6. **Fund** (escrow): payer `POST /milestones/{id}/fund` returns an `approve_url` for the PayPal hold (mock mode simulates PayPal's page). Invoice mode skips this.
 7. **Evidence:** payee members pre-check (`/precheck`), then submit (`/evidence`, `/uploads`, or merged GitHub PRs). Checks run first, then the AI verifier; `GET /milestones/{id}/verdict` shows results with citations.
 8. **Decide:** with auto-release on and a confident verdict, a funded tranche settles itself. Otherwise it waits in each side's `GET /orgs/{id}/review-queue` for a payer admin or reviewer to `POST /milestones/{id}/review` (with `require_reviewer_approval`, only a reviewer can approve). Rejections return what's missing; the payee can `/dispute`.
-9. **Track:** `GET /orgs/{id}/agreements?side=payer|payee|reviewer`, `GET /orgs/{id}/portfolio`, audit logs, compliance packets (JSON/PDF), and signed outbound webhooks via `POST /agreements/{id}/subscriptions`.
+9. **Agents (MCP):** point an MCP client (Claude Desktop, Claude Code, etc.) at `<base>/mcp`. It discovers the OAuth endpoints, opens a consent page where you sign in and pick the org it acts for, then gets org-bound tools (list agreements, status, evidence, verdicts, pre-check, submit evidence, review queue, portfolio, compliance packet, drafting). Headless agents use an org API key as the bearer token. Confirming, approving, releasing, funding and disputes stay with people.
+10. **Track:** `GET /orgs/{id}/agreements?side=payer|payee|reviewer`, `GET /orgs/{id}/portfolio`, audit logs, compliance packets (JSON/PDF), and signed outbound webhooks via `POST /agreements/{id}/subscriptions`.
 
 A complete example draft is in [`tests/conftest.py`](tests/conftest.py), and [`tests/helpers.py`](tests/helpers.py) walks the whole sign-in, org and invitation flow.
 

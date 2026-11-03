@@ -60,6 +60,7 @@ class SSOLoginState(SQLModel, table=True):
     nonce: str = Field(max_length=100)
     code_verifier: str = Field(max_length=200)
     connection_id: str | None = fk("sso_connections.id")
+    next_path: str | None = Field(default=None, max_length=500)  # browser sign-in: where to go afterwards
     created_at: datetime = timestamp()
     expires_at: datetime = timestamp()
     used_at: datetime | None = timestamp(optional=True)

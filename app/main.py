@@ -4,7 +4,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.ai.agents import claude_runtime, mock_runtime
-from app.api import api_router, mock_router
+from app.api import api_router, browser, mock_router
+from app.api.mcp import build_mcp
 from app.config import Mode, Settings, get_settings, use_claude
 from app.db import make_engine, make_sessionmaker, migrate
 from app.integrations.crypto import SecretBox
@@ -31,7 +32,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             stop = start_delivery_loop(
                 app.state.sessionmaker, settings.outbound_interval_seconds, allow_http=settings.mode is Mode.mock
             )
-        yield
+        async with app.state.mcp_app.router.lifespan_context(app.state.mcp_app):
+            yield
         if stop:
             stop.set()
         engine.dispose()
@@ -60,8 +62,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse({"detail": exc.message}, status_code=exc.status_code)
 
     app.include_router(api_router)
+    app.include_router(browser.router)
     if settings.mode is Mode.mock:
         app.include_router(mock_router)
+
+    # MCP (tools generated from the routes above) and its OAuth endpoints. Mounted last at "/" so every
+    # FastAPI route matches first; it serves /mcp, /.well-known/*, /authorize, /token, /register, /revoke.
+    mcp, app.state.oauth = build_mcp(app, settings.public_base_url)
+    app.state.mcp_app = mcp.http_app(path="/mcp", stateless_http=True, json_response=True)
+    app.mount("/", app.state.mcp_app)
     return app
 
 

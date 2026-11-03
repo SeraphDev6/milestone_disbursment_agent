@@ -83,10 +83,28 @@ def milestone_rows(drafts: list[MilestoneCreate]) -> list[Milestone]:
     return [Milestone.model_validate(m, update={"position": i}) for i, m in enumerate(drafts)]
 
 
+class AgreementText(SQLModel):
+    text: str = Field(min_length=20, max_length=200_000, description="Full text of the grant agreement or SOW.")
+    title: str = Field(default="agreement", max_length=200, description="File name or title, for provenance.")
+
+
+@router.post(
+    "/agreements/extract-text",
+    openapi_extra={"x-mcp-tool": "draft_agreement_from_text"},
+    summary="Propose tranches and checkable criteria from an agreement's text",
+)
+async def extract_agreement_text(
+    body: AgreementText, request: Request, _: OrgKeyDep, principal: PrincipalDep
+) -> ExtractionResult:
+    try:
+        return await run_in_threadpool(extract, ai(request), body.text, "text/plain", body.title)
+    except AIError as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
+
+
 @router.post(
     "/agreements/extract",
-    openapi_extra={"x-mcp-tool": "draft_agreement_from_document"},
-    summary="Propose tranches and checkable criteria from an agreement document (PDF or text)",
+    summary="Propose tranches and checkable criteria from an agreement document (PDF or text upload)",
 )
 async def extract_agreement(
     request: Request, _: OrgKeyDep, principal: PrincipalDep, file: Annotated[UploadFile, File()]

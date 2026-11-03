@@ -3,11 +3,9 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
 from sqlmodel import Field, SQLModel, select
 
 from app.api.deps import PrincipalDep, SessionDep, bearer_token, mailer, show_links
-from app.api.views import html_page
 from app.db import as_utc, utcnow
 from app.models import (
     Agreement,
@@ -76,12 +74,6 @@ def request_link(body: MagicLinkRequest, session: SessionDep, request: Request) 
 def verify_link(body: MagicLinkVerify, session: SessionDep) -> SessionCreated:
     user, token = identity.verify_magic_link(session, body.token)
     return SessionCreated(token=token, user=UserRead.model_validate(user))
-
-
-@router.get("/auth/magic-link/verify", include_in_schema=False)
-def verify_link_page(token: str) -> HTMLResponse:
-    # Email clients prefetch GETs, so a GET never consumes the token; the page (UI) POSTs it.
-    return html_page("Finish signing in", "Open this link in the app to finish signing in.")
 
 
 @router.post("/auth/sign-out", status_code=204, summary="Revoke the current session")

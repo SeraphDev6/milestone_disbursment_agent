@@ -3,6 +3,7 @@
 import secrets
 from dataclasses import dataclass
 from datetime import timedelta
+from urllib.parse import quote
 
 from sqlmodel import Session, select
 
@@ -48,7 +49,9 @@ def normalize_email(email: str) -> str:
 # --- magic link ------------------------------------------------------------------------
 
 
-def request_magic_link(session: Session, mailer: ConsoleMailer, email: str, base_url: str) -> str:
+def request_magic_link(
+    session: Session, mailer: ConsoleMailer, email: str, base_url: str, next_path: str | None = None
+) -> str:
     """Create a one-time sign-in link and email it. Returns the link (shown in mock mode only)."""
     from app.services import sso  # sso imports this module
 
@@ -59,6 +62,8 @@ def request_magic_link(session: Session, mailer: ConsoleMailer, email: str, base
     session.add(LoginToken(email=email, token_hash=hash_token(raw), expires_at=utcnow() + LOGIN_TTL))
     session.commit()
     link = f"{base_url}/auth/magic-link/verify?token={raw}"
+    if next_path:
+        link += f"&next={quote(next_path, safe='')}"
     mailer.send(email, "Your sign-in link", "Open this link to sign in. It expires in 15 minutes.", link)
     return link
 

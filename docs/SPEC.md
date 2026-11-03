@@ -234,6 +234,25 @@ original per-agreement party keys.
 **Cut for the hackathon:** SAML, SCIM, email delivery provider (links are returned in mock mode and logged
 otherwise), two-person approval rules, per-agreement access lists beyond side x role.
 
+## MCP server
+
+`/mcp` (streamable HTTP) is generated from the REST API with FastMCP: every operation tagged `x-mcp-tool` is a
+tool, and each call runs the real REST endpoint in-process with the caller's credential, so permissions and the
+audit log are enforced in one place. Human-only steps (confirm criteria, review/approve, release, fund, dispute)
+are not tools.
+
+**Auth** follows the MCP authorization spec (OAuth 2.1):
+- Discovery: protected-resource metadata at `/.well-known/oauth-protected-resource/mcp`, authorization-server
+  metadata at `/.well-known/oauth-authorization-server`; unauthenticated calls get a 401 pointing at them.
+- Clients register dynamically (`/register`) and use authorization code + PKCE (S256 only).
+- `/authorize` sends the person to a consent page: sign in (magic link or the org's SSO, cookie session,
+  CSRF-protected form), pick the organization the client acts for, allow or deny.
+- Access tokens last 1 hour, act only within the chosen org with the person's current role there (removal
+  takes effect on the next call), and are valid only for this server's `/mcp` resource. Refresh tokens last
+  30 days and rotate on every use; presenting a used refresh token revokes the whole family.
+- Headless agents use org API keys as bearer tokens. Session tokens from the web app aren't accepted on `/mcp`.
+- Audit entries for MCP calls name the person, the client and the org (`user:<id>+mcp:<client>@org:<id>`).
+
 ## API surface
 
 FastAPI REST is the single source; the OpenAPI spec generates the MCP tools, the APIMatic SDKs and the Zapier fields. Endpoints tagged `x-mcp-tool` become agent tools; the rest stay REST-only.

@@ -71,10 +71,14 @@ class Principal:
     user: User | None = None
     api_key: ApiToken | None = None
     roles: dict[str, OrgRole] = field(default_factory=dict)  # org_id -> role
+    oauth_client_id: str | None = None  # set when an MCP client acts for the user
 
     @property
     def actor(self) -> str:
-        return f"user:{self.user.id}" if self.user else f"apikey:{self.api_key.id}"  # type: ignore[union-attr]
+        if self.user is None:
+            return f"apikey:{self.api_key.id}"  # type: ignore[union-attr]
+        via = f"+mcp:{self.oauth_client_id[:24]}" if self.oauth_client_id else ""
+        return f"user:{self.user.id}{via}"
 
     def role_in(self, org_id: str) -> OrgRole | None:
         return self.roles.get(org_id)
@@ -122,6 +126,8 @@ def principal_from_token(session: Session, token: str | None) -> Principal:
     now = utcnow()
     if row is None or row.revoked_at is not None or (row.expires_at and _utc(row.expires_at) < now):
         raise AccessError("token is invalid or expired; sign in again", 401)
+    if row.kind == TokenKind.oauth_refresh:
+        raise AccessError("refresh tokens can't be used as bearer tokens", 401)
     row.last_used_at = now
     if row.kind == TokenKind.api_key:
         return Principal(api_key=row, roles={row.org_id: OrgRole(row.org_role)})  # type: ignore[dict-item]
@@ -129,7 +135,12 @@ def principal_from_token(session: Session, token: str | None) -> Principal:
     if user is None:
         raise AccessError("token is invalid or expired; sign in again", 401)
     memberships = session.exec(select(Membership).where(Membership.user_id == user.id)).all()
-    return Principal(user=user, roles={m.org_id: OrgRole(m.role) for m in memberships})  # type: ignore[misc]
+    roles = {m.org_id: OrgRole(m.role) for m in memberships}
+    if row.kind == TokenKind.oauth_access:
+        # An MCP client acts for the person only within the org they chose at consent, with their current role
+        # there; leaving the org (or being demoted) takes effect on the next call.
+        roles = {row.org_id: roles[row.org_id]} if row.org_id in roles else {}
+    return Principal(user=user, roles=roles, oauth_client_id=row.client_id)  # type: ignore[arg-type]
 
 
 def _utc(dt):

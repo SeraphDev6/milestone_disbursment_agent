@@ -146,7 +146,7 @@ def enforced_for(session: Session, email: str) -> bool:
 # --- sign-in round trip ----------------------------------------------------------------
 
 
-def start(session: Session, email: str, oidc: OIDCClient, base_url: str) -> str:
+def start(session: Session, email: str, oidc: OIDCClient, base_url: str, next_path: str | None = None) -> str:
     """Returns the identity provider URL to send the person to."""
     conn = connection_for_email(session, email)
     if conn is None:
@@ -159,6 +159,7 @@ def start(session: Session, email: str, oidc: OIDCClient, base_url: str) -> str:
             nonce=nonce,
             code_verifier=verifier,
             connection_id=conn.id,
+            next_path=next_path,
             expires_at=utcnow() + STATE_TTL,
         )
     )
@@ -179,7 +180,7 @@ def start(session: Session, email: str, oidc: OIDCClient, base_url: str) -> str:
 
 def finish(
     session: Session, code: str, state: str, oidc: OIDCClient, box: SecretBox, base_url: str
-) -> tuple[User, str]:
+) -> tuple[User, str, str | None]:
     row = session.exec(select(SSOLoginState).where(SSOLoginState.state_hash == _hash(state))).first()
     if row is None or row.used_at is not None or as_utc(row.expires_at) < utcnow():
         raise SSOError("this sign-in attempt is invalid or expired; start again", 401)
@@ -215,4 +216,4 @@ def finish(
     if member is None:  # first SSO sign-in: join the org
         session.add(Membership(org_id=conn.org_id, user_id=user.id, role=conn.default_role))  # type: ignore[union-attr]
     session.commit()
-    return user, token
+    return user, token, row.next_path

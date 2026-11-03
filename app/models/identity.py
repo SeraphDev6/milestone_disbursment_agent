@@ -156,7 +156,10 @@ class ApiToken(SQLModel, table=True):
     org_id: str | None = fk("organizations.id", optional=True)  # API keys
     org_role: OrgRole | None = Field(default=None, sa_type=enum_type(OrgRole, 16))  # API keys
     name: str | None = Field(default=None, max_length=120)  # API keys: what it's for
-    scopes: list[str] = Field(default_factory=list, sa_type=JSON)  # reserved
+    scopes: list[str] = Field(default_factory=list, sa_type=JSON)
+    client_id: str | None = Field(default=None, max_length=100, index=True)  # OAuth tokens: the MCP client
+    resource: str | None = Field(default=None, max_length=500)  # OAuth tokens: the server they're valid for
+    family_id: str | None = Field(default=None, max_length=36, index=True)  # OAuth: tokens from one consent
     created_by: str | None = Field(default=None, max_length=120)
     created_at: datetime = timestamp()
     expires_at: datetime | None = timestamp(optional=True)

@@ -97,3 +97,5 @@ class InvitationKind(StrEnum):
 class TokenKind(StrEnum):
     session = "session"  # a signed-in user
     api_key = "api_key"  # an org's integration or agent
+    oauth_access = "oauth_access"  # an MCP client acting for a user within one org (1 hour)
+    oauth_refresh = "oauth_refresh"  # rotates on use; reuse revokes the family

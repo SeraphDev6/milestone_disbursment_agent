@@ -61,6 +61,7 @@ from app.models.identity import (
     User,
     UserRead,
 )
+from app.models.oauth import OAuthClient, OAuthCode, OAuthPendingAuthorization
 from app.models.settlement import LedgerEntry, Settlement, SettlementRead
 from app.models.sso import SSOConnection, SSOConnectionRead, SSOConnectionWrite, SSODomain, SSOLoginState
 
@@ -101,6 +102,9 @@ __all__ = [
     "MilestoneCreate",
     "MilestoneRead",
     "MilestoneStatus",
+    "OAuthClient",
+    "OAuthCode",
+    "OAuthPendingAuthorization",
     "OrgRole",
     "Organization",
     "OrganizationCreate",

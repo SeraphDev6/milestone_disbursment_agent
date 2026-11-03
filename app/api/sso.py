@@ -1,10 +1,11 @@
 """Org SSO configuration and the OIDC sign-in round trip."""
 
 from fastapi import APIRouter, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlmodel import Field, SQLModel, select
 
 from app.api.auth import SessionCreated
+from app.api.browser import safe_next, set_session_cookie
 from app.api.deps import PrincipalDep, SessionDep
 from app.models import OrgRole, UserRead
 from app.models.identity import EMAIL_PATTERN
@@ -80,7 +81,11 @@ def start_redirect(email: str, session: SessionDep, request: Request) -> Redirec
 
 
 @router.get("/auth/sso/callback", summary="Where the identity provider returns; issues a session token")
-def callback(code: str, state: str, session: SessionDep, request: Request) -> SessionCreated:
+def callback(code: str, state: str, session: SessionDep, request: Request) -> Response:
     app_state = request.app.state
-    user, token = sso.finish(session, code, state, app_state.oidc, app_state.secrets, _base(request))
-    return SessionCreated(token=token, user=UserRead.model_validate(user))
+    user, token, next_path = sso.finish(session, code, state, app_state.oidc, app_state.secrets, _base(request))
+    if next_path:  # a browser flow (e.g. MCP consent): continue there, signed in
+        response = RedirectResponse(safe_next(next_path), status_code=303)
+        set_session_cookie(response, request, token)
+        return response
+    return JSONResponse(SessionCreated(token=token, user=UserRead.model_validate(user)).model_dump(mode="json"))
