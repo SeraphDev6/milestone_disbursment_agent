@@ -38,3 +38,12 @@ def test_no_escape_from_dist(tmp_path):
 
 def test_no_build_mounts_nothing(tmp_path):
     assert mount_spa(FastAPI(), tmp_path / "missing") is False
+
+
+def test_root_redirects_to_the_web_app_or_the_docs(client):
+    r = client.get("/", follow_redirects=False)
+    assert r.status_code == 307
+    assert r.headers["location"] == ("/app/" if client.app.state.spa else "/docs")
+    client.app.state.spa = not client.app.state.spa
+    r = client.get("/", follow_redirects=False)
+    assert r.headers["location"] == ("/app/" if client.app.state.spa else "/docs")

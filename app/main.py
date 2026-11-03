@@ -123,7 +123,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(browser.router)
     if settings.mode is Mode.mock:
         app.include_router(mock_router)
-    mount_spa(app)  # the web app at /app, when web/dist has been built
+    app.state.spa = mount_spa(app)  # the web app at /app, when web/dist has been built
 
     # MCP (tools generated from the routes above) and its OAuth endpoints. Mounted last at "/" so every
     # FastAPI route matches first; it serves /mcp, /.well-known/*, /authorize, /token, /register, /revoke.
