@@ -2,7 +2,7 @@
 
 Turns a grant or statement of work into tranches with checkable acceptance criteria, verifies evidence against them, and settles each tranche through PayPal. Built for the PayPal AI Hackathon (Nov 2026). Spec: [`docs/SPEC.md`](docs/SPEC.md).
 
-**Status:** foundation. Agreements, structured criteria, criteria lint and two-party confirmation work. Up next: PayPal escrow (authorize, capture, void), then the verifier and evidence adapters.
+**Status:** agreements, structured criteria, criteria lint, two-party confirmation and the PayPal escrow path (per-tranche hold, reauthorize, capture, void, expiry, webhooks) work in mock mode. Sandbox is wired but not yet run against PayPal. Up next: extraction and the verifier.
 
 ## Run it
 
@@ -28,8 +28,13 @@ Copy `.env.example` to `.env` to set `MODE=sandbox` and PayPal sandbox credentia
 1. `POST /criteria/lint` with a draft to see what a reviewer couldn't verify.
 2. `POST /agreements` creates a draft and returns one API key per party (shown once).
 3. Payer and payee each `POST /agreements/{id}/confirm` with the `criteria_hash` they reviewed (`X-API-Key` header). Confirmation is refused while the lint has errors. When both have signed, the agreement is `active` and its criteria are locked.
+4. Payer `POST /milestones/{id}/fund` returns an `approve_url`; open it to approve the hold (mock mode simulates PayPal's page).
+5. Until the verifier lands, mock mode has `POST /mock/milestones/{id}/mark-verified`.
+6. Payer or approver `POST /milestones/{id}/release` captures the hold to the payee. `GET /agreements/{id}` shows held, released and unfunded.
 
 A complete example draft is in [`tests/conftest.py`](tests/conftest.py).
+
+Expired holds (PayPal keeps them 29 days) are cleared by `uv run python -m app.jobs expire-holds`; run it daily.
 
 ## Develop
 

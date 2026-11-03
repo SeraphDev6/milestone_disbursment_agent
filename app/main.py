@@ -1,11 +1,25 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import sessionmaker
 
-from app.config import Settings, get_settings
+from app import escrow_routes, routes
+from app.config import Mode, Settings, get_settings
 from app.db import Base, make_engine
-from app.routes import router
+from app.escrow import EscrowError
+from app.paypal import MockPayPal, PayPalGateway, SandboxPayPal
+
+
+def make_gateway(settings: Settings) -> PayPalGateway:
+    if settings.mode is Mode.mock:
+        return MockPayPal(base_url=settings.public_base_url)
+    return SandboxPayPal(
+        client_id=settings.paypal_client_id,
+        client_secret=settings.paypal_client_secret,
+        base_url=settings.paypal_base_url,
+        webhook_id=settings.paypal_webhook_id,
+    )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -29,7 +43,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = settings
-    app.include_router(router)
+    app.state.paypal = make_gateway(settings)
+
+    @app.exception_handler(EscrowError)
+    async def _escrow_error(request: Request, exc: EscrowError) -> JSONResponse:
+        return JSONResponse({"detail": exc.message}, status_code=exc.status_code)
+
+    app.include_router(routes.router)
+    app.include_router(escrow_routes.router)
+    if settings.mode is Mode.mock:
+        app.include_router(escrow_routes.mock_router)
     return app
 
 

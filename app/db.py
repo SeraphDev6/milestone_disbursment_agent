@@ -71,10 +71,58 @@ class MilestoneRow(Base):
     due_date: Mapped[date | None] = mapped_column(Date)
     criteria: Mapped[list[dict]] = mapped_column(JSON)  # list of Criterion.model_dump(mode="json")
     status: Mapped[str] = mapped_column(String(32))
-    paypal_authorization_id: Mapped[str | None] = mapped_column(String(64))
-    funded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    paypal_order_id: Mapped[str | None] = mapped_column(String(64), index=True)  # latest funding order
+    paypal_authorization_id: Mapped[str | None] = mapped_column(String(64), index=True)  # current live hold
+    funded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # original authorization time
+    reauthorized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     agreement: Mapped[AgreementRow] = relationship(back_populates="milestones")
+    settlements: Mapped[list["SettlementRow"]] = relationship(
+        back_populates="milestone", order_by="SettlementRow.attempt", cascade="all, delete-orphan"
+    )
+
+
+class SettlementRow(Base):
+    __tablename__ = "settlements"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    milestone_id: Mapped[str] = mapped_column(ForeignKey("milestones.id"), index=True)
+    attempt: Mapped[int] = mapped_column(Integer)
+    mode: Mapped[str] = mapped_column(String(32))
+    idempotency_key: Mapped[str] = mapped_column(String(80), unique=True)  # f"{milestone_id}-{attempt}"
+    paypal_ref: Mapped[str | None] = mapped_column(String(64), index=True)  # capture id once known
+    status: Mapped[str] = mapped_column(String(16))
+    error: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    milestone: Mapped[MilestoneRow] = relationship(back_populates="settlements")
+
+
+class LedgerRow(Base):
+    """Mirrors PayPal money objects per agreement. Append-only."""
+
+    __tablename__ = "ledger"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    agreement_id: Mapped[str] = mapped_column(ForeignKey("agreements.id"), index=True)
+    milestone_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    kind: Mapped[str] = mapped_column(String(16))  # authorized, captured, voided, expired
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    paypal_ref: Mapped[str] = mapped_column(String(64))
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WebhookEventRow(Base):
+    """PayPal webhook events already processed, keyed by PayPal's event id (dedupe)."""
+
+    __tablename__ = "webhook_events"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(80))
+    resource_id: Mapped[str | None] = mapped_column(String(64))
+    outcome: Mapped[str] = mapped_column(String(200))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class AuditEventRow(Base):
@@ -91,6 +139,35 @@ class AuditEventRow(Base):
     to_status: Mapped[str | None] = mapped_column(String(32))
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+def as_utc(dt: datetime) -> datetime:
+    """SQLite drops tzinfo on read; everything stored is UTC."""
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+def record_audit(
+    session: Session,
+    agreement_id: str,
+    actor: str,
+    action: str,
+    *,
+    milestone_id: str | None = None,
+    from_status: str | None = None,
+    to_status: str | None = None,
+    detail: dict | None = None,
+) -> None:
+    session.add(
+        AuditEventRow(
+            agreement_id=agreement_id,
+            milestone_id=milestone_id,
+            actor=actor,
+            action=action,
+            from_status=from_status,
+            to_status=to_status,
+            detail=detail or {},
+        )
+    )
 
 
 def make_engine(url: str) -> Engine:

@@ -1,7 +1,7 @@
 from enum import Enum
 from functools import lru_cache
 
-from pydantic import field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./local.db"
     paypal_client_id: str | None = None
     paypal_client_secret: str | None = None
+    paypal_base_url: str = "https://api-m.sandbox.paypal.com"
+    paypal_webhook_id: str | None = None  # from the sandbox app's webhook config; needed to verify webhooks
+    # Where PayPal sends the payer back after approving. Render sets RENDER_EXTERNAL_URL.
+    public_base_url: str = Field(
+        "http://localhost:8000", validation_alias=AliasChoices("PUBLIC_BASE_URL", "RENDER_EXTERNAL_URL")
+    )
 
     @field_validator("database_url")
     @classmethod

@@ -1,16 +1,16 @@
 import hashlib
 import secrets
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from app.criteria import assign_criterion_ids, criteria_hash, lint_agreement
-from app.db import AgreementRow, AuditEventRow, MilestoneRow, PartyRow, get_session, utcnow
+from app.db import AgreementRow, LedgerRow, MilestoneRow, PartyRow, get_session, record_audit, utcnow
 from app.domain import (
     AgreementDraft,
     AgreementStatus,
@@ -49,6 +49,14 @@ class MilestoneView(BaseModel):
     due_date: date | None
     status: MilestoneStatus
     criteria: list[Criterion]
+    paypal_authorization_id: str | None = Field(None, description="Live PayPal hold for this tranche, if funded.")
+    funded_at: datetime | None = Field(None, description="When the original hold was placed.")
+
+
+class FundingSummary(BaseModel):
+    held: Decimal = Field(..., description="Authorized on the payer's PayPal account, not yet captured.")
+    released: Decimal = Field(..., description="Captured to the payee.")
+    unfunded: Decimal = Field(..., description="Total minus held minus released.")
 
 
 class AgreementView(BaseModel):
@@ -64,6 +72,7 @@ class AgreementView(BaseModel):
     locked: bool = Field(..., description="True once both parties signed and criteria can no longer change.")
     parties: list[PartyView]
     milestones: list[MilestoneView]
+    funding: FundingSummary
     lint: LintReport
 
 
@@ -150,10 +159,34 @@ def _view(row: AgreementRow) -> AgreementView:
                 due_date=m.due_date,
                 status=MilestoneStatus(m.status),
                 criteria=m.criteria,
+                paypal_authorization_id=m.paypal_authorization_id,
+                funded_at=m.funded_at,
             )
             for m in row.milestones
         ],
+        funding=_funding(row),
         lint=lint_agreement(_as_draft(row)),
+    )
+
+
+def _funding(row: AgreementRow) -> FundingSummary:
+    session = object_session(row)
+    entries = session.scalars(select(LedgerRow).where(LedgerRow.agreement_id == row.id)).all() if session else []
+    by_kind: dict[str, Decimal] = {}
+    for e in entries:
+        by_kind[e.kind] = by_kind.get(e.kind, Decimal(0)) + e.amount
+    released = by_kind.get("captured", Decimal(0))
+    held = (
+        by_kind.get("authorized", Decimal(0))
+        - released
+        - by_kind.get("voided", Decimal(0))
+        - by_kind.get("expired", Decimal(0))
+    )
+    cents = Decimal("0.01")
+    return FundingSummary(
+        held=held.quantize(cents),
+        released=released.quantize(cents),
+        unfunded=(row.total_amount - held - released).quantize(cents),
     )
 
 
@@ -173,7 +206,7 @@ def _milestone_rows(drafts: list[MilestoneDraft]) -> list[MilestoneRow]:
 
 
 def _audit(session: Session, agreement: AgreementRow, actor: str, action: str, **kw) -> None:
-    session.add(AuditEventRow(agreement_id=agreement.id, actor=actor, action=action, **kw))
+    record_audit(session, agreement.id, actor, action, **kw)
 
 
 def current_party(
@@ -191,6 +224,23 @@ def current_party(
 
 
 PartyDep = Annotated[PartyRow, Depends(current_party)]
+
+
+def milestone_party(
+    milestone_id: str,
+    session: SessionDep,
+    x_api_key: Annotated[str | None, Header(description="Party API key returned at agreement creation.")] = None,
+) -> tuple[PartyRow, MilestoneRow]:
+    if not x_api_key:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "X-API-Key header required")
+    party = session.scalar(select(PartyRow).where(PartyRow.api_key_hash == _hash_key(x_api_key)))
+    milestone = session.get(MilestoneRow, milestone_id)
+    if party is None or milestone is None or milestone.agreement_id != party.agreement_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "milestone not found")
+    return party, milestone
+
+
+MilestonePartyDep = Annotated[tuple[PartyRow, MilestoneRow], Depends(milestone_party)]
 
 
 # --- Endpoints -------------------------------------------------------------------------
