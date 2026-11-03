@@ -68,6 +68,22 @@ uv run pytest
 uv run ruff check . && uv run ruff format .
 ```
 
+### Database migrations
+
+The schema comes from `app/models/` (SQLModel); Alembic migrations live in `migrations/`. The app applies pending migrations at startup (`AUTO_MIGRATE=true`, the default). With more than one app instance, turn that off and run `uv run python -m app.jobs migrate` before starting.
+
+After changing a model:
+
+```sh
+docker compose up -d db
+export DATABASE_URL=postgresql://milestone:milestone@localhost:5433/milestone
+uv run alembic upgrade head                      # bring the dev database up to date
+uv run alembic revision --autogenerate -m "..."  # generate the migration, then read it
+uv run alembic upgrade head && uv run alembic check
+```
+
+`tests/test_migrations.py` fails if a model changes without a migration.
+
 ## Deploy
 
 `render.yaml` is a Render Blueprint: a web service plus Postgres. Set `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` in the Render dashboard when switching to `MODE=sandbox`.

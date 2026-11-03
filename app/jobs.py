@@ -6,15 +6,13 @@ deliver-webhooks  send due outbound webhooks once (when the in-process loop is t
 
 import sys
 
-from sqlmodel import SQLModel
-
 from app.config import Mode, get_settings
-from app.db import make_engine, make_sessionmaker, utcnow
+from app.db import make_engine, make_sessionmaker, migrate, utcnow
 from app.integrations.paypal import make_gateway
 from app.services.outbound import deliver_due
 from app.services.settlement import expire_stale_holds, expire_stale_invoices
 
-JOBS = ("daily", "deliver-webhooks")
+JOBS = ("migrate", "daily", "deliver-webhooks")
 
 
 def main(argv: list[str]) -> int:
@@ -23,7 +21,10 @@ def main(argv: list[str]) -> int:
         return 2
     settings = get_settings()
     engine = make_engine(settings.database_url)
-    SQLModel.metadata.create_all(engine)
+    migrate.upgrade(engine)
+    if argv[0] == "migrate":
+        print("database is at the latest migration")
+        return 0
     with make_sessionmaker(engine)() as session:
         now = utcnow()
         if argv[0] == "daily":

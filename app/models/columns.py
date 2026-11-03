@@ -9,7 +9,17 @@ from pydantic import TypeAdapter
 from sqlalchemy import JSON, DateTime
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.types import TypeDecorator
-from sqlmodel import Field
+from sqlmodel import Field, SQLModel
+
+# Deterministic constraint names, so migrations can drop/alter them on every database (incl. SQLite batch mode).
+# Must be set before any table is defined; every model module imports this one first.
+SQLModel.metadata.naming_convention = {
+    "ix": "ix_%(table_name)s_%(column_0_N_name)s",
+    "uq": "uq_%(table_name)s_%(column_0_N_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
 
 
 def new_id() -> str:

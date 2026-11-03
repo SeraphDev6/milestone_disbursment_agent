@@ -2,12 +2,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from sqlmodel import SQLModel
 
 from app.ai.agents import claude_runtime, mock_runtime
 from app.api import api_router, mock_router
 from app.config import Mode, Settings, get_settings, use_claude
-from app.db import make_engine, make_sessionmaker
+from app.db import make_engine, make_sessionmaker, migrate
 from app.integrations.github import GitHubClient
 from app.integrations.paypal import make_gateway
 from app.services import ServiceError
@@ -20,7 +19,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         engine = make_engine(settings.database_url)
-        SQLModel.metadata.create_all(engine)
+        if settings.auto_migrate:
+            migrate.upgrade(engine)
         app.state.engine = engine
         app.state.sessionmaker = make_sessionmaker(engine)
         stop = None

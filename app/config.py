@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = None
     # When set, creating agreements and extracting documents (which spends model credits) requires X-Org-Key.
     org_api_key: str | None = None
+    # Apply pending Alembic migrations at startup. Safe with one app instance; turn off and run
+    # `python -m app.jobs migrate` before starting when running several.
+    auto_migrate: bool = True
     # How often the in-process loop delivers outbound webhooks; 0 turns it off (tests, or a separate worker).
     outbound_interval_seconds: float = 5.0
     github_token: str | None = None  # optional; raises GitHub API rate limits and reads private repos
