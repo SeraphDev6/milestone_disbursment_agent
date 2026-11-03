@@ -82,7 +82,7 @@ Criteria are fixed before any evidence arrives; a verdict below the agreement's 
 
 ## Data model
 
-Every entity is defined once with SQLModel in [`app/models/`](../app/models/) and serves as database table, API input and API output (`XBase` shared fields and validation, `X` table, `XCreate`, `XRead`). Criteria and verdict results are typed value objects stored in JSON columns. That package is the source of truth; this section describes it. Entities: Party, Agreement, Milestone (tranche), Criterion, EvidenceEvent, Verdict (with typed CriterionResult), Settlement, LedgerEntry, AuditEvent. Settlement mode lives on the Agreement, so push vs pull is configuration, not product. Every field uses `Field(..., description=...)` so descriptions flow into OpenAPI, MCP tool schemas and structured-output prompts. Statuses are enums, not strings.
+Every entity is defined once with SQLModel in [`app/models/`](../app/models/) and serves as database table, API input and API output (`XBase` shared fields and validation, `X` table, `XCreate`, `XRead`). Criteria and verdict results are typed value objects stored in JSON columns. That package is the source of truth; this section describes it. Entities: Agreement, Party, Milestone (tranche), Evidence, StoredFile, Verdict (with typed CriterionResult), Settlement, LedgerEntry, AuditEvent, Integration, Subscription, OutboxMessage, WebhookEvent; value objects Criterion and Measure. Settlement mode lives on the Agreement, so push vs pull is configuration, not product. Every field uses `Field(..., description=...)` so descriptions flow into OpenAPI, MCP tool schemas and structured-output prompts. Statuses are enums, not strings.
 
 ### Criteria: every tranche is a list of checkable conditions
 
@@ -199,7 +199,7 @@ FastAPI REST is the single source; the OpenAPI spec generates the MCP tools, the
 
 ## Adapters
 
-An adapter's only job is turning a source-native event into an `EvidenceEvent`; adding a workflow never touches the engine.
+An adapter's only job is turning a source-native event into an `EvidenceCreate`; adding a workflow never touches the engine.
 
 | Adapter | Direction | Hackathon scope |
 | --- | --- | --- |
@@ -212,7 +212,7 @@ An adapter's only job is turning a source-native event into an `EvidenceEvent`; 
 | MCP server (generated from tagged endpoints) | Both | Build |
 | Zapier (triggers on events, actions on submit/create) | Both | Stretch, likely cut |
 
-- **Adapter contract:** `parse(payload) -> EvidenceEvent | None`, plus a signature check for that source, plus any deterministic checks it can run at intake (stored in `check_results`). Unmatched events are dropped and logged, never guessed onto a milestone.
+- **Adapter contract:** `parse(payload) -> EvidenceCreate | None`, plus a signature check for that source, plus any deterministic checks it can run at intake (stored in `check_results`). Unmatched events are dropped and logged, never guessed onto a milestone.
 - **Pinning:** evidence records an immutable version (commit SHA, file content hash) so a later force-push or file edit can't change what was verified.
 - **GitHub (built):** per-agreement integration with its own HMAC secret; only `pull_request` closed+merged events from the registered repo count; label `mde-<milestone id>` selects the milestone; deliveries dedupe on `X-GitHub-Delivery`; CI is read from the head commit's check runs; GitHub API calls and verification run after the webhook is acknowledged.
 - **Uploads (built):** PDF, CSV, XLSX (one evidence per non-empty sheet), TXT, MD, images; 10 files, 20 MB each, 25 MB per request; all files must parse before any is stored; originals stored (database for now) and downloadable by parties of the agreement only.
