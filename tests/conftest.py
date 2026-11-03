@@ -75,8 +75,13 @@ def draft() -> dict:
     return copy.deepcopy(GOOD_DRAFT)
 
 
+def hermetic_settings(**overrides) -> Settings:
+    """Hermetic: ignores .env and pins mock PayPal + mock model."""
+    return Settings(**{"_env_file": None, "mode": "mock", "llm": "mock", "database_url": "sqlite://", **overrides})
+
+
 @pytest.fixture
 def client():
-    app = create_app(Settings(database_url="sqlite://"))
+    app = create_app(hermetic_settings())
     with TestClient(app) as c:
         yield c

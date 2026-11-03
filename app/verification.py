@@ -78,10 +78,19 @@ def to_event(row: EvidenceRow) -> EvidenceEvent:
     )
 
 
+def attachments_of(rows: list[EvidenceRow]) -> dict[str, tuple[bytes, str]]:
+    return {e.id: (e.file.data, e.file.media_type) for e in rows if e.file is not None}
+
+
 # --- judging ---------------------------------------------------------------------------
 
 
-def judge(ai: AIRuntime, criteria: list[Criterion], evidence: list[EvidenceEvent]) -> Judgment:
+def judge(
+    ai: AIRuntime,
+    criteria: list[Criterion],
+    evidence: list[EvidenceEvent],
+    attachments: dict[str, tuple[bytes, str]] | None = None,
+) -> Judgment:
     from app.ai import VERIFY_PROMPT_VERSION
 
     results: dict[str, CriterionResult] = {}
@@ -102,7 +111,7 @@ def judge(ai: AIRuntime, criteria: list[Criterion], evidence: list[EvidenceEvent
             )
         rationale = "No evidence has been submitted."
     elif judged:
-        out, aliases = ai.verify(judged, evidence)
+        out, aliases = ai.verify(judged, evidence, attachments)
         by_id = {r.criterion_id: r for r in out.results}
         for c in judged:
             r = by_id.get(c.id or "")
@@ -184,6 +193,7 @@ def submit_evidence(
     actor: str,
     check_results: dict[str, bool] | None = None,
     pinned_ref: str | None = None,
+    file_id: str | None = None,
 ) -> tuple[EvidenceRow, bool]:
     """Store evidence. Returns (row, created). Re-submitting identical evidence is a no-op."""
     if m.agreement.status != AgreementStatus.active.value:
@@ -209,6 +219,7 @@ def submit_evidence(
         dated=ev.dated,
         artifact_uris=ev.artifact_uris,
         check_results=check_results or {},
+        file_id=file_id,
     )
     m.evidence.append(row)
     if m.status in (MilestoneStatus.pending.value, MilestoneStatus.funded.value, MilestoneStatus.needs_review.value):
@@ -253,7 +264,8 @@ def run_verification(
 
         criteria = criteria_of(m)
         try:
-            j = judge(ai, criteria, [to_event(e) for e in m.evidence if e.id in snapshot])
+            rows = [e for e in m.evidence if e.id in snapshot]
+            j = judge(ai, criteria, [to_event(e) for e in rows], attachments_of(rows))
         except AIError as e:
             escrow._transition(
                 session, m, MilestoneStatus.evidence_received, actor, "verification_failed", error=str(e)[:500]
@@ -333,7 +345,7 @@ def precheck(session: Session, ai: AIRuntime, m: MilestoneRow, items: list[Evide
     ]
     stored = [to_event(e) for e in m.evidence]
     try:
-        j = judge(ai, criteria_of(m), stored + drafts)
+        j = judge(ai, criteria_of(m), stored + drafts, attachments_of(m.evidence))
     except AIError as e:
         raise VerificationError(str(e), 502) from e
     verdict = VerdictRow(

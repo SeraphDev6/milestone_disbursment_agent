@@ -4,7 +4,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import sessionmaker
 
-from app import escrow_routes, evidence_routes, routes
+from app import adapter_routes, escrow_routes, evidence_routes, routes
+from app.adapters.github import GitHubClient
 from app.ai import claude_runtime, mock_runtime
 from app.config import Mode, Settings, get_settings, use_claude
 from app.db import Base, make_engine
@@ -45,7 +46,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.paypal = make_gateway(settings)
-    app.state.ai = claude_runtime() if use_claude(settings) else mock_runtime()
+    if use_claude(settings):
+        key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
+        app.state.ai = claude_runtime(key)
+    else:
+        app.state.ai = mock_runtime()
+    app.state.github = GitHubClient(token=settings.github_token)
 
     @app.exception_handler(EscrowError)
     async def _escrow_error(request: Request, exc: EscrowError) -> JSONResponse:
@@ -54,6 +60,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(routes.router)
     app.include_router(escrow_routes.router)
     app.include_router(evidence_routes.router)
+    app.include_router(adapter_routes.router)
     if settings.mode is Mode.mock:
         app.include_router(escrow_routes.mock_router)
     return app

@@ -2,7 +2,7 @@ from enum import Enum
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,8 +19,10 @@ class Settings(BaseSettings):
     # mock: deterministic stand-in; claude: Claude via Pydantic AI (needs ANTHROPIC_API_KEY).
     # Unset follows MODE, so sandbox uses Claude and mock uses the stand-in.
     llm: Literal["mock", "claude"] | None = None
+    anthropic_api_key: SecretStr | None = None
     # When set, creating agreements and extracting documents (which spends model credits) requires X-Org-Key.
     org_api_key: str | None = None
+    github_token: str | None = None  # optional; raises GitHub API rate limits and reads private repos
     paypal_client_id: str | None = None
     paypal_client_secret: str | None = None
     paypal_base_url: str = "https://api-m.sandbox.paypal.com"

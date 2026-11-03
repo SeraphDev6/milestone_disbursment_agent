@@ -9,10 +9,12 @@ dependencies = [
     "anthropic>=2.4.0",
     "fastapi>=0.162.0",
     "httpx>=0.28.1",
+    "openpyxl>=3.1.5",
     "psycopg[binary]>=3.3.7",
     "pydantic>=2.14.2",
     "pydantic-ai-slim[anthropic]>=2.65.0",
     "pydantic-settings>=2.16.2",
+    "pypdf>=6.21.4",
     "python-multipart>=0.0.33",
     "sqlalchemy>=2",
     "uvicorn[standard]>=0.54.0",
@@ -22,6 +24,7 @@ dependencies = [
 dev = [
     "httpx2>=2.16.0",
     "pytest>=9.2.0",
+    "reportlab>=5.1.0",
     "ruff>=0.17.3",
 ]
 

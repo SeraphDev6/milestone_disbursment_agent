@@ -16,11 +16,11 @@ from app.ai import (
     VerifierOutput,
     claude_runtime,
 )
-from app.config import Settings
 from app.domain import Criterion, EvidenceEvent
 from app.extraction import convert
 from app.main import create_app
 from app.verification import judge
+from tests.conftest import hermetic_settings
 
 
 def h(key):
@@ -79,7 +79,7 @@ def test_extract_rejects_other_types(client):
 
 
 def test_org_key_guards_spend():
-    app = create_app(Settings(database_url="sqlite://", org_api_key="org-secret"))
+    app = create_app(hermetic_settings(org_api_key="org-secret"))
     with TestClient(app) as c:
         files = {"file": ("grant.txt", b"text", "text/plain")}
         assert c.post("/agreements/extract", files=files).status_code == 401
@@ -323,8 +323,8 @@ def test_evidence_cannot_close_its_own_tag():
 
 
 def test_claude_runtime_settings():
-    rt = claude_runtime()
-    assert rt.model == "anthropic:claude-opus-5-5"
+    rt = claude_runtime(api_key="sk-test-not-real")
+    assert rt.model_name == "claude-opus-5-5" and rt.model.model_name == "claude-opus-5-5"
     assert rt.settings["anthropic_effort"] == "high"
     assert rt.settings["extra_body"] == {"fallbacks": "default"}
     assert "server-side-fallback-2026-07-01" in rt.settings["anthropic_betas"]

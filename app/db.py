@@ -13,6 +13,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -114,7 +115,39 @@ class EvidenceRow(Base):
     dated: Mapped[date | None] = mapped_column(Date)
     artifact_uris: Mapped[list[str]] = mapped_column(JSON, default=list)
     check_results: Mapped[dict] = mapped_column(JSON, default=dict)  # set by adapters only
+    file_id: Mapped[str | None] = mapped_column(ForeignKey("files.id"))  # original upload, if any
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    file: Mapped["FileRow | None"] = relationship()
+
+
+class FileRow(Base):
+    """Original uploaded bytes. In the database for the hackathon; object storage later."""
+
+    __tablename__ = "files"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    filename: Mapped[str] = mapped_column(String(255))
+    media_type: Mapped[str] = mapped_column(String(100))
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
+    size: Mapped[int] = mapped_column(Integer)
+    data: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class IntegrationRow(Base):
+    """An evidence source registered on an agreement, e.g. a GitHub repo webhook."""
+
+    __tablename__ = "integrations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    agreement_id: Mapped[str] = mapped_column(ForeignKey("agreements.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))  # github
+    target: Mapped[str] = mapped_column(String(200))  # e.g. "owner/repo"
+    # HMAC secret the source signs deliveries with. Must be stored readable to verify signatures.
+    secret: Mapped[str] = mapped_column(String(100))
+    created_by: Mapped[str] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class VerdictRow(Base):

@@ -32,7 +32,10 @@ from app.domain import Criterion, EvidenceEvent
 
 CLAUDE_MODEL = "claude-opus-5-5"
 EXTRACT_PROMPT_VERSION = "extract-v1"
-VERIFY_PROMPT_VERSION = "verify-v1"
+VERIFY_PROMPT_VERSION = "verify-v2"
+# Originals sent with the evidence text; the rest go as text only. Keeps requests under the API's size limit.
+ATTACHABLE = {"application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp"}
+MAX_ATTACHMENT_BYTES = 24 * 1024 * 1024
 
 EvidenceKind = Literal["document", "spreadsheet", "photo", "link", "code_change", "ci_run", "dataset", "attestation"]
 CheckName = Literal["ci_green", "file_present", "row_count", "sheet_total", "dated_by"]
@@ -135,6 +138,8 @@ You check submitted evidence against a payment tranche's acceptance criteria. Mo
 judgment, so be strict and literal.
 
 For each criterion given:
+- Some evidence has its original file attached after the text (e.g. a PDF). Its text was extracted automatically
+  and may miss tables or images; read the attached file when it is there.
 - Judge it against its measure: find the observed value (count, total, date, presence) in the evidence and
   compare it with the target. If the evidence doesn't show the value, the criterion is not met.
 - Cite the evidence ids that show it (e1, e2, ...). Only cite ids that exist. A criterion without a citation is
@@ -217,9 +222,23 @@ class AIRuntime:
             prompt = [f"Extract the tranches from this agreement ('{filename}'):\n\n<agreement>\n{text}\n</agreement>"]
         return self._run(extraction_agent, prompt)
 
-    def verify(self, criteria: list[Criterion], evidence: list[EvidenceEvent]) -> tuple[VerifierOutput, dict[str, str]]:
+    def verify(
+        self,
+        criteria: list[Criterion],
+        evidence: list[EvidenceEvent],
+        attachments: dict[str, tuple[bytes, str]] | None = None,
+    ) -> tuple[VerifierOutput, dict[str, str]]:
+        """attachments maps evidence id -> (original bytes, media type), sent alongside the text."""
         prompt, aliases = verification_prompt(criteria, evidence)
-        return self._run(verification_agent, [prompt]), aliases
+        parts: list = [prompt]
+        budget = MAX_ATTACHMENT_BYTES
+        for alias, evidence_id in aliases.items():
+            data, media_type = (attachments or {}).get(evidence_id, (b"", ""))
+            if not data or media_type not in ATTACHABLE or len(data) > budget:
+                continue
+            budget -= len(data)
+            parts += [f"Original file for evidence {alias}:", BinaryContent(data=data, media_type=media_type)]
+        return self._run(verification_agent, parts), aliases
 
     def _run(self, agent: Agent, prompt: list):
         try:
@@ -230,8 +249,10 @@ class AIRuntime:
             raise AIError(f"the model didn't return a usable answer: {e}") from e
 
 
-def claude_runtime() -> AIRuntime:
-    from pydantic_ai.models.anthropic import AnthropicModelSettings
+def claude_runtime(api_key: str | None = None) -> AIRuntime:
+    """api_key from settings (.env); falls back to ANTHROPIC_API_KEY in the process environment."""
+    from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
+    from pydantic_ai.providers.anthropic import AnthropicProvider
 
     settings = AnthropicModelSettings(
         max_tokens=16000,
@@ -241,7 +262,8 @@ def claude_runtime() -> AIRuntime:
         anthropic_betas=["server-side-fallback-2026-07-01"],
         extra_body={"fallbacks": "default"},
     )
-    return AIRuntime(model=f"anthropic:{CLAUDE_MODEL}", model_name=CLAUDE_MODEL, settings=settings)
+    model = AnthropicModel(CLAUDE_MODEL, provider=AnthropicProvider(api_key=api_key))
+    return AIRuntime(model=model, model_name=CLAUDE_MODEL, settings=settings)
 
 
 # --- Mock model (deterministic, no network) --------------------------------------------
