@@ -164,6 +164,7 @@ Webhooks are the source of truth for whether money actually moved. All of it run
 - **Authorization windows:** [valid 29 days, honored for 3](https://developer.paypal.com/docs/platforms/checkout/standard/customize/auth-capture/). Reauthorizing issues a new authorization id; store it. After day 29 the milestone returns to `pending` to be re-funded. Sandbox authorizations don't expire, so the demo is unaffected; production funds each milestone when its work starts.
 - **Ledger:** `LedgerEntry` rows mirror PayPal objects per agreement (authorized, captured, voided, invoiced, paid). Releases are blocked if the milestone has no live authorization.
 - **Webhook intake:** verify every event with `verify-webhook-signature`, dedupe on PayPal event id, and ignore events for unknown references.
+- **Invoicing caveat (found while building):** Invoicing v2 issues invoices as the account that owns the API credentials. The invoice names the payee as invoicer, which works when the REST app belongs to the payee (single-payee demo); a multi-payee product needs each payee's third-party permission through PayPal's partner program.
 - **Invoice timeout:** an invoice unpaid after a configurable period (default 30 days) moves the settlement to `expired` and the milestone to `settlement_failed` with a reminder option.
 - **Unclaimed payouts (fallback path only):** a payout to an email without a PayPal account is `unclaimed`; notify the payee, and treat the funds as returned if PayPal returns them.
 - **Real-world caveat:** per-milestone authorization reduces but doesn't remove regulatory questions; a production version would sit on a PayPal marketplace/partner product.
@@ -193,6 +194,7 @@ FastAPI REST is the single source; the OpenAPI spec generates the MCP tools, the
 | `POST /subscriptions` | Register an outbound webhook URL for events | any party | — |
 
 - **Human steps stay off MCP on purpose:** an agent can draft, pre-check, submit and ask, but confirming criteria, approving low-confidence releases and disputing are a person's call.
+- **Outbound events (built):** every audit event is queued in the same transaction as the change (transactional outbox) for matching subscriptions, then delivered signed (`X-MDE-Signature` over `timestamp.body`), retried with exponential backoff up to 10 attempts. Subscriber URLs must be https (http allowed in mock mode) and may not resolve to private, loopback, link-local or reserved addresses; redirects are not followed.
 - **Auth:** API keys per party, carrying the party's role, for the hackathon; OAuth later for Zapier. The review endpoint rejects the payee's key.
 
 ## Adapters

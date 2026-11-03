@@ -54,9 +54,10 @@ class MilestoneView(BaseModel):
 
 
 class FundingSummary(BaseModel):
-    held: Decimal = Field(..., description="Authorized on the payer's PayPal account, not yet captured.")
-    released: Decimal = Field(..., description="Captured to the payee.")
-    unfunded: Decimal = Field(..., description="Total minus held minus released.")
+    held: Decimal = Field(..., description="Escrow: authorized on the payer's PayPal account, not yet captured.")
+    invoiced: Decimal = Field(..., description="Invoice mode: invoices sent and not yet paid.")
+    released: Decimal = Field(..., description="Paid to the payee: captured holds plus paid invoices.")
+    unfunded: Decimal = Field(..., description="Total minus held, invoiced and released.")
 
 
 class AgreementView(BaseModel):
@@ -175,18 +176,19 @@ def _funding(row: AgreementRow) -> FundingSummary:
     by_kind: dict[str, Decimal] = {}
     for e in entries:
         by_kind[e.kind] = by_kind.get(e.kind, Decimal(0)) + e.amount
-    released = by_kind.get("captured", Decimal(0))
-    held = (
-        by_kind.get("authorized", Decimal(0))
-        - released
-        - by_kind.get("voided", Decimal(0))
-        - by_kind.get("expired", Decimal(0))
-    )
+
+    def k(kind: str) -> Decimal:
+        return by_kind.get(kind, Decimal(0))
+
+    held = k("authorized") - k("captured") - k("voided") - k("expired")
+    invoiced = k("invoiced") - k("paid") - k("invoice_cancelled")
+    released = k("captured") + k("paid")
     cents = Decimal("0.01")
     return FundingSummary(
         held=held.quantize(cents),
+        invoiced=invoiced.quantize(cents),
         released=released.quantize(cents),
-        unfunded=(row.total_amount - held - released).quantize(cents),
+        unfunded=(row.total_amount - held - invoiced - released).quantize(cents),
     )
 
 

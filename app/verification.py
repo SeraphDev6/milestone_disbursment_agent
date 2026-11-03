@@ -11,12 +11,13 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import checks, escrow
 from app.ai import AIError, AIRuntime
-from app.db import EvidenceRow, MilestoneRow, PartyRow, VerdictRow, as_utc, record_audit, utcnow
+from app.db import AuditEventRow, EvidenceRow, MilestoneRow, PartyRow, VerdictRow, as_utc, record_audit, utcnow
 from app.domain import (
     AgreementStatus,
     Criterion,
@@ -163,15 +164,8 @@ def _gate(m: MilestoneRow, criteria: list[Criterion], j: Judgment) -> str:
 
 def _settle_if_possible(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str, now: datetime) -> None:
     a = m.agreement
-    if a.settlement_mode != SettlementMode.escrow_release.value or m.paypal_authorization_id is None:
-        record_audit(
-            session,
-            a.id,
-            actor,
-            "release_waiting",
-            milestone_id=m.id,
-            detail={"reason": "not funded" if a.settlement_mode == "escrow_release" else "invoice mode"},
-        )
+    if a.settlement_mode == SettlementMode.escrow_release.value and m.paypal_authorization_id is None:
+        record_audit(session, a.id, actor, "release_waiting", milestone_id=m.id, detail={"reason": "not funded"})
         session.commit()
         return
     try:
@@ -383,8 +377,8 @@ def review(
     note: str | None,
     now: datetime,
 ) -> None:
-    if m.status != MilestoneStatus.needs_review.value:
-        raise VerificationError(f"tranche is {m.status}; only tranches in needs_review can be reviewed")
+    if m.status not in (MilestoneStatus.needs_review.value, MilestoneStatus.disputed.value):
+        raise VerificationError(f"tranche is {m.status}; only tranches in needs_review or disputed can be reviewed")
     actor = f"party:{party.id}"
     verdict = latest_verdict(m)
     detail = {"note": note, "verdict_id": verdict.id if verdict else None}
@@ -405,3 +399,19 @@ def review(
             missing=[{"criterion_id": r["criterion_id"], "missing": r["missing"]} for r in unmet],
         )
         session.commit()
+
+
+def dispute(session: Session, m: MilestoneRow, party: PartyRow, reason: str) -> None:
+    """Payee escalates a rejection. The tranche waits in `disputed` until the payer side reviews it again."""
+    if m.status not in (MilestoneStatus.pending.value, MilestoneStatus.funded.value):
+        raise VerificationError(f"tranche is {m.status}; only a rejected tranche can be disputed")
+    last_review = session.scalar(
+        select(AuditEventRow)
+        .where(AuditEventRow.milestone_id == m.id, AuditEventRow.action.in_(("review_rejected", "review_approved")))
+        .order_by(AuditEventRow.at.desc())
+        .limit(1)
+    )
+    if last_review is None or last_review.action != "review_rejected":
+        raise VerificationError("only a rejected tranche can be disputed")
+    escrow._transition(session, m, MilestoneStatus.disputed, f"party:{party.id}", "disputed", reason=reason)
+    session.commit()

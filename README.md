@@ -35,11 +35,14 @@ Copy `.env.example` to `.env` to set `MODE=sandbox` and PayPal sandbox credentia
 6. If the payer turned on auto-release and the verdict passes the threshold, a funded tranche settles on its own. Otherwise it waits in `needs_review` for `POST /milestones/{id}/review` (payer or approver): approve releases it, reject returns what's missing.
    Or upload files: `POST /milestones/{id}/uploads` takes PDF, CSV, XLSX, TXT, MD and images (multipart `files`, optional `note` and `dated`). Spreadsheets become CSV for the checks; PDFs are text-extracted and the original goes to the verifier too.
    Or connect GitHub: payee `POST /agreements/{id}/integrations/github` with `{"repo": "owner/name"}` returns a webhook URL, secret and one label per milestone. Add the webhook (pull_request events) to the repo; a merged PR carrying a milestone's label becomes evidence pinned to the merge commit, with CI results from GitHub (the only way to satisfy a `ci_green` check).
-7. `POST /milestones/{id}/release` releases a verified tranche manually (e.g. after funding late). `GET /agreements/{id}` shows held, released and unfunded.
+7. In invoice mode (`settlement_mode: invoice_on_verify`) nothing is funded up front: a verified tranche sends the payer a PayPal invoice and settles when it's paid (mock mode has a pay page at the invoice link).
+8. After a rejection the payee can `POST /milestones/{id}/dispute`; the payer side then reviews it again.
+9. Integrations: `POST /agreements/{id}/subscriptions` registers a URL for signed events (`X-MDE-Signature: sha256=HMAC(secret, "{X-MDE-Timestamp}.{body}")`); `GET /agreements/{id}/audit` and `GET /milestones/{id}/audit` return the event log; `GET /agreements/{id}/compliance-packet?format=pdf` (payer/approver) exports everything behind each payment.
+10. `POST /milestones/{id}/release` releases a verified tranche manually (e.g. after funding late). `GET /agreements/{id}` shows held, released and unfunded.
 
 A complete example draft is in [`tests/conftest.py`](tests/conftest.py).
 
-Expired holds (PayPal keeps them 29 days) are cleared by `uv run python -m app.jobs expire-holds`; run it daily.
+Run `uv run python -m app.jobs daily` once a day: it clears expired PayPal holds (29 days) and cancels invoices left unpaid for 30 days.
 
 ## Develop
 

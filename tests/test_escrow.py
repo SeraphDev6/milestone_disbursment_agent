@@ -62,7 +62,7 @@ def test_fund_verify_release_happy_path(client, active):
     fund(client, m1, keys)
     a = agreement(client, aid, keys)
     assert a["milestones"][0]["status"] == "funded"
-    assert a["funding"] == {"held": "10000.00", "released": "0.00", "unfunded": "20000.00"}
+    assert a["funding"] == {"held": "10000.00", "invoiced": "0.00", "released": "0.00", "unfunded": "20000.00"}
 
     verify(client, m1, keys)
     r = release(client, m1, keys)
@@ -71,7 +71,7 @@ def test_fund_verify_release_happy_path(client, active):
     assert s["status"] == "succeeded" and s["milestone_status"] == "settled" and s["idempotency_key"] == f"{m1}-1"
 
     a = agreement(client, aid, keys)
-    assert a["funding"] == {"held": "0.00", "released": "10000.00", "unfunded": "20000.00"}
+    assert a["funding"] == {"held": "0.00", "invoiced": "0.00", "released": "10000.00", "unfunded": "20000.00"}
     order = gw(client).orders[next(iter(gw(client).orders))]
     assert order["payee"] == "grantee@example.org"  # funds go straight to the payee
 

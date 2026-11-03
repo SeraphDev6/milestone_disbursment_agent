@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = None
     # When set, creating agreements and extracting documents (which spends model credits) requires X-Org-Key.
     org_api_key: str | None = None
+    # How often the in-process loop delivers outbound webhooks; 0 turns it off (tests, or a separate worker).
+    outbound_interval_seconds: float = 5.0
     github_token: str | None = None  # optional; raises GitHub API rate limits and reads private repos
     paypal_client_id: str | None = None
     paypal_client_secret: str | None = None

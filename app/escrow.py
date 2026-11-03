@@ -225,8 +225,9 @@ def _apply_capture_status(session: Session, s: SettlementRow, status: str, actor
 
 
 def release(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str, now: datetime) -> SettlementRow:
-    if m.agreement.settlement_mode != SettlementMode.escrow_release.value:
-        raise EscrowError("invoice-mode settlement isn't built yet (build plan: Nov 8)")
+    """Settle a verified tranche: capture its hold (escrow) or send a PayPal invoice (invoice mode)."""
+    if m.agreement.settlement_mode == SettlementMode.invoice_on_verify.value:
+        return _release_by_invoice(session, gw, m, actor)
 
     last = m.settlements[-1] if m.settlements else None
     if m.status == MilestoneStatus.settling.value and last and last.status == SettlementStatus.submitted.value:
@@ -274,6 +275,129 @@ def release(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str, no
     return s
 
 
+# --- invoice mode ----------------------------------------------------------------------
+
+INVOICE_TIMEOUT = timedelta(days=30)
+
+
+def _party(m: MilestoneRow, role: Role) -> PartyRow:
+    return next(p for p in m.agreement.parties if p.role == role.value)
+
+
+def _release_by_invoice(session: Session, gw: PayPalGateway, m: MilestoneRow, actor: str) -> SettlementRow:
+    """Invoice-on-verify: the payer gets a PayPal invoice for the tranche when it verifies.
+
+    Invoicing v2 bills as the account that owns the API credentials, so the invoicer shown is the payee's
+    PayPal email and, outside a single-payee demo, the payee must grant the platform third-party access.
+    """
+    last = m.settlements[-1] if m.settlements else None
+    if m.status == MilestoneStatus.settling.value and last and last.status == SettlementStatus.submitted.value:
+        if last.paypal_ref:
+            raise EscrowError("the invoice is out; the tranche settles when the payer pays it", 409)
+        s = last  # outcome of the previous send is unknown: resume with the same idempotency key
+    elif m.status in RELEASABLE:
+        attempt = last.attempt + 1 if last else 1
+        s = SettlementRow(
+            milestone=m,
+            attempt=attempt,
+            mode=SettlementMode.invoice_on_verify.value,
+            idempotency_key=f"{m.id}-{attempt}",
+            status=SettlementStatus.submitted.value,
+        )
+        session.add(s)
+        _transition(session, m, MilestoneStatus.settling, actor, "invoice_requested", attempt=attempt)
+        session.commit()
+    else:
+        raise EscrowError(f"a tranche that is {m.status} can't be invoiced")
+
+    a = m.agreement
+    try:
+        invoice = gw.create_and_send_invoice(
+            invoicer_email=_party(m, Role.payee).paypal_email,
+            recipient_email=_party(m, Role.payer).paypal_email,
+            item_name=f"{a.title}: {m.title}",
+            amount=m.amount,
+            currency=a.currency,
+            note=f"'{m.title}' met all {len(m.criteria)} acceptance criteria. Verdict and evidence are in the "
+            "agreement's audit log.",
+            reference=s.idempotency_key,
+            request_id=s.idempotency_key,
+        )
+    except PayPalError as e:
+        s.error = str(e)[:500]
+        if e.ambiguous:
+            _note(session, m, actor, "invoice_outcome_unknown", attempt=s.attempt, error=s.error)
+            session.commit()
+            raise EscrowError(
+                "PayPal didn't confirm the invoice; release again to resume with the same key", 502
+            ) from e
+        s.status = SettlementStatus.failed.value
+        _transition(
+            session, m, MilestoneStatus.settlement_failed, actor, "settlement_failed", attempt=s.attempt, error=s.error
+        )
+        session.commit()
+        raise _paypal_failure(e) from e
+
+    s.paypal_ref = invoice.invoice_id
+    _ledger(session, m, "invoiced", invoice.invoice_id)
+    _note(session, m, actor, "invoice_sent", invoice_id=invoice.invoice_id, payer_view_url=invoice.payer_view_url)
+    session.commit()
+    return s
+
+
+def _close_invoice(session: Session, s: SettlementRow, paid: bool, actor: str, status: str = "") -> str:
+    m = s.milestone
+    if s.status != SettlementStatus.submitted.value:
+        return "ignored: invoice already closed"
+    if paid:
+        s.status = SettlementStatus.succeeded.value
+        _ledger(session, m, "paid", s.paypal_ref or "unknown")
+        _transition(session, m, MilestoneStatus.settled, actor, "settled", invoice_id=s.paypal_ref, attempt=s.attempt)
+        return "invoice paid"
+    s.status = status or SettlementStatus.failed.value
+    _ledger(session, m, "invoice_cancelled", s.paypal_ref or "unknown")
+    _transition(
+        session,
+        m,
+        MilestoneStatus.settlement_failed,
+        actor,
+        "invoice_closed_unpaid",
+        invoice_id=s.paypal_ref,
+        status=s.status,
+    )
+    return "invoice closed unpaid"
+
+
+def expire_stale_invoices(
+    session: Session,
+    gw: PayPalGateway,
+    now: datetime,
+    actor: str = "system:expiry",
+    timeout: timedelta = INVOICE_TIMEOUT,
+) -> int:
+    """Cancel invoices left unpaid past the timeout so the tranche can be re-invoiced or reviewed."""
+    count = 0
+    stale = session.scalars(
+        select(SettlementRow).where(
+            SettlementRow.mode == SettlementMode.invoice_on_verify.value,
+            SettlementRow.status == SettlementStatus.submitted.value,
+            SettlementRow.paypal_ref.is_not(None),
+        )
+    ).all()
+    for s in stale:
+        if now - as_utc(s.created_at) <= timeout:
+            continue
+        try:
+            gw.cancel_invoice(s.paypal_ref, request_id=f"{s.paypal_ref}-cancel")
+        except PayPalError as e:
+            if e.ambiguous:
+                continue  # try again next run
+        _close_invoice(session, s, paid=False, actor=actor, status=SettlementStatus.expired.value)
+        count += 1
+    session.commit()
+    return count
+
+
 # --- webhooks --------------------------------------------------------------------------
 
 CAPTURE_EVENTS = {
@@ -318,6 +442,12 @@ def _dispatch(session: Session, event_type: str, res: dict, now: datetime) -> st
             s.paypal_ref = rid
         _apply_capture_status(session, s, CAPTURE_EVENTS[event_type], actor)
         return f"capture {CAPTURE_EVENTS[event_type].lower()}"
+
+    if event_type in ("INVOICING.INVOICE.PAID", "INVOICING.INVOICE.CANCELLED"):
+        s = session.scalar(select(SettlementRow).where(SettlementRow.paypal_ref == rid))
+        if s is None or s.mode != SettlementMode.invoice_on_verify.value:
+            return "ignored: no settlement for this invoice"
+        return _close_invoice(session, s, paid=event_type == "INVOICING.INVOICE.PAID", actor=actor)
 
     return "ignored: event type not handled"
 

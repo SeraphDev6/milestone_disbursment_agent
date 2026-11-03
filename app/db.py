@@ -19,6 +19,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    select,
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
@@ -234,6 +235,47 @@ def as_utc(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
+class SubscriptionRow(Base):
+    """An outbound webhook a party registered for an agreement's events."""
+
+    __tablename__ = "subscriptions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    agreement_id: Mapped[str] = mapped_column(ForeignKey("agreements.id"), index=True)
+    url: Mapped[str] = mapped_column(String(1000))
+    events: Mapped[list[str]] = mapped_column(JSON)  # event types or prefixes ("milestone."), or ["*"]
+    secret: Mapped[str] = mapped_column(String(100))  # HMAC key; readable because we sign with it
+    created_by: Mapped[str] = mapped_column(String(80))
+    active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class OutboxRow(Base):
+    """One pending delivery, written in the same transaction as the change it announces."""
+
+    __tablename__ = "outbox"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    subscription_id: Mapped[str] = mapped_column(ForeignKey("subscriptions.id"), index=True)
+    event_type: Mapped[str] = mapped_column(String(80))
+    payload: Mapped[dict] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)  # pending, delivered, dead
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+def event_type_for(action: str, milestone_id: str | None, to_status: str | None) -> str:
+    scope = "milestone" if milestone_id else "agreement"
+    return f"{scope}.status_changed" if to_status else f"{scope}.{action}"
+
+
+def subscribed(events: list[str], event_type: str) -> bool:
+    return any(e == "*" or e == event_type or (e.endswith(".") and event_type.startswith(e)) for e in events)
+
+
 def record_audit(
     session: Session,
     agreement_id: str,
@@ -245,17 +287,46 @@ def record_audit(
     to_status: str | None = None,
     detail: dict | None = None,
 ) -> None:
-    session.add(
-        AuditEventRow(
-            agreement_id=agreement_id,
-            milestone_id=milestone_id,
-            actor=actor,
-            action=action,
-            from_status=from_status,
-            to_status=to_status,
-            detail=detail or {},
-        )
+    event = AuditEventRow(
+        id=new_id(),
+        agreement_id=agreement_id,
+        milestone_id=milestone_id,
+        actor=actor,
+        action=action,
+        from_status=from_status,
+        to_status=to_status,
+        detail=detail or {},
+        at=utcnow(),
     )
+    session.add(event)
+
+    # Outbound webhooks: queued in the same transaction, so subscribers never hear about a rolled-back change.
+    event_type = event_type_for(action, milestone_id, to_status)
+    subs = session.scalars(
+        select(SubscriptionRow).where(SubscriptionRow.agreement_id == agreement_id, SubscriptionRow.active.is_(True))
+    ).all()
+    for sub in subs:
+        if subscribed(sub.events, event_type):
+            session.add(
+                OutboxRow(
+                    subscription_id=sub.id,
+                    event_type=event_type,
+                    payload={
+                        "id": event.id,
+                        "type": event_type,
+                        "created_at": event.at.isoformat(),
+                        "agreement_id": agreement_id,
+                        "milestone_id": milestone_id,
+                        "data": {
+                            "action": action,
+                            "actor": actor,
+                            "from_status": from_status,
+                            "to_status": to_status,
+                            "detail": detail or {},
+                        },
+                    },
+                )
+            )
 
 
 def make_engine(url: str) -> Engine:

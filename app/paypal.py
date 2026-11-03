@@ -54,6 +54,12 @@ class Capture:
     status: str  # COMPLETED, PENDING, DECLINED, FAILED
 
 
+@dataclass(frozen=True)
+class Invoice:
+    invoice_id: str
+    payer_view_url: str | None
+
+
 class PayPalGateway(Protocol):
     def create_authorize_order(
         self,
@@ -80,6 +86,21 @@ class PayPalGateway(Protocol):
 
     def void_authorization(self, authorization_id: str, *, request_id: str) -> None: ...
 
+    def create_and_send_invoice(
+        self,
+        *,
+        invoicer_email: str,
+        recipient_email: str,
+        item_name: str,
+        amount: Decimal,
+        currency: str,
+        note: str,
+        reference: str,
+        request_id: str,
+    ) -> Invoice: ...
+
+    def cancel_invoice(self, invoice_id: str, *, request_id: str) -> None: ...
+
     def verify_webhook(self, headers: dict[str, str], event: dict) -> bool: ...
 
 
@@ -100,6 +121,7 @@ class MockPayPal:
     base_url: str
     orders: dict[str, dict] = field(default_factory=dict)
     authorizations: dict[str, dict] = field(default_factory=dict)
+    invoices: dict[str, dict] = field(default_factory=dict)
     next_capture_status: str = "COMPLETED"  # tests flip this to PENDING / DECLINED
     fail_next: PayPalError | None = None  # tests inject a failure for the next call (PayPal did nothing)
     drop_next_response: bool = False  # PayPal acts, but the response is lost (timeout after success)
@@ -200,6 +222,32 @@ class MockPayPal:
             auth["status"] = "VOIDED"
 
         self._idempotent(request_id, void)
+
+    def create_and_send_invoice(
+        self, *, invoicer_email, recipient_email, item_name, amount, currency, note, reference, request_id
+    ) -> Invoice:
+        def create():
+            iid = self._id("INV")
+            self.invoices[iid] = {
+                "status": "SENT",
+                "amount": amount,
+                "currency": currency,
+                "invoicer": invoicer_email,
+                "recipient": recipient_email,
+                "reference": reference,
+            }
+            return Invoice(iid, f"{self.base_url}/mock/paypal/invoices/{iid}")
+
+        return self._idempotent(request_id, create)
+
+    def cancel_invoice(self, invoice_id, *, request_id) -> None:
+        def cancel():
+            inv = self.invoices.get(invoice_id)
+            if inv is None or inv["status"] != "SENT":
+                raise PayPalError("INVOICE_NOT_CANCELLABLE", status=422)
+            inv["status"] = "CANCELLED"
+
+        self._idempotent(request_id, cancel)
 
     def verify_webhook(self, headers, event) -> bool:
         return headers.get("paypal-transmission-sig") == MOCK_WEBHOOK_SIGNATURE
@@ -314,6 +362,49 @@ class SandboxPayPal:
 
     def void_authorization(self, authorization_id, *, request_id) -> None:
         self._call("POST", f"/v2/payments/authorizations/{authorization_id}/void", request_id=request_id)
+
+    def create_and_send_invoice(
+        self, *, invoicer_email, recipient_email, item_name, amount, currency, note, reference, request_id
+    ) -> Invoice:
+        """Invoicing v2 bills as the account that owns these API credentials. invoicer_email must be that
+        account (the payee's, in a single-payee demo) unless the payee granted third-party permissions."""
+        body = {
+            "detail": {
+                "currency_code": currency,
+                "note": note[:4000],
+                "reference": reference[:120],
+                "payment_term": {"term_type": "DUE_ON_RECEIPT"},
+            },
+            "invoicer": {"email_address": invoicer_email},
+            "primary_recipients": [{"billing_info": {"email_address": recipient_email}}],
+            "items": [
+                {
+                    "name": item_name[:200],
+                    "quantity": "1",
+                    "unit_amount": _money(amount, currency),
+                    "unit_of_measure": "QUANTITY",
+                }
+            ],
+        }
+        data = self._call("POST", "/v2/invoicing/invoices", request_id=request_id, json=body)
+        invoice_id = data.get("id") or data.get("href", "").rsplit("/", 1)[-1]
+        if not invoice_id:
+            raise PayPalError("PayPal returned no invoice id")
+        sent = self._call(
+            "POST",
+            f"/v2/invoicing/invoices/{invoice_id}/send",
+            request_id=f"{request_id}-send",
+            json={"send_to_invoicer": False, "send_to_recipient": True},
+        )
+        return Invoice(invoice_id, sent.get("href"))
+
+    def cancel_invoice(self, invoice_id, *, request_id) -> None:
+        self._call(
+            "POST",
+            f"/v2/invoicing/invoices/{invoice_id}/cancel",
+            request_id=request_id,
+            json={"send_to_recipient": True, "send_to_invoicer": False},
+        )
 
     def verify_webhook(self, headers, event) -> bool:
         if not self._webhook_id:

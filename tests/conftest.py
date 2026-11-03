@@ -77,7 +77,16 @@ def draft() -> dict:
 
 def hermetic_settings(**overrides) -> Settings:
     """Hermetic: ignores .env and pins mock PayPal + mock model."""
-    return Settings(**{"_env_file": None, "mode": "mock", "llm": "mock", "database_url": "sqlite://", **overrides})
+    return Settings(
+        **{
+            "_env_file": None,
+            "mode": "mock",
+            "llm": "mock",
+            "database_url": "sqlite://",
+            "outbound_interval_seconds": 0,
+            **overrides,
+        }
+    )
 
 
 @pytest.fixture
