@@ -44,7 +44,9 @@ def paypal_return(token: str, session: SessionDep, request: Request) -> HTMLResp
 
 
 @router.get("/paypal/cancel", include_in_schema=False)
-def paypal_cancel() -> HTMLResponse:
+def paypal_cancel(session: SessionDep, token: str | None = None) -> HTMLResponse:
+    if token:
+        settlement.cancel_funding(session, token, "payer:paypal_cancel")
     return html_page("Funding cancelled", "No hold was placed. You can start again from the agreement.")
 
 

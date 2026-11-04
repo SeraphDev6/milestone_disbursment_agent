@@ -2096,6 +2096,12 @@ export interface components {
              * @default false
              */
             refund_failed?: boolean;
+            /**
+             * Awaiting Approval
+             * @description Funding was started and PayPal is waiting for the payer to approve the hold; clients poll while this is set. Cleared when the hold is placed, the payer cancels, or funding is started again.
+             * @default false
+             */
+            awaiting_approval?: boolean;
         };
         /**
          * MilestoneStatus

@@ -239,14 +239,16 @@ export function useAgreement(agreementId: string, orgId: string) {
   return useQuery({
     queryKey: keys.agreement(agreementId),
     queryFn: () => call(api.GET("/agreements/{agreement_id}", { params: { path: { agreement_id: agreementId } }, ...asOrg(orgId) })) as Promise<AgreementRead>,
-    // Fast while the server is working; slower while money waits on a window, a payout or a contest.
+    // Fast while the server is working or the payer is approving a hold in another tab; slower while money
+    // waits on a window, a payout or a contest.
     refetchInterval: (q) => {
       const ms = q.state.data?.milestones ?? [];
-      if (ms.some((m) => IN_FLIGHT.has(m.status))) return 2_000;
+      if (ms.some((m) => IN_FLIGHT.has(m.status) || m.awaiting_approval)) return 2_000;
       if (ms.some((m) => m.status === "held" || m.status === "contested")) return 10_000;
       return false;
     },
-    refetchOnWindowFocus: true,
+    // Coming back from the PayPal tab must show the result even if the last fetch was seconds ago.
+    refetchOnWindowFocus: "always",
   });
 }
 

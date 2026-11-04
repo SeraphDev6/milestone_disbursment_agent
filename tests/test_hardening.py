@@ -493,3 +493,23 @@ def test_sso_browser_flow_only_completes_in_the_browser_that_started_it(client, 
     url = stranger.post("/auth/sso/start", json={"email": email}).json()["authorize_url"]
     code, state = idp.authorize(url, email)
     assert TestClient(client.app).get("/auth/sso/callback", params={"code": code, "state": state}).status_code == 200
+
+
+def test_awaiting_approval_is_flagged_until_the_payer_approves_or_cancels(client, draft):
+    aid, (m1, _), ctx = create_active(client, draft)
+    assert agreement(client, aid, ctx)["milestones"][0]["awaiting_approval"] is False
+
+    r = client.post(f"/milestones/{m1}/fund", headers=h(ctx["payer"]))
+    assert r.status_code == 200, r.text
+    assert agreement(client, aid, ctx)["milestones"][0]["awaiting_approval"] is True
+
+    # Backing out of PayPal forgets the order; an unknown or already-approved token is ignored.
+    assert client.get(f"/paypal/cancel?token={r.json()['order_id']}").status_code == 200
+    assert client.get("/paypal/cancel?token=nope").status_code == 200
+    m = agreement(client, aid, ctx)["milestones"][0]
+    assert m["awaiting_approval"] is False and m["status"] == "pending"
+    assert client.get(f"/paypal/return?token={r.json()['order_id']}").status_code == 404  # superseded order
+
+    fund(client, m1, ctx)
+    m = agreement(client, aid, ctx)["milestones"][0]
+    assert m["status"] == "funded" and m["awaiting_approval"] is False

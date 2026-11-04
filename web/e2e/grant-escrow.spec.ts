@@ -17,8 +17,7 @@ test("grant escrow: fund, pre-check, submit, review, release, settle", async ({ 
   await expect(paypal.getByRole("heading", { name: "Tranche funded" })).toBeVisible();
   await paypal.close();
   await page.bringToFront();
-  await page.reload();
-  await expect(page.getByText("Tranche status: Held")).toBeVisible();
+  await expect(page.getByText("Tranche status: Held")).toBeVisible({ timeout: 10_000 }); // no reload: the page polls
 
   // Grantee pre-checks thin evidence, then submits what the criteria ask for.
   await switchPerson(page, /director\+/);

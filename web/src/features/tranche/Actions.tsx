@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { API_BASE } from "@/api/client";
 import { useNow } from "@/app/useNow";
 import type { AgreementRead, MilestoneRead, VerdictRead } from "@/api/types";
@@ -22,6 +22,10 @@ export function Actions({ a, m, seat, verdict, acts, rejected }: { a: AgreementR
   const [note, setNote] = useState("");
   const [reason, setReason] = useState("");
   const [fundUrl, setFundUrl] = useState<string | null>(null);
+  // The "approve in PayPal" callout lasts only while PayPal is waiting on this payer.
+  useEffect(() => {
+    if (fundUrl && !m.awaiting_approval) setFundUrl(null);
+  }, [fundUrl, m.awaiting_approval]);
   const now = useNow();
   const windowClosed = !!m.release_due_at && Date.parse(m.release_due_at) <= now;
   const ctx = { status: m.status, mode: a.settlement_mode, agreementActive: a.status === "active", hasHold: !!m.paypal_authorization_id, rejected, windowClosed };

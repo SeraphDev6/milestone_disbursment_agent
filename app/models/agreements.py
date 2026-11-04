@@ -150,6 +150,11 @@ class MilestoneRead(MilestoneBase):
         description="A contest was resolved for the payer but PayPal refused the refund; the tranche stays contested "
         "and resolving it again with decision=refund retries.",
     )
+    awaiting_approval: bool = Field(
+        default=False,
+        description="Funding was started and PayPal is waiting for the payer to approve the hold; clients poll while "
+        "this is set. Cleared when the hold is placed, the payer cancels, or funding is started again.",
+    )
 
 
 # --- Agreement -------------------------------------------------------------------------

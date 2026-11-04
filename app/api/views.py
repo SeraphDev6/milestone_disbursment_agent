@@ -59,6 +59,15 @@ def pay_path(s) -> str | None:
     return path(s)
 
 
+def _awaiting_approval(m) -> bool:
+    """Funding started (an order exists) but the payer hasn't approved it in PayPal yet."""
+    return (
+        m.status in (MilestoneStatus.pending, MilestoneStatus.overdue)
+        and m.paypal_order_id is not None
+        and m.paypal_authorization_id is None
+    )
+
+
 def _refund_failed(m) -> bool:
     from app.models import DisbursementKind, SettlementStatus
 
@@ -108,6 +117,7 @@ def agreement_read(row: Agreement) -> AgreementRead:
                     update={
                         "pay_path": pay_path(m.settlements[-1]) if m.settlements else None,
                         "refund_failed": _refund_failed(m),
+                        "awaiting_approval": _awaiting_approval(m),
                     },
                 )
                 for m in row.milestones

@@ -198,6 +198,17 @@ def start_funding(
     return order
 
 
+def cancel_funding(session: Session, order_id: str, actor: str) -> Milestone | None:
+    """The payer backed out of PayPal approval: forget the order so the tranche stops waiting on it."""
+    m = session.exec(select(Milestone).where(Milestone.paypal_order_id == order_id)).first()
+    if m is None or m.paypal_authorization_id is not None:
+        return None
+    _note(session, m, actor, "funding_cancelled", order_id=order_id)
+    m.paypal_order_id = None
+    session.commit()
+    return m
+
+
 def complete_funding(session: Session, gw: PayPalGateway, order_id: str, actor: str, now: datetime) -> Milestone:
     """Called when the payer returns from PayPal approval. Idempotent."""
     m = session.exec(select(Milestone).where(Milestone.paypal_order_id == order_id)).first()
