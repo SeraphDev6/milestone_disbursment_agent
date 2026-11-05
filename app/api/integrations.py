@@ -186,7 +186,10 @@ async def github_webhook(
 
 
 @router.post(
-    "/agreements/{agreement_id}/subscriptions", tags=["events"], summary="Subscribe a URL to this agreement's events"
+    "/agreements/{agreement_id}/subscriptions",
+    openapi_extra={"x-sdk-core": True},
+    tags=["events"],
+    summary="Subscribe a URL to this agreement's events",
 )
 def subscribe(
     agreement_id: str, body: SubscriptionCreate, access: AgreementAccessDep, session: SessionDep, request: Request
@@ -208,14 +211,24 @@ def subscribe(
     return SubscriptionCreated.model_validate(sub)
 
 
-@router.get("/agreements/{agreement_id}/subscriptions", tags=["events"], summary="Subscriptions on this agreement")
+@router.get(
+    "/agreements/{agreement_id}/subscriptions",
+    openapi_extra={"x-sdk-core": True},
+    tags=["events"],
+    summary="Subscriptions on this agreement",
+)
 def list_subscriptions(agreement_id: str, access: AgreementAccessDep, session: SessionDep) -> list[SubscriptionRead]:
     access.require(Action.view)
     subs = session.exec(select(Subscription).where(Subscription.agreement_id == agreement_id)).all()
     return [SubscriptionRead.model_validate(s) for s in subs]
 
 
-@router.delete("/agreements/{agreement_id}/subscriptions/{subscription_id}", tags=["events"], status_code=204)
+@router.delete(
+    "/agreements/{agreement_id}/subscriptions/{subscription_id}",
+    openapi_extra={"x-sdk-core": True},
+    tags=["events"],
+    status_code=204,
+)
 def unsubscribe(agreement_id: str, subscription_id: str, access: AgreementAccessDep, session: SessionDep) -> Response:
     access.require(Action.manage_subscriptions)
     sub = session.get(Subscription, subscription_id)

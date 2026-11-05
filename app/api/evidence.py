@@ -59,7 +59,7 @@ def _verify_later(background: BackgroundTasks, request: Request, milestone_id: s
 @router.post(
     "/milestones/{milestone_id}/evidence",
     status_code=status.HTTP_202_ACCEPTED,
-    openapi_extra={"x-mcp-tool": "submit_evidence"},
+    openapi_extra={"x-sdk-core": True, "x-mcp-tool": "submit_evidence"},
     summary="Payee submits evidence for a tranche; verification runs in the background",
 )
 def submit_evidence(
@@ -80,6 +80,7 @@ def submit_evidence(
 
 @router.post(
     "/milestones/{milestone_id}/uploads",
+    openapi_extra={"x-sdk-core": True},
     status_code=status.HTTP_202_ACCEPTED,
     summary="Payee uploads evidence files (PDF, CSV, XLSX, TXT, MD, images); verification runs in the background",
 )
@@ -159,7 +160,7 @@ def download_file(evidence_id: str, auth: EvidenceAccessDep) -> Response:
 
 @router.post(
     "/milestones/{milestone_id}/precheck",
-    openapi_extra={"x-mcp-tool": "precheck_evidence"},
+    openapi_extra={"x-sdk-core": True, "x-mcp-tool": "precheck_evidence"},
     summary="Payee checks draft evidence against the criteria without submitting it",
 )
 def precheck(
@@ -185,7 +186,7 @@ def reverify(
 
 @router.get(
     "/milestones/{milestone_id}/verdict",
-    openapi_extra={"x-mcp-tool": "get_verdict"},
+    openapi_extra={"x-sdk-core": True, "x-mcp-tool": "get_verdict"},
     summary="Latest verdict for a tranche, with per-criterion results and citations",
 )
 def get_verdict(milestone_id: str, auth: MilestoneAccessDep) -> VerdictRead:
@@ -201,7 +202,9 @@ def get_verdict(milestone_id: str, auth: MilestoneAccessDep) -> VerdictRead:
 
 
 @router.post(
-    "/milestones/{milestone_id}/review", summary="Payer (admin) or reviewer approves or rejects a verdict in review"
+    "/milestones/{milestone_id}/review",
+    openapi_extra={"x-sdk-core": True},
+    summary="Payer (admin) or reviewer approves or rejects a verdict in review",
 )
 def review(
     milestone_id: str, body: ReviewRequest, auth: MilestoneAccessDep, session: SessionDep, request: Request

@@ -90,7 +90,7 @@ class AgreementText(SQLModel):
 
 @router.post(
     "/agreements/extract-text",
-    openapi_extra={"x-mcp-tool": "draft_agreement_from_text"},
+    openapi_extra={"x-sdk-core": True, "x-mcp-tool": "draft_agreement_from_text"},
     summary="Propose tranches and checkable criteria from an agreement's text",
 )
 async def extract_agreement_text(
@@ -105,6 +105,7 @@ async def extract_agreement_text(
 
 @router.post(
     "/agreements/extract",
+    openapi_extra={"x-sdk-core": True},
     summary="Propose tranches and checkable criteria from an agreement document (PDF or text upload)",
 )
 async def extract_agreement(
@@ -135,7 +136,7 @@ def lint(draft: TranchesDraft) -> LintReport:
 @router.post(
     "/orgs/{org_id}/agreements",
     status_code=status.HTTP_201_CREATED,
-    openapi_extra={"x-mcp-tool": "create_agreement"},
+    openapi_extra={"x-sdk-core": True, "x-mcp-tool": "create_agreement"},
     summary="Create a draft agreement as this org (the payer) and invite the payee and any reviewers",
 )
 def create_agreement(
@@ -182,7 +183,7 @@ def create_agreement(
 
 @router.get(
     "/agreements/{agreement_id}",
-    openapi_extra={"x-mcp-tool": "get_agreement_status"},
+    openapi_extra={"x-sdk-core": True, "x-mcp-tool": "get_agreement_status"},
     summary="Agreement, tranches, criteria, lint and confirmation status",
 )
 def get_agreement(agreement_id: str, access: AgreementAccessDep) -> AgreementRead:
@@ -192,6 +193,7 @@ def get_agreement(agreement_id: str, access: AgreementAccessDep) -> AgreementRea
 
 @router.post(
     "/agreements/{agreement_id}/invitations",
+    openapi_extra={"x-sdk-core": True},
     status_code=201,
     summary="Invite a reviewer (or the payee, if none has joined) to this agreement (payer admin)",
 )
@@ -272,6 +274,7 @@ def replace_milestones(
 
 @router.post(
     "/agreements/{agreement_id}/confirm",
+    openapi_extra={"x-sdk-core": True},
     summary="Sign the current criteria hash for your org; activates when every party has signed",
 )
 def confirm(agreement_id: str, body: ConfirmRequest, access: AgreementAccessDep, session: SessionDep) -> AgreementRead:

@@ -105,7 +105,12 @@ web/               React app (Vite, React Aria, AG Grid); served at / from web/d
 ```sh
 uv run pytest
 uv run ruff check . && uv run ruff format .
+uv run python -m app.sdk_spec   # after changing a core operation: rewrites sdk/openapi-core.json
 ```
+
+### SDK core spec
+
+Operations tagged `x-sdk-core` (in `openapi_extra`) make up the SDK's API: drafting and confirming an agreement, funding, evidence, verdicts, review, release, the ledger and subscriptions. `python -m app.sdk_spec` writes just those, with the schemas they use, to `sdk/openapi-core.json`. CI (and `tests/test_sdk_spec.py`) fails when the committed file is stale, so SDK-facing changes are always deliberate. The core spec has its own semver (`CORE_VERSION` in `app/sdk_spec.py`); a breaking change to a core operation bumps the major version.
 
 ### Database migrations
 
