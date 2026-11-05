@@ -1,0 +1,260 @@
+"""The GitHub App: installations instead of hand-made repo webhooks, and short-lived per-installation tokens.
+
+- The app authenticates as itself with a JWT signed by its private key (RS256, 9 minutes), and exchanges it for an
+  installation token (1 hour, cached) to act on the repos an installation was given.
+- Installing uses "request user authorization during installation": GitHub sends the installer back with an OAuth
+  code, and we check with *their* token that they can access the installation before it's linked to an org, so a
+  forged `installation_id` can't claim someone else's installation.
+- Mock mode without app credentials uses MockGitHubApp: an install page on this server and canned repos.
+
+The app's permissions (set in the manifest, scripts/github_app_setup.py): contents, metadata and pull requests
+read; checks write. Events: installation, pull_request.
+"""
+
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from itertools import count
+from typing import Protocol
+from urllib.parse import quote, urlencode
+
+import httpx
+import jwt
+
+from app.integrations.github import GitHubAPI, GitHubClient, GitHubError
+
+CHECK_NAME = "Milestone Ledger"
+
+
+@dataclass
+class Installation:
+    id: int
+    account_login: str
+    account_type: str  # User or Organization
+
+
+class GitHubApp(Protocol):
+    slug: str
+    webhook_secret: str
+
+    def install_url(self, state: str) -> str: ...
+    def exchange_code(self, code: str) -> str: ...
+    def user_installation_ids(self, user_token: str) -> set[int]: ...
+    def installation(self, installation_id: int) -> Installation: ...
+    def repos(self, installation_id: int) -> list[str]: ...
+    def client(self, installation_id: int) -> GitHubAPI: ...
+    def upsert_check_run(self, installation_id: int, repo: str, check_run_id: int | None, body: dict) -> int: ...
+
+
+def _pem(key: str) -> str:
+    return key.replace("\\n", "\n").strip() + "\n"
+
+
+class RealGitHubApp:
+    def __init__(
+        self,
+        *,
+        app_id: str,
+        slug: str,
+        client_id: str,
+        client_secret: str,
+        private_key: str,
+        webhook_secret: str,
+        api_url: str = "https://api.github.com",
+        web_url: str = "https://github.com",
+        transport: httpx.BaseTransport | None = None,
+        clock=time.time,
+    ):
+        self.app_id, self.slug, self.webhook_secret = app_id, slug, webhook_secret
+        self._client_id, self._client_secret, self._key = client_id, client_secret, _pem(private_key)
+        self._api_url, self._web_url, self._transport, self._clock = api_url, web_url, transport, clock
+        self._http = httpx.Client(timeout=10.0, transport=transport)
+        self._tokens: dict[int, tuple[str, float]] = {}
+
+    # --- authentication ------------------------------------------------------------------
+
+    def app_jwt(self) -> str:
+        now = int(self._clock())
+        return jwt.encode({"iat": now - 60, "exp": now + 540, "iss": self.app_id}, self._key, algorithm="RS256")
+
+    def _headers(self, token: str) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+    def _call(self, method: str, path: str, token: str, **kwargs) -> dict:
+        try:
+            r = self._http.request(method, self._api_url + path, headers=self._headers(token), **kwargs)
+        except httpx.HTTPError as e:
+            raise GitHubError(f"GitHub unreachable: {e}") from e
+        if r.status_code >= 300:
+            raise GitHubError(f"GitHub {r.status_code} for {method} {path}")
+        return r.json() if r.content else {}
+
+    def installation_token(self, installation_id: int) -> str:
+        token, expires = self._tokens.get(installation_id, ("", 0.0))
+        if token and expires - self._clock() > 300:
+            return token
+        data = self._call("POST", f"/app/installations/{installation_id}/access_tokens", self.app_jwt())
+        expires_at = data.get("expires_at", "")
+        try:
+            exp = datetime.fromisoformat(expires_at).timestamp()
+        except ValueError:
+            exp = self._clock() + 3000
+        self._tokens[installation_id] = (data["token"], exp)
+        return data["token"]
+
+    # --- installing ----------------------------------------------------------------------
+
+    def install_url(self, state: str) -> str:
+        return f"{self._web_url}/apps/{quote(self.slug)}/installations/new?{urlencode({'state': state})}"
+
+    def exchange_code(self, code: str) -> str:
+        try:
+            r = self._http.post(
+                f"{self._web_url}/login/oauth/access_token",
+                json={"client_id": self._client_id, "client_secret": self._client_secret, "code": code},
+                headers={"Accept": "application/json"},
+            )
+        except httpx.HTTPError as e:
+            raise GitHubError(f"GitHub unreachable: {e}") from e
+        token = r.json().get("access_token") if r.status_code == 200 else None
+        if not token:
+            raise GitHubError("GitHub didn't accept the authorization code; start the install again")
+        return token
+
+    def user_installation_ids(self, user_token: str) -> set[int]:
+        ids: set[int] = set()
+        for page in range(1, 11):
+            data = self._call("GET", "/user/installations", user_token, params={"per_page": 100, "page": page})
+            batch = data.get("installations", [])
+            ids |= {int(i["id"]) for i in batch}
+            if len(batch) < 100:
+                break
+        return ids
+
+    def installation(self, installation_id: int) -> Installation:
+        data = self._call("GET", f"/app/installations/{installation_id}", self.app_jwt())
+        account = data.get("account") or {}
+        return Installation(installation_id, account.get("login", "unknown"), account.get("type", "User"))
+
+    # --- acting for an installation ------------------------------------------------------
+
+    def repos(self, installation_id: int) -> list[str]:
+        token = self.installation_token(installation_id)
+        names: list[str] = []
+        for page in range(1, 11):
+            data = self._call("GET", "/installation/repositories", token, params={"per_page": 100, "page": page})
+            batch = data.get("repositories", [])
+            names += [r["full_name"] for r in batch]
+            if len(batch) < 100:
+                break
+        return sorted(names)
+
+    def client(self, installation_id: int) -> GitHubAPI:
+        return GitHubClient(
+            token=self.installation_token(installation_id), base_url=self._api_url, transport=self._transport
+        )
+
+    def upsert_check_run(self, installation_id: int, repo: str, check_run_id: int | None, body: dict) -> int:
+        token = self.installation_token(installation_id)
+        if check_run_id:
+            data = self._call("PATCH", f"/repos/{repo}/check-runs/{check_run_id}", token, json=body)
+        else:
+            data = self._call("POST", f"/repos/{repo}/check-runs", token, json=body)
+        return int(data["id"])
+
+
+# --- mock --------------------------------------------------------------------------------
+
+
+@dataclass
+class MockGitHubClient:
+    """What an installation token can read, in mock mode."""
+
+    commits: dict[tuple[str, str], tuple[str, str]]
+
+    def check_runs(self, repo: str, sha: str) -> list[dict]:
+        return [{"name": "tests", "status": "completed", "conclusion": "success"}]
+
+    def pr_files(self, repo: str, number: int) -> list[dict]:
+        return [{"filename": "README.md", "additions": 1, "deletions": 0}]
+
+    def commit(self, repo: str, ref: str) -> dict:
+        if (repo, ref) not in self.commits:
+            raise GitHubError(f"GitHub 404 for /repos/{repo}/commits/{ref}")
+        sha, tree = self.commits[(repo, ref)]
+        return {"sha": sha, "commit": {"tree": {"sha": tree}}}
+
+
+@dataclass
+class MockGitHubApp:
+    """Stand-in app for mock mode and tests. `install` simulates someone installing it on an account."""
+
+    base_url: str
+    slug: str = "milestone-ledger-mock"
+    webhook_secret: str = "mock-github-app-webhook-secret"
+    installs: dict[int, Installation] = field(default_factory=dict)
+    repo_lists: dict[int, list[str]] = field(default_factory=dict)
+    codes: dict[str, int] = field(default_factory=dict)  # OAuth code -> installation the user can access
+    commits: dict[tuple[str, str], tuple[str, str]] = field(default_factory=dict)
+    check_runs: dict[int, dict] = field(default_factory=dict)
+    _ids: count = field(default_factory=lambda: count(1001))
+
+    def install(self, account: str, repos: list[str]) -> tuple[int, str]:
+        """Someone installs the app on `account`; returns (installation id, the OAuth code GitHub would send)."""
+        iid = next(self._ids)
+        self.installs[iid] = Installation(iid, account, "Organization")
+        self.repo_lists[iid] = sorted(repos)
+        code = f"mock-code-{iid}"
+        self.codes[code] = iid
+        return iid, code
+
+    def install_url(self, state: str) -> str:
+        return f"{self.base_url}/mock/github/install?{urlencode({'state': state})}"
+
+    def exchange_code(self, code: str) -> str:
+        if code not in self.codes:
+            raise GitHubError("GitHub didn't accept the authorization code; start the install again")
+        return f"mock-user-token-{self.codes.pop(code)}"
+
+    def user_installation_ids(self, user_token: str) -> set[int]:
+        return {int(user_token.rsplit("-", 1)[1])} if user_token.startswith("mock-user-token-") else set()
+
+    def installation(self, installation_id: int) -> Installation:
+        if installation_id not in self.installs:
+            raise GitHubError(f"GitHub 404 for /app/installations/{installation_id}")
+        return self.installs[installation_id]
+
+    def repos(self, installation_id: int) -> list[str]:
+        return list(self.repo_lists.get(installation_id, []))
+
+    def client(self, installation_id: int) -> GitHubAPI:
+        return MockGitHubClient(self.commits)
+
+    def upsert_check_run(self, installation_id: int, repo: str, check_run_id: int | None, body: dict) -> int:
+        rid = check_run_id or len(self.check_runs) + 1
+        self.check_runs[rid] = {
+            **self.check_runs.get(rid, {}),
+            **body,
+            "repo": repo,
+            "installation_id": installation_id,
+        }
+        return rid
+
+
+def make_github_app(settings) -> GitHubApp | None:
+    if settings.github_app_configured:
+        return RealGitHubApp(
+            app_id=settings.github_app_id,
+            slug=settings.github_app_slug,
+            client_id=settings.github_app_client_id,
+            client_secret=settings.github_app_client_secret.get_secret_value(),
+            private_key=settings.github_app_private_key.get_secret_value(),
+            webhook_secret=settings.github_app_webhook_secret.get_secret_value(),
+        )
+    if settings.is_mock:
+        return MockGitHubApp(base_url=settings.api_base_url)
+    return None

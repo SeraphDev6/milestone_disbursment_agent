@@ -7,6 +7,7 @@ from app.api import (
     audit,
     auth,
     evidence,
+    github_app,
     integrations,
     ledger,
     mock,
@@ -24,7 +25,19 @@ def health(request: Request) -> dict[str, str]:
     return {"status": "ok", "mode": request.app.state.settings.mode.value}
 
 
-for module in (auth, sso, orgs, paypal_accounts, agreements, settlement, ledger, evidence, integrations, audit):
+for module in (
+    auth,
+    sso,
+    orgs,
+    paypal_accounts,
+    github_app,
+    agreements,
+    settlement,
+    ledger,
+    evidence,
+    integrations,
+    audit,
+):
     api_router.include_router(module.router)
 
 mock_router = mock.router

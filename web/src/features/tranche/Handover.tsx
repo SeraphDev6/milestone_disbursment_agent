@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { AuditEventRead, EvidenceRead, HandoverCheck, HandoverResult } from "@/api/types";
 import { errorMessage } from "@/api/errors";
 import { dateTime, shortHash } from "@/domain/format";
-import { Button, Callout, Dialog, layout, RadioGroup, Stamp, TextField } from "@/design/components";
+import { Button, Callout, Dialog, layout, RadioGroup, Select, Stamp, TextField } from "@/design/components";
 import s from "./Tranche.module.css";
 
 const SHA = /^[0-9a-f]{40}$/i;
@@ -57,10 +57,11 @@ type Check = { mutateAsync: (v: { evidenceId: string; body: HandoverCheck }) => 
  * Check code delivered outside the engine (a PR into the client's repo, a repo transfer) against the commit the
  * verifier read. Either side or a reviewer can run it; every check is recorded in the history and the packet.
  */
-export function HandoverButton({ evidence, check }: { evidence: EvidenceRead; check: Check }) {
+export function HandoverButton({ evidence, check, repos = [] }: { evidence: EvidenceRead; check: Check; repos?: string[] }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"repo" | "sha">("repo");
-  const [repo, setRepo] = useState("");
+  const [repo, setRepo] = useState(repos[0] ?? "");
+  const [other, setOther] = useState(repos.length === 0);
   const [ref, setRef] = useState("main");
   const [sha, setSha] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -122,7 +123,20 @@ export function HandoverButton({ evidence, check }: { evidence: EvidenceRead; ch
           />
           {mode === "repo" ? (
             <div className={layout.grid2}>
-              <TextField label="Repo" description="owner/name" value={repo} onChange={setRepo} error={repoError} autoComplete="off" />
+              {repos.length > 0 && (
+                <Select
+                  label="Repo"
+                  description="Repos your GitHub App installation can read"
+                  value={other ? "__other__" : repo}
+                  options={[...repos.map((r) => ({ id: r, label: r })), { id: "__other__", label: "Another repo" }]}
+                  onChange={(v) => {
+                    const isOther = v === "__other__";
+                    setOther(isOther);
+                    setRepo(isOther ? "" : v);
+                  }}
+                />
+              )}
+              {other && <TextField label={repos.length ? "Other repo" : "Repo"} description="owner/name" value={repo} onChange={setRepo} error={repoError} autoComplete="off" />}
               <TextField label="Branch, tag or SHA" value={ref} onChange={setRef} autoComplete="off" />
             </div>
           ) : (

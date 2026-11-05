@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useParams } from "react-router";
-import { isMock, useEvidence, useHealth, useMilestoneAudit, useTrancheActions, useVerdict } from "@/api/queries";
+import { isMock, useEvidence, useGitHubRepos, useHealth, useMilestoneAudit, useTrancheActions, useVerdict } from "@/api/queries";
 import { useAgreementCtx, useOrgCtx, paths } from "@/app/context";
 import { useTitle } from "@/app/RouteAnnouncer";
 import { useSessions } from "@/auth/session";
@@ -32,6 +32,8 @@ export function Tranche() {
   const verdict = useVerdict(milestoneId, org.orgId, status);
   const audit = useMilestoneAudit(milestoneId, org.orgId, status);
   const acts = useTrancheActions(a.id, milestoneId, org.orgId);
+  const hasCode = (evidence.data ?? []).some((e) => /^[0-9a-f]{40}$/i.test(e.pinned_ref));
+  const repos = useGitHubRepos(org.orgId, hasCode);
 
   const names: ActorNames = useMemo(
     () => ({
@@ -113,7 +115,7 @@ export function Tranche() {
             )}
           </Sheet>
           <Sheet title="Evidence on file">
-            {evidence.isPending ? <Busy label="Loading evidence" /> : <EvidenceList evidence={evidence.data ?? []} orgId={org.orgId} handovers={latestHandovers(events)} checkHandover={acts.handover} />}
+            {evidence.isPending ? <Busy label="Loading evidence" /> : <EvidenceList evidence={evidence.data ?? []} orgId={org.orgId} handovers={latestHandovers(events)} checkHandover={acts.handover} repos={(repos.data ?? []).map((r) => r.repo)} />}
           </Sheet>
           {isPayee && (
             <AddEvidence

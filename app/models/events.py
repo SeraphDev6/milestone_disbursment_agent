@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON
+from sqlalchemy import JSON, BigInteger, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from app.models.columns import fk, id_field, timestamp
@@ -58,6 +58,48 @@ class Integration(SQLModel, table=True):
     secret: str = Field(max_length=100)
     created_by: str = Field(max_length=120)
     created_at: datetime = timestamp()
+    # Set when the repo is connected through the GitHub App (no repo webhook; deliveries come to the app's
+    # endpoint and GitHub reads use this installation's token). None: the hand-configured repo webhook.
+    installation_id: int | None = Field(default=None, sa_type=BigInteger, index=True)
+
+
+class GitHubInstallation(SQLModel, table=True):
+    """The GitHub App installed on a GitHub account, linked to one of our organizations by one of its admins."""
+
+    __tablename__ = "github_installations"
+    __table_args__ = (UniqueConstraint("org_id", "installation_id"),)
+
+    id: str = id_field()
+    org_id: str | None = fk("organizations.id")
+    installation_id: int = Field(sa_type=BigInteger, index=True)
+    account_login: str = Field(max_length=100)
+    account_type: str = Field(max_length=32)  # User or Organization
+    created_by: str = Field(max_length=120)
+    created_at: datetime = timestamp()
+
+
+class GitHubInstallationRead(SQLModel):
+    installation_id: int
+    account_login: str = Field(description="GitHub user or organization the app is installed on.")
+    account_type: str
+    created_at: datetime
+
+
+class GitHubCheck(SQLModel, table=True):
+    """The "Milestone Ledger" check run on a merge commit, kept in step with its tranche by a reconciliation loop."""
+
+    __tablename__ = "github_checks"
+    __table_args__ = (UniqueConstraint("milestone_id", "repo", "sha"),)
+
+    id: str = id_field()
+    milestone_id: str | None = fk("milestones.id")
+    installation_id: int = Field(sa_type=BigInteger)
+    repo: str = Field(max_length=200)
+    sha: str = Field(max_length=40)
+    check_run_id: int | None = Field(default=None, sa_type=BigInteger)
+    posted_state: str | None = Field(default=None, max_length=32)  # tranche status last shown on GitHub
+    error: str | None = Field(default=None, max_length=300)
+    updated_at: datetime = timestamp()
 
 
 class SubscriptionBase(SQLModel):

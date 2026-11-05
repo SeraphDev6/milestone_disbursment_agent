@@ -53,11 +53,13 @@ class GitHubAPI(Protocol):
 
 
 class GitHubClient:
-    def __init__(self, token: str | None = None, base_url: str = "https://api.github.com", timeout: float = 10.0):
+    def __init__(
+        self, token: str | None = None, base_url: str = "https://api.github.com", timeout: float = 10.0, transport=None
+    ):
         headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        self._client = httpx.Client(base_url=base_url, headers=headers, timeout=timeout)
+        self._client = httpx.Client(base_url=base_url, headers=headers, timeout=timeout, transport=transport)
 
     def _get(self, path: str) -> dict | list:
         try:

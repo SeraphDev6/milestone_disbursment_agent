@@ -18,3 +18,4 @@ local.db
 # Operative compliance documents: real policies, vendor reports received under NDA, audit evidence.
 # Never commit these to this public repo. Clone the private compliance repo here (see docs/policy-templates/README.md).
 /compliance-private/
+github-app.env

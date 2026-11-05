@@ -72,6 +72,12 @@ Two scheduled jobs and a few settings turn the mock demo into a deployment (all 
 - **Email:** `EMAIL_PROVIDER=resend` (with `RESEND_API_KEY`) or `smtp` (with `SMTP_*`), plus `EMAIL_FROM`. Sign-in links, invitations, review requests, rejections with what's missing, pay links, overdue notices and unclaimed or failed payouts go to the tranche's assignee on that side, or to every member of the party's org. `console` (the default) only logs them.
 - **Rate limits:** sign-in links per IP and per address, extraction and pre-check per caller, pay-link visits per IP (`RATE_LIMIT_*_PER_HOUR`); `TRUST_PROXY_HEADERS` says whether `X-Forwarded-For` names the client.
 - **PayPal disputes:** `CUSTOMER.DISPUTE.*` webhooks are recorded on the tranche; a dispute against a tranche still in its window pauses the payout as a contest for a reviewer to resolve. The hourly `payouts` job also polls the Disputes API (the platform account and each payee with a capture in the last 180 days) as a backstop. Reading a connected payee's disputes needs the `READ_SELLER_DISPUTE` onboarding feature, which payees who connected before Nov 5 don't have; those accounts are skipped and counted.
+- **GitHub App:** `uv run python scripts/github_app_setup.py --public-url https://your.host` registers the app in one click (GitHub's manifest flow) and writes its `GITHUB_APP_*` settings to `github-app.env`; add them to the environment.
+  - Orgs install it from **Organization > GitHub** in the web app. The callback checks with the installer's own GitHub token that they can access the installation, and the admin who started it confirms it for their org.
+  - Payees then pick a repo instead of configuring a webhook, and merged, labelled PRs arrive at `/webhooks/github/app`.
+  - Reads use each installation's short-lived token, so the handover check can read a client's private repo.
+  - Each PR's merge commit gets a "Milestone Ledger" check run that follows the tranche. It's posted by an in-process loop, or by the `deliver-webhooks` job when that loop is off.
+  - The per-repo webhook still works without the app. Mock mode has a stand-in app with a mock install page.
 - **Live mode:** `MODE=live` uses PayPal's production API, pays connected payees only (never the platform route), and requires an https `PUBLIC_BASE_URL` and `PAYPAL_WEBHOOK_ID`. It also needs PayPal's partner approval and a BN code.
 - `uv run python scripts/paypal_sandbox_check.py` checks the PayPal credentials, the platform merchant id and the webhook subscription from `.env` without running the app (`--order` also creates a $1 hold link).
 - `uv run python scripts/sandbox_walkthrough.py` walks the whole wallet flow through a running sandbox-mode app (escrow, pay-now and Payouts), pausing wherever you act in PayPal: see [`docs/SANDBOX.md`](docs/SANDBOX.md).
@@ -161,7 +167,7 @@ Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
 | Anthropic | Agreement extraction and evidence verification (Claude) | Agreement documents, criteria and evidence content | US |
 | Resend (or the operator's SMTP server) | Email: sign-in links, invitations, notifications | Recipient emails, names, tranche titles and status | US |
 
-GitHub is only read from: when a payee submits a repository as evidence, the engine fetches it (with the operator's optional `GITHUB_TOKEN`). Org SSO talks to
+GitHub: the engine reads the repos an org chose when it installed the GitHub App, using that installation's short-lived token, and writes only check runs (permissions: contents, metadata and pull requests read; checks write). Without the app it reads with the operator's optional `GITHUB_TOKEN`. Org SSO talks to
 each customer's own identity provider. We don't publish vendors' audit reports; see each vendor's trust center.
 
 **Policies and roadmap.** Generic policy templates will live in `docs/policy-templates/`

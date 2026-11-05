@@ -4,7 +4,7 @@ migrate           apply pending migrations and exit (run before starting several
 daily             drop expired PayPal holds, close invoices unpaid past the timeout, mark tranches overdue
 payouts           catch up on captures, payments and invoices PayPal finished without a webhook reaching us, pay
                   tranches whose dispute window closed and follow payouts in flight (hourly)
-deliver-webhooks  send due outbound webhooks once (when the in-process loop is turned off)
+deliver-webhooks  send due outbound webhooks and GitHub check runs once (when the in-process loops are off)
 """
 
 import logging
@@ -14,7 +14,9 @@ from app.api.spa import has_build
 from app.config import get_settings
 from app.db import make_engine, make_sessionmaker, migrate, utcnow
 from app.integrations.email import make_mailer
+from app.integrations.github_app import make_github_app
 from app.integrations.paypal import make_gateway
+from app.services.github_app import publish_checks
 from app.services.notifications import NOTIFIER, Notifier
 from app.services.outbound import deliver_due
 from app.services.settlement import disburse_due, expire_stale_holds, expire_stale_invoices
@@ -49,7 +51,8 @@ def main(argv: list[str]) -> int:
             print(", ".join(f"{k.replace('_', ' ')}: {v}" for k, v in counts.items()))
         else:
             sent = deliver_due(session, now, allow_http=settings.is_mock)
-            print(f"delivered {sent} webhook(s)")
+            checks = publish_checks(session, make_github_app(settings), notifier.tranche_link, now)
+            print(f"delivered {sent} webhook(s), posted {checks} GitHub check run(s)")
     return 0
 
 
