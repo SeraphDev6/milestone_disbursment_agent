@@ -40,7 +40,8 @@ services:
         sync: false
 
   # Hourly: pay tranches whose dispute window closed, follow Payouts in flight, mirror PayPal's 28-day release.
-  # The jobs never encrypt or decrypt anything, so their generated SECRET_KEY only has to be non-default.
+  # The jobs share the web service's SECRET_KEY: stored files are encrypted with a key derived from it (unless
+  # FILE_ENCRYPTION_KEY is set), and the daily retention sweep and `encrypt-files` write those files.
   - type: cron
     name: milestone-engine-payouts
     runtime: python
@@ -54,7 +55,10 @@ services:
           name: milestone-engine-db
           property: connectionString
       - key: SECRET_KEY
-        generateValue: true
+        fromService:
+          type: web
+          name: milestone-engine
+          envVarKey: SECRET_KEY
       - key: AUTO_MIGRATE
         value: "false"
       - key: PUBLIC_BASE_URL
@@ -82,7 +86,10 @@ services:
           name: milestone-engine-db
           property: connectionString
       - key: SECRET_KEY
-        generateValue: true
+        fromService:
+          type: web
+          name: milestone-engine
+          envVarKey: SECRET_KEY
       - key: AUTO_MIGRATE
         value: "false"
       - key: PUBLIC_BASE_URL
