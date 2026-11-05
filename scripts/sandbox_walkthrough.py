@@ -12,6 +12,12 @@ Flows (all by default):
     paynow   invoice mode with a connected payee: the funder pays a pay-now link, money goes to the payee
     platform the payee never connects PayPal: hold paid to the platform, then PayPal Payouts to the payee
 
+With PAYPAL_TEST_PAYER_PASSWORD and PAYPAL_TEST_PAYEE_PASSWORD set, the PayPal pages are done for you in a Chrome
+window (scripts/paypal_browser.py; run with `uv run --group sandbox`). Without them, or with --manual-paypal, the
+script prints each link for you to open. The app's own sign-in and invitation links still need pasting unless the
+server is in mock mode, or RESEND_INBOX_API_KEY and RESEND_INBOX_DOMAIN are set: then the funder and grantee get fresh
+addresses at that receiving domain and the script reads their emails from Resend.
+
 PayPal's return pages are browser redirects, not calls from PayPal, so localhost works and no webhooks are needed.
 The platform flow's payout finishes on the app's payouts loop (PAYOUTS_INTERVAL_SECONDS) or `python -m app.jobs
 payouts`; nothing else waits on a webhook.
@@ -19,6 +25,7 @@ payouts`; nothing else waits on a webhook.
 
 import argparse
 import os
+import re
 import sys
 import time
 import uuid
@@ -78,6 +85,45 @@ def agreement_body(title: str, mode: str, counterparty: str) -> dict:
     }
 
 
+LINK = re.compile(r"https?://[^\s\"'<>]+[?&]token=[^\s\"'<>]+")
+
+
+class ResendInbox:
+    """Reads the app's emails from a Resend receiving domain, so nobody has to paste sign-in or invitation links.
+
+    Needs a full-access key (send-only keys can't read received mail); keep it out of the deployment."""
+
+    def __init__(self, api_key: str, domain: str, *, http: httpx.Client | None = None):
+        self.domain = domain.lower()
+        self.http = http or httpx.Client(
+            base_url="https://api.resend.com", headers={"Authorization": f"Bearer {api_key}"}, timeout=30
+        )
+        self.seen: set[str] = set()  # each email is used once, so a sign-in email is never read as an invitation
+
+    def owns(self, address: str) -> bool:
+        return address.lower().endswith(f"@{self.domain}")
+
+    def link(self, to: str, path: str, timeout: float, poll: float = 3.0) -> str:
+        """Wait for a new email to `to` and return its app link whose path contains `path`."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            r = self.http.get("/emails/receiving", params={"limit": 25})
+            r.raise_for_status()
+            for item in r.json().get("data", []):
+                if item["id"] in self.seen or to.lower() not in (t.lower() for t in item.get("to", [])):
+                    continue
+                email = self.http.get(f"/emails/receiving/{item['id']}")
+                email.raise_for_status()
+                body = email.json()
+                for link in LINK.findall(f"{body.get('text') or ''}\n{body.get('html') or ''}"):
+                    link = link.replace("&amp;", "&")
+                    if path in link:
+                        self.seen.add(item["id"])
+                        return link
+            time.sleep(poll)
+        raise TimeoutError(f"no email to {to} with a {path} link within {timeout:.0f}s")
+
+
 class Walk:
     def __init__(self, base: str, timeout: float, *, http: httpx.Client | None = None, mode: str = "sandbox"):
         self.base = base.rstrip("/")
@@ -86,6 +132,9 @@ class Walk:
         self.mode = mode  # tests run the same walk against mock mode
         self.poll_seconds = 3.0
         self.tokens: dict[str, str] = {}
+        self.browser = None  # a paypal_browser.PayPalBrowser when PayPal pages are done automatically
+        self.paypal_logins: dict[str, tuple[str, str]] = {}  # "payer"/"payee" -> (sandbox email, password)
+        self.inbox: ResendInbox | None = None  # reads emailed links instead of asking for them
 
     # --- output and prompts ---
 
@@ -106,8 +155,18 @@ class Walk:
     def ask(text: str) -> str:
         return input(f"   >>   {text}\n        ").strip()
 
-    def open_in_browser(self, url: str, who: str) -> None:
+    def open_in_browser(self, url: str, who: str, account: str | None = None) -> bool:
+        """Get a person (or the automated browser) through a PayPal page. True if it's known to be finished."""
+        login = self.paypal_logins.get(account) if self.browser else None
+        if login:
+            print(f"   ..   finishing PayPal as {login[0]} in the browser window")
+            if self.browser.finish(url, *login, back_to=self.base):
+                self.ok("PayPal sent the browser back to the app")
+                return True
+            print("   >>   Couldn't finish it automatically. Finish it in the open browser window.")
+            return False
         print(f"   >>   As {who}, open this in a browser and finish in PayPal:\n        {url}")
+        return False
 
     # --- API ---
 
@@ -118,13 +177,27 @@ class Walk:
             self.fail(f"{method} {path} -> {r.status_code}: {r.text[:500]}")
         return r.json() if r.content else {}
 
+    def emailed_link(self, to: str, path: str, prompt: str) -> str:
+        """The link emailed to `to`: read from the Resend inbox when it's ours, otherwise pasted by a person."""
+        if self.inbox and self.inbox.owns(to):
+            try:
+                link = self.inbox.link(to, path, self.timeout)
+            except (TimeoutError, httpx.HTTPError) as e:
+                print(f"   ..   couldn't read the inbox: {e}")
+            else:
+                self.ok(f"read the {path} link from the email to {to}")
+                return link
+        return self.ask(prompt)
+
     def token_from(self, link: str) -> str:
         token = parse_qs(urlsplit(link).query).get("token", [link])[0]
         return token.strip()
 
     def sign_in(self, who: str, email: str) -> None:
         sent = self.call("POST", "/auth/magic-link", json={"email": email})
-        link = sent.get("dev_link") or self.ask(f"Paste the sign-in link emailed to {email} (server log with console)")
+        link = sent.get("dev_link") or self.emailed_link(
+            email, "/auth/", f"Paste the sign-in link emailed to {email} (server log with console)"
+        )
         self.tokens[who] = self.call("POST", "/auth/magic-link/verify", json={"token": self.token_from(link)})["token"]
         self.ok(f"{who} signed in as {email}")
 
@@ -171,8 +244,10 @@ class Walk:
         self.ok(f"agreement {aid}")
         if "payee" not in self.tokens:
             self.sign_in("payee", payee_email)
-        link = (created.get("dev_links") or {}).get(payee_email) or self.ask(
-            f"Paste the invitation link emailed to {payee_email} for '{body['title']}'"
+        link = (created.get("dev_links") or {}).get(payee_email) or self.emailed_link(
+            payee_email,
+            "/invitations/accept",
+            f"Paste the invitation link emailed to {payee_email} for '{body['title']}'",
         )
         accept = {"token": self.token_from(link)}
         accept |= (
@@ -199,8 +274,8 @@ class Walk:
             self.ok(f"already connected: merchant {status.get('merchant_id')}")
             return
         url = self.call("POST", f"/orgs/{payee_org}/paypal/connect", "payee")["onboarding_url"]
-        self.open_in_browser(url, "the grantee (sandbox BUSINESS account that isn't the app owner)")
-        self.ask("Press Enter once PayPal has sent you back to the 'PayPal connected' page")
+        if not self.open_in_browser(url, "the grantee (sandbox BUSINESS account that isn't the app owner)", "payee"):
+            self.ask("Press Enter once PayPal has sent you back to the 'PayPal connected' page")
         deadline = time.monotonic() + self.timeout
         while not status.get("ready"):
             status = self.call("POST", f"/orgs/{payee_org}/paypal/refresh", "payee")
@@ -227,7 +302,7 @@ class Walk:
         mid = self.tranche(aid)["id"]
         self.step(f"Fund tranche 1 (escrow, {route} route)")
         started = self.call("POST", f"/milestones/{mid}/fund", "payer")
-        self.open_in_browser(started["approve_url"], "the funder (sandbox PERSONAL account)")
+        self.open_in_browser(started["approve_url"], "the funder (sandbox PERSONAL account)", "payer")
         self.tranche_reaches(aid, {"funded"}, "the hold to be placed (approve it in PayPal)")
 
         self.step("Evidence, checks, auto-release")
@@ -251,7 +326,7 @@ class Walk:
             "milestones"
         ][0]
         self.ok(f"tranche 1 is {m['status']}; pay link {m['pay_path']}")
-        self.open_in_browser(f"{self.base}/api{m['pay_path']}", "the funder (sandbox PERSONAL account)")
+        self.open_in_browser(f"{self.base}/api{m['pay_path']}", "the funder (sandbox PERSONAL account)", "payer")
         self.tranche_reaches(aid, {"settled"}, "the payment (pay it in PayPal)")
 
 
@@ -298,13 +373,25 @@ def run(
     print("   The audit log for each agreement is at /api/agreements/{id}/audit.")
 
 
+def load_env(path: str = ".env") -> None:
+    """Read settings from .env the way the app does; values already in the environment win."""
+    from dotenv import dotenv_values  # comes with pydantic-settings
+
+    for key, value in dotenv_values(path).items():
+        if value is not None:
+            os.environ.setdefault(key, value)
+
+
 def main() -> int:
+    load_env()
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--base-url", default=os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000"))
     p.add_argument("--flows", default="escrow,paynow,platform", help="comma-separated: escrow, paynow, platform")
     p.add_argument("--payer-email", default=os.environ.get("WALKTHROUGH_PAYER_EMAIL"), help="funder's sign-in email")
     p.add_argument("--payee-email", default=os.environ.get("WALKTHROUGH_PAYEE_EMAIL"), help="grantee's sign-in email")
     p.add_argument("--timeout", type=float, default=600, help="seconds to wait at each step")
+    p.add_argument("--manual-paypal", action="store_true", help="print PayPal links even when passwords are set")
+    p.add_argument("--headless", action="store_true", help="don't show the browser window for PayPal pages")
     args = p.parse_args()
     flows = [f.strip() for f in args.flows.split(",") if f.strip()]
     unknown = set(flows) - {"escrow", "paynow", "platform"}
@@ -316,11 +403,29 @@ def main() -> int:
     if not (payer_paypal and payee_paypal):
         p.error("set PAYPAL_TEST_PAYER_EMAIL and PAYPAL_TEST_PAYEE_EMAIL (sandbox account emails; see docs/SANDBOX.md)")
     run_id = uuid.uuid4().hex[:6]
-    payer_email = args.payer_email or f"funder+{run_id}@example.org"
-    payee_email = args.payee_email or f"grantee+{run_id}@example.org"
+    inbox_key, inbox_domain = os.environ.get("RESEND_INBOX_API_KEY"), os.environ.get("RESEND_INBOX_DOMAIN")
+    inbox = ResendInbox(inbox_key, inbox_domain) if inbox_key and inbox_domain else None
+    default_domain = inbox.domain if inbox else "example.org"
+    payer_email = args.payer_email or f"funder-{run_id}@{default_domain}"
+    payee_email = args.payee_email or f"grantee-{run_id}@{default_domain}"
 
     w = Walk(args.base_url, args.timeout)
-    run(w, flows, payer_email, payee_email, payer_paypal, payee_paypal, run_id)
+    w.inbox = inbox
+    passwords = (os.environ.get("PAYPAL_TEST_PAYER_PASSWORD"), os.environ.get("PAYPAL_TEST_PAYEE_PASSWORD"))
+    if all(passwords) and not args.manual_paypal:
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from paypal_browser import PayPalBrowser
+
+            w.browser = PayPalBrowser(headless=args.headless)
+        except ImportError:
+            print("   ..   PayPal passwords are set but Playwright isn't installed; run with `uv run --group sandbox`")
+        w.paypal_logins = {"payer": (payer_paypal, passwords[0]), "payee": (payee_paypal, passwords[1])}
+    try:
+        run(w, flows, payer_email, payee_email, payer_paypal, payee_paypal, run_id)
+    finally:
+        if w.browser:
+            w.browser.close()
     return 0
 
 

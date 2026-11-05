@@ -25,10 +25,11 @@ class MockWalk(walkthrough.Walk):
         assert "Paste" not in text, f"mock mode should return the link instead of asking: {text}"
         return ""
 
-    def open_in_browser(self, url: str, who: str) -> None:
+    def open_in_browser(self, url: str, who: str, account: str | None = None) -> bool:
         r = self.http.get(url)  # PayPal approval, onboarding or pay link, then back to the app
         assert r.status_code == 200, r.text
         self.visited.append(url)
+        return True
 
 
 @pytest.mark.parametrize("flows", [["platform", "escrow", "paynow"], ["paynow"]])
