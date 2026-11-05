@@ -131,10 +131,11 @@ envVarGroups:
         value: console
       - key: EMAIL_FROM
         value: "Milestone Ledger <notify@mail.milestone-ledger.com>"
-      # database keeps files in Postgres; s3 puts them in the R2 bucket set on the web and daily services (then run
-      # `python -m app.jobs encrypt-files` once from the web service's shell to move the existing ones).
+      # s3: files go to the R2 bucket set (S3_*) on the web and daily services; after the first deploy with it, run
+      # `python -m app.jobs encrypt-files` once from the web service's shell to move the files already in Postgres.
+      # database keeps them in Postgres (the app won't start with s3 and no bucket settings).
       - key: FILE_STORAGE
-        value: database
+        value: s3
 
 databases:
   - name: milestone-engine-db
