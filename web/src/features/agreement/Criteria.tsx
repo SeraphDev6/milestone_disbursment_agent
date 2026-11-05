@@ -131,6 +131,7 @@ function SignPanel({ stale, onStale, onSigned }: { stale: boolean; onStale: () =
             <p style={{ margin: 0 }}>You're signing for <strong>{org.orgName}</strong> as the {seat.role}: {a.milestones.length} tranches, {money(a.total_amount, a.currency)}.</p>
             {a.deliverable_release === "on_capture" && <p style={{ margin: "var(--space-2) 0 0" }}>The payer sees full evidence <strong>only after each tranche is paid</strong>, so payment follows the verdict.</p>}
             {mayAuto.ok && <p style={{ margin: "var(--space-2) 0 0" }}>Auto-release: <strong>{autoRelease ? `on, at ${percent(a.auto_release_threshold)}` : "off"}</strong></p>}
+            {mayAuto.ok && autoRelease && a.deliverable_release === "on_capture" && <p style={{ margin: "var(--space-2) 0 0" }}>Because you pay before seeing the work, a second, skeptical check must agree before anything the model judged releases on its own; if it doesn't, the tranche comes to a person.</p>}
           </>
         }
         confirmLabel="Sign"

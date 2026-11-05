@@ -1,8 +1,8 @@
 import { useState } from "react";
-import type { Criterion, EvidenceCreate, EvidenceRead, EvidenceType, VerdictRead } from "@/api/types";
+import type { Criterion, EvidenceCreate, EvidenceRead, EvidenceType, EvidenceVisibility, VerdictRead } from "@/api/types";
 import { download } from "@/api/client";
 import { errorMessage } from "@/api/errors";
-import { date, dateTime, EVIDENCE_LABEL } from "@/domain/format";
+import { date, dateTime, EVIDENCE_LABEL, shortHash, VISIBILITY_LABEL, VISIBILITY_ORDER } from "@/domain/format";
 import {
   Button,
   Callout,
@@ -11,6 +11,7 @@ import {
   FileDropZone,
   Glyph,
   layout,
+  RadioGroup,
   Select,
   Sheet,
   Stamp,
@@ -21,13 +22,31 @@ import {
   type Problem,
 } from "@/design/components";
 import { Link } from "react-router";
+import { HandoverButton, HandoverStatus, isCommitPinned, type HandoverRecord } from "./Handover";
 import { Results } from "./Verdict";
 import s from "./Tranche.module.css";
 
 const SOURCE: Record<string, string> = { api: "Submitted", upload: "Uploaded", github: "GitHub merge", mcp: "Agent (MCP)", precheck: "Pre-check" };
 
+async function fetchOriginal(e: EvidenceRead, orgId: string) {
+  try {
+    const { matches } = await download(`/evidence/${e.id}/file`, e.title, orgId);
+    if (matches === true) toast("Matches what was verified", { body: `${e.title} hashes to the fingerprint the verifier read.`, tone: "success" });
+    else if (matches === false) toast("This file doesn't match what was verified", { body: "Don't rely on it; contact the payee or support.", tone: "error" });
+  } catch (err) {
+    toast("Download failed", { body: errorMessage(err), tone: "error" });
+  }
+}
+
 /** Evidence on file, numbered so verdict citations ([e1]) can point at it. */
-export function EvidenceList({ evidence, orgId }: { evidence: EvidenceRead[]; orgId: string }) {
+export function EvidenceList({
+  evidence, orgId, handovers = {}, checkHandover,
+}: {
+  evidence: EvidenceRead[];
+  orgId: string;
+  handovers?: Record<string, HandoverRecord>;
+  checkHandover?: Parameters<typeof HandoverButton>[0]["check"];
+}) {
   if (!evidence.length) return <p style={{ color: "var(--text-secondary)" }}>No evidence on file yet.</p>;
   return (
     <ol className={s.evidence} aria-label="Evidence on file">
@@ -41,7 +60,16 @@ export function EvidenceList({ evidence, orgId }: { evidence: EvidenceRead[]; or
               <span>{SOURCE[e.source] ?? e.source}</span>
               <span>Received {dateTime(e.received_at)}</span>
               {e.dated && <span>Dated {date(e.dated)}</span>}
+              <span title={e.file_sha256 ? `sha256:${e.file_sha256}` : e.pinned_ref}>
+                Fingerprint <code>{shortHash(e.file_sha256 ? `sha256:${e.file_sha256}` : e.pinned_ref, 8, 4)}</code>
+              </span>
             </p>
+            {e.withheld && (
+              <p className={s.evMeta}>
+                <Stamp flat spec={{ label: "Opens once paid", tone: "neutral", glyph: "ring", meaning: "The payee's work opens to you when this tranche is captured; until then you see the verdict and this fingerprint." }} />
+                <span>You see: {VISIBILITY_LABEL[e.payer_visibility].label.toLowerCase()}</span>
+              </p>
+            )}
             {Object.keys(e.check_results).length > 0 && (
               <div className={s.checks} aria-label="Checks run at intake">
                 {Object.entries(e.check_results).map(([k, ok]) => (
@@ -49,13 +77,15 @@ export function EvidenceList({ evidence, orgId }: { evidence: EvidenceRead[]; or
                 ))}
               </div>
             )}
+            {isCommitPinned(e) && <HandoverStatus record={handovers[e.id]} />}
             {e.excerpt && <pre className={s.excerpt} aria-label={`First lines of ${e.title}`}>{e.excerpt}</pre>}
             <div className={layout.row}>
-              {e.has_file && (
-                <Button size="sm" icon="download" onPress={() => download(`/evidence/${e.id}/file`, e.title, orgId).catch((err) => toast("Download failed", { body: errorMessage(err), tone: "error" }))}>
+              {e.has_file && !e.withheld && (
+                <Button size="sm" icon="download" onPress={() => fetchOriginal(e, orgId)}>
                   Download original<span className="sr-only">: {e.title}</span>
                 </Button>
               )}
+              {checkHandover && isCommitPinned(e) && <HandoverButton evidence={e} check={checkHandover} />}
               {e.artifact_uris.map((u) => (
                 <a key={u} href={u} target="_blank" rel="noreferrer noopener">{new URL(u, location.origin).host}<span className="sr-only"> (opens in a new tab)</span></a>
               ))}
@@ -83,16 +113,18 @@ const guessType = (name: string): EvidenceType => (/\.(csv|xlsx)$/i.test(name) ?
  * after upload.
  */
 export function AddEvidence({
-  criteria, mock, canSubmit, submitReason, onSubmitted, actions,
+  criteria, mock, canSubmit, submitReason, onSubmitted, actions, minVisibility,
 }: {
   criteria: Criterion[];
+  /** Set when the agreement withholds work until capture: the least the payer may see of each item. */
+  minVisibility?: EvidenceVisibility;
   mock: boolean;
   canSubmit: boolean;
   submitReason?: string;
   onSubmitted: () => void;
   actions: {
     submit: { mutateAsync: (b: EvidenceCreate) => Promise<unknown>; isPending: boolean };
-    upload: { mutateAsync: (b: { files: File[]; note?: string; dated?: string }) => Promise<unknown>; isPending: boolean };
+    upload: { mutateAsync: (b: { files: File[]; note?: string; dated?: string; payer_visibility?: EvidenceVisibility }) => Promise<unknown>; isPending: boolean };
     precheck: { mutateAsync: (e: EvidenceCreate[]) => Promise<VerdictRead>; isPending: boolean; data?: VerdictRead; reset: () => void };
   };
 }) {
@@ -105,6 +137,8 @@ export function AddEvidence({
   const [draft, setDraft] = useState<EvidenceCreate>({ evidence_type: "document", title: "", content: "" });
   const [precheck, setPrecheck] = useState<{ verdict: VerdictRead; skipped: string[] } | null>(null);
   const [busy, setBusy] = useState<"precheck" | "submit" | null>(null);
+  const [visibility, setVisibility] = useState<EvidenceVisibility | undefined>(minVisibility);
+  const shown = minVisibility ? visibility : undefined;
 
   const files = basket.filter((b): b is Extract<Entry, { kind: "file" }> => b.kind === "file");
   const total = files.reduce((n, f) => n + f.file.size, 0);
@@ -174,10 +208,10 @@ export function AddEvidence({
     setBusy("submit");
     try {
       const written = basket.filter((b) => b.kind === "written");
-      for (const w of written) await actions.submit.mutateAsync({ ...w.data, dated: w.data.dated ?? dated ?? undefined });
+      for (const w of written) await actions.submit.mutateAsync({ ...w.data, dated: w.data.dated ?? dated ?? undefined, payer_visibility: shown });
       if (files.length || note.trim()) {
-        if (files.length) await actions.upload.mutateAsync({ files: files.map((f) => f.file), note: note.trim() || undefined, dated: dated ?? undefined });
-        else await actions.submit.mutateAsync({ evidence_type: "document", title: "Payee note", content: note.trim() });
+        if (files.length) await actions.upload.mutateAsync({ files: files.map((f) => f.file), note: note.trim() || undefined, dated: dated ?? undefined, payer_visibility: shown });
+        else await actions.submit.mutateAsync({ evidence_type: "document", title: "Payee note", content: note.trim(), payer_visibility: shown });
       }
       toast("Evidence submitted", { body: "Checks run first, then the verifier. This page updates on its own." });
       setBasket([]);
@@ -251,6 +285,16 @@ export function AddEvidence({
           <TextArea label="Note to the reviewer" optional value={note} onChange={setNote} rows={2} maxLength={2000} />
           <DateField label="Evidence date" optional description="If the files don't carry their own date (used by date checks)." value={dated} onChange={setDated} />
         </div>
+
+        {minVisibility && (
+          <RadioGroup
+            label="What the payer sees before paying"
+            description="This agreement keeps your work from the payer until the tranche is paid. Choose how much of the verdict they see first; the agreement sets the minimum."
+            value={visibility ?? minVisibility}
+            onChange={(v) => setVisibility(v as EvidenceVisibility)}
+            options={VISIBILITY_ORDER.slice(VISIBILITY_ORDER.indexOf(minVisibility)).map((id) => ({ id, ...VISIBILITY_LABEL[id] }))}
+          />
+        )}
 
         <div className={layout.row}>
           <Button icon="search" onPress={runPrecheck} isPending={busy === "precheck"} isDisabled={!basket.length && !note.trim()}>Pre-check without submitting</Button>

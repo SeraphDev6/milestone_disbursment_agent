@@ -733,10 +733,33 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Download the original uploaded file */
+        /**
+         * Download the original uploaded file
+         * @description The response carries X-Content-SHA256 (the file's hash, checked against the hash recorded at upload, which is what the verifier read) and X-Pinned-Ref. On a deliverable_release=on_capture agreement the payer side can download only once the tranche is captured; each such download is recorded in the audit log.
+         */
         get: operations["download_file_evidence__evidence_id__file_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evidence/{evidence_id}/handover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check that code handed over outside the engine is the commit that was verified
+         * @description For code evidence pinned to a commit. Give the delivered commit SHA, or the repo and ref it was handed over into (looked up on GitHub). It matches when it is the same commit, or a commit with exactly the same file tree (e.g. squashed into the client's repo). The result is recorded in the audit log and the compliance packet.
+         */
+        post: operations["check_handover_evidence__evidence_id__handover_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1046,6 +1069,11 @@ export interface components {
              */
             deliverable_release?: components["schemas"]["DeliverableRelease"];
             /**
+             * @description on_capture only: the least the payee may show the payer of each evidence item before capture. hash_only (pass/fail and the pinned hash), verdict_only (+ observed values), excerpt (+ the verifier's quotes and rationale) or preview. The payee picks a level at or above it per item. Signed with the criteria.
+             * @default hash_only
+             */
+            min_evidence_visibility?: components["schemas"]["EvidenceVisibility"];
+            /**
              * Counterparty Email
              * @description Email of the person invited to accept for the payee organization.
              */
@@ -1122,6 +1150,11 @@ export interface components {
              * @default on_submit
              */
             deliverable_release?: components["schemas"]["DeliverableRelease"];
+            /**
+             * @description on_capture only: the least the payee may show the payer of each evidence item before capture. hash_only (pass/fail and the pinned hash), verdict_only (+ observed values), excerpt (+ the verifier's quotes and rationale) or preview. The payee picks a level at or above it per item. Signed with the criteria.
+             * @default hash_only
+             */
+            min_evidence_visibility?: components["schemas"]["EvidenceVisibility"];
             /** Id */
             id: string;
             status: components["schemas"]["AgreementStatus"];
@@ -1310,6 +1343,8 @@ export interface components {
              * @description The evidence's own date, if the files don't carry one.
              */
             dated?: string | null;
+            /** @description on_capture agreements: what the payer sees of these files before capture. */
+            payer_visibility?: components["schemas"]["EvidenceVisibility"] | null;
         };
         /**
          * Comparator
@@ -1599,6 +1634,8 @@ export interface components {
              * @description Source-native id (file id, URL). Defaults to a content hash.
              */
             external_ref?: string | null;
+            /** @description deliverable_release=on_capture: what the payer sees of this item before capture. Defaults to the agreement's min_evidence_visibility and can't be below it. Ignored for on_submit agreements. */
+            payer_visibility?: components["schemas"]["EvidenceVisibility"] | null;
         };
         /** EvidenceRead */
         EvidenceRead: {
@@ -1611,16 +1648,19 @@ export interface components {
             title: string;
             /**
              * Excerpt
-             * @description First 500 characters of the text the checks and verifier read.
+             * @description First 500 characters of the text the checks and verifier read. Null while withheld.
              */
-            excerpt: string;
+            excerpt: string | null;
             /** Dated */
             dated: string | null;
             /** Check Results */
             check_results: {
                 [key: string]: boolean;
             };
-            /** Artifact Uris */
+            /**
+             * Artifact Uris
+             * @description Links to the originals. Empty while withheld.
+             */
             artifact_uris: string[];
             /** Has File */
             has_file: boolean;
@@ -1629,12 +1669,37 @@ export interface components {
              * Format: date-time
              */
             received_at: string;
+            /**
+             * Pinned Ref
+             * @description The commitment: content hash ('sha256:...') or commit SHA of exactly what was verified.
+             */
+            pinned_ref: string;
+            /**
+             * File Sha256
+             * @description SHA-256 of the original uploaded file; a download must hash to this.
+             */
+            file_sha256?: string | null;
+            /** @description What the payer sees of this item before capture (deliverable_release=on_capture). */
+            payer_visibility: components["schemas"]["EvidenceVisibility"];
+            /**
+             * Withheld
+             * @description True when this caller is on the payer side and the tranche isn't captured yet: content, links and the file are held back until capture.
+             * @default false
+             */
+            withheld?: boolean;
         };
         /**
          * EvidenceType
          * @enum {string}
          */
         EvidenceType: "document" | "spreadsheet" | "photo" | "link" | "code_change" | "ci_run" | "dataset" | "attestation";
+        /**
+         * EvidenceVisibility
+         * @description What the payer sees of one evidence item before capture, when deliverable_release is on_capture.
+         *     Ordered from least to most disclosed; the pinned hash is shown at every level.
+         * @enum {string}
+         */
+        EvidenceVisibility: "hash_only" | "verdict_only" | "excerpt" | "preview";
         /** ExtractionProblem */
         ExtractionProblem: {
             /** Path */
@@ -1759,6 +1824,49 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HandoverCheck */
+        HandoverCheck: {
+            /**
+             * Delivered Sha
+             * @description Commit SHA the work was delivered as. Give this, or repo and ref.
+             */
+            delivered_sha?: string | null;
+            /**
+             * Repo
+             * @description Repo it was handed over into, as owner/name.
+             */
+            repo?: string | null;
+            /**
+             * Ref
+             * @description Branch, tag or SHA in that repo.
+             */
+            ref?: string | null;
+        };
+        /** HandoverResult */
+        HandoverResult: {
+            /** Evidence Id */
+            evidence_id: string;
+            /**
+             * Pinned Ref
+             * @description The commit that was verified.
+             */
+            pinned_ref: string;
+            /**
+             * Delivered Sha
+             * @description The commit that was delivered.
+             */
+            delivered_sha: string;
+            /**
+             * Matches
+             * @description Same commit, or a commit with exactly the same file tree.
+             */
+            matches: boolean;
+            /**
+             * How
+             * @description 'same_commit', 'same_tree' or 'different'.
+             */
+            how: string;
         };
         /** InvitationAccepted */
         InvitationAccepted: {
@@ -2102,6 +2210,11 @@ export interface components {
              */
             release_due_at?: string | null;
             /**
+             * Revealed At
+             * @description deliverable_release=on_capture: when the payer's money was captured and the full evidence opened to the payer side. Unset while the evidence is withheld.
+             */
+            revealed_at?: string | null;
+            /**
              * Pay Path
              * @description Invoice mode: where the payer pays this tranche (relative to the API), while open.
              */
@@ -2346,6 +2459,12 @@ export interface components {
             verdict_met: boolean | null;
             /** Verdict Confidence */
             verdict_confidence: number | null;
+            /**
+             * Second Opinion Disagreed
+             * @description The skeptic pass disagreed with the verifier (or couldn't run), which is why it's in review.
+             * @default false
+             */
+            second_opinion_disagreed?: boolean;
         };
         /** ReviewOutcome */
         ReviewOutcome: {
@@ -2549,6 +2668,48 @@ export interface components {
          * @enum {string}
          */
         SettlementStatus: "submitted" | "succeeded" | "failed" | "unclaimed" | "expired";
+        /**
+         * SkepticPass
+         * @description A second verifier run told to look for reasons each criterion is NOT met. Auto-release needs both passes
+         *     to agree that every model-judged criterion is met.
+         */
+        SkepticPass: {
+            /**
+             * Results
+             * @description The skeptic's result per model-judged criterion.
+             */
+            results: components["schemas"]["CriterionResult"][];
+            /**
+             * Rationale
+             * @description The skeptic's explanation.
+             */
+            rationale: string;
+            /**
+             * Confidence
+             * @description The skeptic's self-reported confidence.
+             */
+            confidence: number;
+            /**
+             * Model
+             * @description Model id used.
+             */
+            model: string;
+            /**
+             * Prompt Version
+             * @description Skeptic prompt version, for replay.
+             */
+            prompt_version: string;
+            /**
+             * Disagrees On
+             * @description Criteria the first pass found met and the skeptic did not.
+             */
+            disagrees_on?: string[];
+            /**
+             * Error
+             * @description Set when the skeptic couldn't run; the tranche goes to review.
+             */
+            error?: string | null;
+        };
         /** SubscriptionCreate */
         SubscriptionCreate: {
             /**
@@ -2683,6 +2844,8 @@ export interface components {
              * @description auto_release, needs_review or precheck.
              */
             gate: string;
+            /** @description Second opinion, run before an auto-release on deliverable_release=on_capture agreements. */
+            skeptic?: components["schemas"]["SkepticPass"] | null;
             /** Id */
             id: string;
             /**
@@ -4462,6 +4625,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_handover_evidence__evidence_id__handover_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Which of your orgs you act for, if you belong to several. */
+                "X-Org-Id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                evidence_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HandoverCheck"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HandoverResult"];
                 };
             };
             /** @description Validation Error */

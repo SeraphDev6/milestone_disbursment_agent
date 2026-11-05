@@ -190,7 +190,7 @@ export function Actions({ a, m, seat, verdict, acts, rejected }: { a: AgreementR
         isOpen={dialog === "approve"}
         onOpenChange={(o) => !o && setDialog(null)}
         title="Approve this tranche?"
-        summary={<p style={{ margin: 0 }}>Mark <strong>{m.title}</strong> as verified{verdict && !verdict.met ? ", even though the verifier found gaps" : ""}.{a.auto_release_enabled && seat.role === "payer" ? ` With a live hold, ${amt} is then released.` : ""}</p>}
+        summary={<p style={{ margin: 0 }}>Mark <strong>{m.title}</strong> as verified{verdict && !verdict.met ? ", even though the verifier found gaps" : verdict?.skeptic?.disagrees_on?.length ? `, even though the second, skeptical check disagreed on ${verdict.skeptic.disagrees_on.join(", ")}` : ""}.{a.auto_release_enabled && seat.role === "payer" ? ` With a live hold, ${amt} is then released.` : ""}</p>}
         confirmLabel="Approve"
         isPending={acts.review.isPending}
         onConfirm={() => run("Approved", () => acts.review.mutateAsync({ decision: "approve", note: note.trim() || null }))}

@@ -16,21 +16,34 @@ from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from sqlmodel import Session, select
 
-from app.models import Agreement, AuditEvent, LedgerEntry, Milestone
+from app.models import Agreement, AuditEvent, LedgerEntry, Milestone, Role, SkepticPass
+from app.services import disclosure
 
 
 def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat() if dt else None
 
 
-def milestone_section(session: Session, m: Milestone) -> dict:
+def _skeptic(v) -> dict | None:
+    if v.skeptic is None:
+        return None
+    return SkepticPass.model_validate(v.skeptic).model_dump(mode="json")
+
+
+def milestone_section(session: Session, m: Milestone, role: Role | str | None = None) -> dict:
+    """`role`: the side asking. The payer side gets the filtered view while the tranche's evidence is withheld
+    (deliverable_release=on_capture, not yet captured); None or another side gets everything."""
     events = session.exec(select(AuditEvent).where(AuditEvent.milestone_id == m.id).order_by(AuditEvent.at)).all()
+    hidden = disclosure.restricted(role, m)
+    shown = {v.id: disclosure.verdict_read(v, m, role) for v in m.verdicts if not v.is_precheck}
     return {
         "id": m.id,
         "title": m.title,
         "amount": str(m.amount),
         "due_date": m.due_date.isoformat() if m.due_date else None,
         "status": m.status,
+        "revealed_at": _iso(m.revealed_at),
+        "evidence_withheld": hidden,
         "criteria": [c.model_dump(mode="json") for c in m.criteria],
         "evidence": [
             {
@@ -38,8 +51,10 @@ def milestone_section(session: Session, m: Milestone) -> dict:
                 "title": e.title,
                 "type": e.evidence_type,
                 "source": e.source,
-                "external_ref": e.external_ref,
+                "external_ref": None if hidden else e.external_ref,
                 "pinned_ref": e.pinned_ref,
+                "file_sha256": e.file.sha256 if e.file is not None else None,
+                "payer_visibility": e.payer_visibility,
                 "dated": e.dated.isoformat() if e.dated else None,
                 "facts_from_adapter": e.check_results,
                 "has_original_file": e.file_id is not None,
@@ -59,11 +74,18 @@ def milestone_section(session: Session, m: Milestone) -> dict:
                 "model_confidence": v.model_confidence,
                 "criteria_hash": v.criteria_hash,
                 "evidence_ids": v.evidence_ids,
-                "results": [r.model_dump(mode="json") for r in v.criteria_results],
-                "rationale": v.rationale,
+                "results": [r.model_dump(mode="json") for r in shown[v.id].criteria_results],
+                "rationale": shown[v.id].rationale,
+                "skeptic": _skeptic(shown[v.id]),
             }
             for v in m.verdicts
             if not v.is_precheck
+        ],
+        "delivery": [
+            {"at": _iso(e.at), "actor": e.actor, "action": e.action, **(e.detail or {})}
+            for e in events
+            if e.action
+            in ("deliverable_released", "deliverable_downloaded", "deliverable_mismatch", "handover_checked")
         ],
         "reviews": [
             {"at": _iso(e.at), "actor": e.actor, "action": e.action, "note": (e.detail or {}).get("note")}
@@ -109,7 +131,7 @@ def milestone_section(session: Session, m: Milestone) -> dict:
     }
 
 
-def build_packet(session: Session, a: Agreement) -> dict:
+def build_packet(session: Session, a: Agreement, role: Role | str | None = None) -> dict:
     ledger = session.exec(select(LedgerEntry).where(LedgerEntry.agreement_id == a.id).order_by(LedgerEntry.at)).all()
     released = sum((e.amount for e in ledger if e.kind in ("disbursed", "paid")), start=Decimal(0))
     return {
@@ -126,6 +148,7 @@ def build_packet(session: Session, a: Agreement) -> dict:
             "auto_release_threshold": a.auto_release_threshold,
             "dispute_window_days": a.dispute_window_days,
             "deliverable_release": a.deliverable_release,
+            "min_evidence_visibility": a.min_evidence_visibility,
             "released": str(released.quantize(Decimal("0.01"))),
         },
         "parties": [
@@ -138,7 +161,7 @@ def build_packet(session: Session, a: Agreement) -> dict:
             }
             for p in a.parties
         ],
-        "milestones": [milestone_section(session, m) for m in a.milestones],
+        "milestones": [milestone_section(session, m, role) for m in a.milestones],
         "ledger": [
             {
                 "at": _iso(e.at),
@@ -264,6 +287,42 @@ def render_pdf(packet: dict) -> bytes:
                     small,
                 ),
                 _p(f"Rationale: {v['rationale']}", small),
+            ]
+            if v.get("skeptic"):
+                sk = v["skeptic"]
+                verdict = (
+                    f"couldn't run ({sk['error']})"
+                    if sk.get("error")
+                    else f"disagreed on {', '.join(sk['disagrees_on'])}"
+                    if sk["disagrees_on"]
+                    else "agreed"
+                )
+                flow.append(
+                    _p(f"Skeptic pass ({sk['model']}, {sk['prompt_version']}): {verdict}. {sk['rationale']}", small)
+                )
+        if m["delivery"]:
+            flow += [
+                _p("Delivery", h3),
+                _table(
+                    [["When", "Who", "Event", "Result"]]
+                    + [
+                        [
+                            d["at"],
+                            d["actor"],
+                            d["action"],
+                            "matches what was verified"
+                            if d.get("matches")
+                            else (
+                                "DOES NOT MATCH"
+                                if d.get("matches") is False
+                                else f"{len(d.get('evidence') or [])} item(s) committed"
+                            ),
+                        ]
+                        for d in m["delivery"]
+                    ],
+                    [1.4 * inch, 1.6 * inch, 1.5 * inch, 2.0 * inch],
+                    small,
+                ),
             ]
         if m["reviews"]:
             flow += [

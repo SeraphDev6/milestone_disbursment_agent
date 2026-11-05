@@ -1,6 +1,6 @@
 import type { Criterion, CriterionResult, EvidenceRead, VerdictRead } from "@/api/types";
 import { dateTime, measureText, percent } from "@/domain/format";
-import { Glyph, ThresholdMeter, Facts } from "@/design/components";
+import { Callout, Glyph, ThresholdMeter, Facts } from "@/design/components";
 import s from "./Tranche.module.css";
 
 const GATE: Record<string, string> = {
@@ -63,10 +63,33 @@ export function Results({ criteria, results, evidence }: { criteria: Criterion[]
   );
 }
 
+function SecondOpinion({ v }: { v: VerdictRead }) {
+  const k = v.skeptic;
+  if (!k) return null;
+  const tone = k.error || k.disagrees_on?.length ? "warning" : "success";
+  const title = k.error
+    ? "The second opinion couldn't run, so a person decides"
+    : k.disagrees_on?.length
+      ? `A second, skeptical check disagreed on ${k.disagrees_on.join(", ")}`
+      : "A second, skeptical check agreed";
+  return (
+    <Callout tone={tone} title={title}>
+      {k.error ? <p>{k.error}</p> : <p>{k.rationale}</p>}
+      {k.results.filter((r) => !r.met && r.missing).map((r) => (
+        <p key={r.criterion_id}><code>{r.criterion_id}</code>: {r.missing}</p>
+      ))}
+      <p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+        Because the payer pays before seeing the work, auto-release needs both checks to agree. <code>{k.model}</code> · <code>{k.prompt_version}</code>
+      </p>
+    </Callout>
+  );
+}
+
 export function VerdictSummary({ v, threshold }: { v: VerdictRead; threshold: number }) {
   return (
     <div style={{ display: "grid", gap: "var(--space-4)" }}>
       <p className={s.rationale}>{v.rationale}</p>
+      <SecondOpinion v={v} />
       <ThresholdMeter label="Verifier confidence" value={v.model_confidence} threshold={threshold} />
       <Facts
         items={[

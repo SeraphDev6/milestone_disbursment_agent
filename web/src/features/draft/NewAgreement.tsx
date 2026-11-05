@@ -6,7 +6,7 @@ import { errorMessage, isApiError } from "@/api/errors";
 import { paths, useOrgCtx } from "@/app/context";
 import { useTitle } from "@/app/RouteAnnouncer";
 import { atLeast } from "@/domain/permissions";
-import { MODE_LABEL, money, percent, RELEASE_LABEL } from "@/domain/format";
+import { MODE_LABEL, money, percent, RELEASE_LABEL, VISIBILITY_LABEL, VISIBILITY_ORDER } from "@/domain/format";
 import { fieldId } from "@/domain/lint-paths";
 import {
   Button,
@@ -177,7 +177,7 @@ export function NewAgreement() {
                 <NumberField label="Auto-release threshold" percent minValue={0.5} maxValue={1} step={0.01} value={draft.auto_release_threshold} onChange={(v) => set({ auto_release_threshold: v ?? 0.85 })} description="If you turn on auto-release when signing, verdicts at or above this confidence settle without a person. Anything below waits for review." />
                 <NumberField
                   label="Dispute window"
-                  minValue={0}
+                  minValue={draft.deliverable_release === "on_capture" && draft.settlement_mode === "escrow_release" ? 1 : 0}
                   maxValue={14}
                   step={1}
                   value={draft.dispute_window_days ?? 0}
@@ -188,12 +188,32 @@ export function NewAgreement() {
                 <RadioGroup
                   label="When you see the work"
                   value={draft.deliverable_release}
-                  onChange={(v) => set({ deliverable_release: v })}
+                  onChange={(v) =>
+                    set({
+                      deliverable_release: v,
+                      // You see the work at capture, so you need time to check it before the payee is paid.
+                      ...(v === "on_capture" && draft.settlement_mode === "escrow_release" && !draft.dispute_window_days ? { dispute_window_days: 3 } : {}),
+                    })
+                  }
                   options={[
                     { id: "on_submit", label: RELEASE_LABEL.on_submit, description: "You can open the payee's evidence as it arrives. Usual for grants." },
                     { id: "on_capture", label: RELEASE_LABEL.on_capture, description: "Full evidence opens once the tranche is paid, so you pay on the verdict. Usual for SOWs, where the work is the product." },
                   ]}
                 />
+                {draft.deliverable_release === "on_capture" && (
+                  <Select
+                    label="Before paying, you see at least"
+                    description="The payee picks per item and can show more. A dispute window of at least a day lets you check the work after it opens."
+                    value={draft.min_evidence_visibility}
+                    options={VISIBILITY_ORDER.map((id) => ({ id, label: VISIBILITY_LABEL[id].label }))}
+                    onChange={(v) => set({ min_evidence_visibility: v })}
+                  />
+                )}
+                {draft.deliverable_release === "on_capture" && (
+                  <p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", margin: 0 }}>
+                    With auto-release on, anything the model judges gets a second, skeptical check that looks for reasons it isn't met. Both must agree before money moves without a person.
+                  </p>
+                )}
                 {draft.deliverable_release === "on_capture" && draft.reviewer_emails.filter(Boolean).length === 0 && (
                   <Callout tone="warning" title="Consider a reviewer">
                     <p>If you also turn on auto-release when signing, you'd pay on the model's verdict alone. A reviewer can see the evidence for you.</p>
@@ -256,7 +276,7 @@ export function NewAgreement() {
                 ["Tranches", `${draft.milestones.length} with ${draft.milestones.reduce((n, m) => n + m.criteria.length, 0)} criteria`],
                 ["Auto-release", `Off until you sign; threshold ${percent(draft.auto_release_threshold)}`],
                 ["Dispute window", draft.settlement_mode === "escrow_release" && draft.dispute_window_days ? `${draft.dispute_window_days} day${draft.dispute_window_days === 1 ? "" : "s"} after each release` : "None: released payments go straight to the payee"],
-                ["Seeing the work", draft.deliverable_release === "on_capture" ? "Once each tranche is paid: you pay on the verdict" : "As the payee submits it"],
+                ["Seeing the work", draft.deliverable_release === "on_capture" ? `Once each tranche is paid: you pay on the verdict (before that: ${VISIBILITY_LABEL[draft.min_evidence_visibility].label.toLowerCase()})` : "As the payee submits it"],
                 ["Payee invite", draft.counterparty_email],
                 ["Reviewers", draft.reviewer_emails.filter(Boolean).join(", ") || "None"],
               ]}

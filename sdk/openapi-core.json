@@ -49,6 +49,11 @@
             "title": "Milestones",
             "type": "array"
           },
+          "min_evidence_visibility": {
+            "$ref": "#/components/schemas/EvidenceVisibility",
+            "default": "hash_only",
+            "description": "on_capture only: the least the payee may show the payer of each evidence item before capture. hash_only (pass/fail and the pinned hash), verdict_only (+ observed values), excerpt (+ the verifier's quotes and rationale) or preview. The payee picks a level at or above it per item. Signed with the criteria."
+          },
           "require_reviewer_approval": {
             "default": false,
             "description": "When on, only a reviewer's approval releases a tranche in review.",
@@ -200,6 +205,11 @@
             },
             "title": "Milestones",
             "type": "array"
+          },
+          "min_evidence_visibility": {
+            "$ref": "#/components/schemas/EvidenceVisibility",
+            "default": "hash_only",
+            "description": "on_capture only: the least the payee may show the payer of each evidence item before capture. hash_only (pass/fail and the pinned hash), verdict_only (+ observed values), excerpt (+ the verifier's quotes and rationale) or preview. The payee picks a level at or above it per item. Signed with the criteria."
           },
           "parties": {
             "items": {
@@ -356,6 +366,17 @@
             ],
             "description": "Optional context, shown as a payee note.",
             "title": "Note"
+          },
+          "payer_visibility": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceVisibility"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "on_capture agreements: what the payer sees of these files before capture."
           }
         },
         "required": [
@@ -872,6 +893,17 @@
             "description": "Source-native id (file id, URL). Defaults to a content hash.",
             "title": "External Ref"
           },
+          "payer_visibility": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceVisibility"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "deliverable_release=on_capture: what the payer sees of this item before capture. Defaults to the agreement's min_evidence_visibility and can't be below it. Ignored for on_submit agreements."
+          },
           "title": {
             "description": "File name or short label, e.g. 'Q2 sign-in sheets.csv'.",
             "maxLength": 200,
@@ -900,6 +932,17 @@
           "attestation"
         ],
         "title": "EvidenceType",
+        "type": "string"
+      },
+      "EvidenceVisibility": {
+        "description": "What the payer sees of one evidence item before capture, when deliverable_release is on_capture.\nOrdered from least to most disclosed; the pinned hash is shown at every level.",
+        "enum": [
+          "hash_only",
+          "verdict_only",
+          "excerpt",
+          "preview"
+        ],
+        "title": "EvidenceVisibility",
         "type": "string"
       },
       "ExtractionProblem": {
@@ -1711,6 +1754,19 @@
             "description": "When the dispute window closes and the payee is paid, unless contested.",
             "title": "Release Due At"
           },
+          "revealed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "deliverable_release=on_capture: when the payer's money was captured and the full evidence opened to the payer side. Unset while the evidence is withheld.",
+            "title": "Revealed At"
+          },
           "status": {
             "$ref": "#/components/schemas/MilestoneStatus"
           },
@@ -2091,6 +2147,70 @@
         "title": "SettlementStatus",
         "type": "string"
       },
+      "SkepticPass": {
+        "description": "A second verifier run told to look for reasons each criterion is NOT met. Auto-release needs both passes\nto agree that every model-judged criterion is met.",
+        "properties": {
+          "confidence": {
+            "description": "The skeptic's self-reported confidence.",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "disagrees_on": {
+            "description": "Criteria the first pass found met and the skeptic did not.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Disagrees On",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when the skeptic couldn't run; the tranche goes to review.",
+            "title": "Error"
+          },
+          "model": {
+            "description": "Model id used.",
+            "title": "Model",
+            "type": "string"
+          },
+          "prompt_version": {
+            "description": "Skeptic prompt version, for replay.",
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "rationale": {
+            "description": "The skeptic's explanation.",
+            "title": "Rationale",
+            "type": "string"
+          },
+          "results": {
+            "description": "The skeptic's result per model-judged criterion.",
+            "items": {
+              "$ref": "#/components/schemas/CriterionResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "results",
+          "rationale",
+          "confidence",
+          "model",
+          "prompt_version"
+        ],
+        "title": "SkepticPass",
+        "type": "object"
+      },
       "SubscriptionCreate": {
         "properties": {
           "events": {
@@ -2297,6 +2417,17 @@
             "description": "One-paragraph explanation shown to the approver.",
             "title": "Rationale",
             "type": "string"
+          },
+          "skeptic": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkepticPass"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Second opinion, run before an auto-release on deliverable_release=on_capture agreements."
           }
         },
         "required": [

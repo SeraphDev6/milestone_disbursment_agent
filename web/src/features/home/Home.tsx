@@ -66,6 +66,7 @@ function WaitingOnYou({ queue, payeeWork, loading, orgId }: { queue?: ReviewItem
                 <span className={s.muted}>
                   {i.agreement_title} · {money(i.amount)} · as {ROLE_LABEL[i.side].toLowerCase()}
                   {i.verdict_confidence !== null && i.verdict_confidence !== undefined && ` · verifier ${i.verdict_met ? "found it met" : "found gaps"} (${percent(i.verdict_confidence)})`}
+                  {i.second_opinion_disagreed && " · second opinion disagreed"}
                 </span>
               </div>
               <span className={s.queueAction}>{i.status === "disputed" ? "Re-review the dispute" : "Approve or reject"}</span>

@@ -23,16 +23,19 @@ from app.models import (
     AuditEvent,
     Criterion,
     CriterionResult,
+    DeliverableRelease,
     Evidence,
     EvidenceCreate,
+    EvidenceVisibility,
     Milestone,
     MilestoneStatus,
     Role,
     SettlementMode,
+    SkepticPass,
     Verdict,
     VerificationMethod,
 )
-from app.services import ServiceError, settlement
+from app.services import ServiceError, disclosure, settlement
 from app.services.notifications import notify_side, tranche_subject
 
 ACCEPTS_EVIDENCE = {
@@ -127,16 +130,86 @@ def judge(
     )
 
 
-def _gate(m: Milestone, v: Verdict) -> str:
+def _model_judged(m: Milestone) -> list[Criterion]:
+    return [c for c in m.criteria if c.verification is VerificationMethod.model]
+
+
+def _skeptic_required(m: Milestone) -> bool:
+    """With the work withheld until capture the payer pays on the verdict alone, so a model-judged auto-release
+    needs a second opinion."""
+    return m.agreement.deliverable_release == DeliverableRelease.on_capture and bool(_model_judged(m))
+
+
+def _first_pass_releases(m: Milestone, v: Verdict) -> bool:
     a = m.agreement
-    if (
+    return (
         a.auto_release_enabled
         and v.met
         and not any(c.verification is VerificationMethod.human for c in m.criteria)
         and v.model_confidence >= a.auto_release_threshold
-    ):
-        return "auto_release"
-    return "needs_review"
+    )
+
+
+def _gate(m: Milestone, v: Verdict) -> str:
+    if not _first_pass_releases(m, v):
+        return "needs_review"
+    if _skeptic_required(m):
+        s = SkepticPass.model_validate(v.skeptic) if v.skeptic is not None else None
+        if s is None or s.error or s.disagrees_on:
+            return "needs_review"
+    return "auto_release"
+
+
+def skeptic_pass(
+    ai: AIRuntime,
+    criteria: list[Criterion],
+    first: Verdict,
+    evidence: list[Evidence],
+    attachments: dict[str, tuple[bytes, str]] | None = None,
+) -> SkepticPass:
+    """Second verifier run on the model-judged criteria, told to look for reasons they are not met. A criterion
+    the skeptic finds met must be cited, as in the first pass. A failed run is recorded and fails closed."""
+    from app.ai.agents import SKEPTIC_PROMPT_VERSION
+
+    judged = [c for c in criteria if c.verification is VerificationMethod.model]
+    try:
+        out, aliases = ai.skeptic(judged, evidence, attachments)
+    except AIError as e:
+        return SkepticPass(
+            results=[],
+            rationale="",
+            confidence=0,
+            model=ai.model_name,
+            prompt_version=SKEPTIC_PROMPT_VERSION,
+            disagrees_on=[c.id or "" for c in judged],
+            error=str(e)[:300],
+        )
+    by_id = {r.criterion_id: r for r in out.results}
+    first_met = {r.criterion_id for r in first.criteria_results if r.met}
+    results = []
+    for c in judged:
+        r = by_id.get(c.id or "")
+        cited = [aliases[a] for a in (r.evidence_ids if r else []) if a in aliases]
+        met = bool(r and r.met and cited)
+        results.append(
+            CriterionResult(
+                criterion_id=c.id or "",
+                met=met,
+                decided_by="model:skeptic",
+                observed=r.observed if r else None,
+                evidence_ids=cited,
+                quote=(r.quote or None) and r.quote[:300] if r else None,
+                missing=None if met else (r.missing if r and r.missing else "The skeptic didn't find this shown."),
+            )
+        )
+    return SkepticPass(
+        results=results,
+        rationale=out.rationale,
+        confidence=out.confidence,
+        model=ai.model_name,
+        prompt_version=SKEPTIC_PROMPT_VERSION,
+        disagrees_on=[r.criterion_id for r in results if not r.met and r.criterion_id in first_met],
+    )
 
 
 def _settle_if_possible(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: datetime) -> None:
@@ -180,6 +253,14 @@ def submit_evidence(
         raise VerificationError(f"agreement is {m.agreement.status}; evidence is accepted once it is active")
     if m.status not in ACCEPTS_EVIDENCE:
         raise VerificationError(f"tranche is {m.status}; it no longer accepts evidence")
+    minimum = EvidenceVisibility(m.agreement.min_evidence_visibility)
+    visibility = EvidenceVisibility(ev.payer_visibility or minimum)
+    if visibility.rank < minimum.rank:
+        raise VerificationError(
+            f"this agreement shows the payer at least '{minimum}' of each evidence item before capture; "
+            f"'{visibility}' is below that",
+            422,
+        )
     pinned = pinned_ref or "sha256:" + hashlib.sha256(ev.content.encode()).hexdigest()
     external = ev.external_ref or pinned
     existing = next(
@@ -197,6 +278,7 @@ def submit_evidence(
             "pinned_ref": pinned,
             "check_results": check_results or {},
             "file_id": file_id,
+            "payer_visibility": visibility,
         },
     )
     m.evidence.append(row)
@@ -248,6 +330,8 @@ def run_verification(
         try:
             rows = [e for e in m.evidence if e.id in snapshot]
             verdict = judge(ai, m.criteria, rows, attachments_of(rows))
+            if _skeptic_required(m) and _first_pass_releases(m, verdict):  # else a person decides anyway
+                verdict.skeptic = skeptic_pass(ai, m.criteria, verdict, rows, attachments_of(rows))
         except AIError as e:
             settlement.transition(
                 session, m, MilestoneStatus.evidence_received, actor, "verification_failed", error=str(e)[:500]
@@ -289,6 +373,7 @@ def run_verification(
                 verdict_id=verdict.id,
                 met=verdict.met,
                 confidence=verdict.model_confidence,
+                **_skeptic_detail(verdict),
             )
             session.commit()
             _notify_review_needed(session, m, verdict)
@@ -296,19 +381,35 @@ def run_verification(
     return None
 
 
+def _skeptic_detail(v: Verdict) -> dict:
+    if v.skeptic is None:
+        return {}
+    s = SkepticPass.model_validate(v.skeptic)
+    return {"skeptic_disagrees_on": s.disagrees_on, "skeptic_error": s.error} if s.disagrees_on or s.error else {}
+
+
 def _notify_review_needed(session: Session, m: Milestone, verdict: Verdict) -> None:
-    unmet = [r for r in verdict.criteria_results if not r.met]
-    summary = (
-        f"The verifier found all {len(verdict.criteria_results)} criteria met with confidence "
-        f"{verdict.model_confidence:.0%}; a person must approve the release."
-        if verdict.met
-        else f"{len(unmet)} of {len(verdict.criteria_results)} criteria were not met: "
-        + "; ".join(f"{r.criterion_id}: {r.missing or 'not met'}" for r in unmet[:5])
-    )
     subject = tranche_subject(m, "Review needed")
-    body = f"Evidence for '{m.title}' was verified. {summary}\n\nRationale: {verdict.rationale}"
     sides = [Role.reviewer] if m.agreement.require_reviewer_approval else [Role.payer, Role.reviewer]
     for role in sides:
+        # The payer side reads what disclosure allows while the work is withheld (deliverable_release=on_capture).
+        shown = disclosure.verdict_read(verdict, m, role)
+        unmet = [r for r in shown.criteria_results if not r.met]
+        summary = (
+            f"The verifier found all {len(shown.criteria_results)} criteria met with confidence "
+            f"{verdict.model_confidence:.0%}; a person must approve the release."
+            if verdict.met
+            else f"{len(unmet)} of {len(shown.criteria_results)} criteria were not met: "
+            + "; ".join(f"{r.criterion_id}: {r.missing or 'not met'}" for r in unmet[:5])
+        )
+        body = f"Evidence for '{m.title}' was verified. {summary}\n\nRationale: {shown.rationale}"
+        if shown.skeptic and shown.skeptic.disagrees_on:
+            body += (
+                f"\n\nA second, skeptical check disagreed on {', '.join(shown.skeptic.disagrees_on)}: "
+                f"{shown.skeptic.rationale}"
+            )
+        elif shown.skeptic and shown.skeptic.error:
+            body += f"\n\nThe second, skeptical check couldn't run ({shown.skeptic.error}), so a person decides."
         notify_side(session, m, role, subject, body, tone="review")
 
 
@@ -374,6 +475,7 @@ def precheck(session: Session, ai: AIRuntime, m: Milestone, items: list[Evidence
                 "source": "precheck",
                 "external_ref": f"draft-{i}",
                 "pinned_ref": "draft",
+                "payer_visibility": EvidenceVisibility.hash_only,
                 "received_at": utcnow(),
             },
         )

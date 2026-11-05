@@ -81,6 +81,13 @@ export const SAMPLES = {
     content: "Riverside Reads final report, dated 2027-09-12. Table 2 lists all 87 enrolled students with pre and post scores.",
     dated: "2027-09-12",
   },
+  unfinished: {
+    title: "Final outcomes report (draft).txt",
+    evidence_type: "document" as const,
+    content:
+      "Riverside Reads final report, dated 2027-09-12. Table 2 lists all 87 enrolled students with pre and post scores. Post scores for section B: TODO.",
+    dated: "2027-09-12",
+  },
   thin: {
     title: "Workshop photos note.txt",
     evidence_type: "document" as const,
@@ -140,7 +147,9 @@ async function signIn(email: string) {
   return call(api.POST("/auth/magic-link/verify", { body: { token } }));
 }
 
-export async function seedDemo(opts: { signed: boolean; disputeWindowDays?: number }, progress: DemoProgress) {
+/** `withheld`: SOW-style. The funder sees the work once paid, auto-release is on, and model-judged criteria need
+ * the skeptic's second opinion; needs a dispute window, so it's at least 3 days. */
+export async function seedDemo(opts: { signed: boolean; disputeWindowDays?: number; withheld?: boolean }, progress: DemoProgress) {
   const code = Math.random().toString(36).slice(2, 6);
   const emails = {
     funder: `officer+${code}@harbor.example.org`,
@@ -156,7 +165,13 @@ export async function seedDemo(opts: { signed: boolean; disputeWindowDays?: numb
   const created = await call(
     api.POST("/orgs/{org_id}/agreements", {
       params: { path: { org_id: harbor.id } },
-      body: { ...DEMO_GRANT, dispute_window_days: opts.disputeWindowDays ?? 0, counterparty_email: emails.grantee, reviewer_emails: [emails.reviewer] },
+      body: {
+        ...DEMO_GRANT,
+        dispute_window_days: opts.withheld ? Math.max(3, opts.disputeWindowDays ?? 0) : (opts.disputeWindowDays ?? 0),
+        ...(opts.withheld ? { deliverable_release: "on_capture" as const, min_evidence_visibility: "verdict_only" as const } : {}),
+        counterparty_email: emails.grantee,
+        reviewer_emails: [emails.reviewer],
+      },
       ...auth(funder.token),
     }),
   );
@@ -189,7 +204,7 @@ export async function seedDemo(opts: { signed: boolean; disputeWindowDays?: numb
       call(api.POST("/agreements/{agreement_id}/confirm", { params: { path: { agreement_id: aid } }, body: { ...body, ...extra }, ...auth(token, orgId) }));
     await confirm(grantee.token, riverside.organization.id);
     await confirm(reviewer.token, sponsor.organization.id);
-    await confirm(funder.token, harbor.id, { auto_release_enabled: false });
+    await confirm(funder.token, harbor.id, { auto_release_enabled: !!opts.withheld });
   }
 
   // Keep all three people; the funder is active.

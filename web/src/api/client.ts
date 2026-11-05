@@ -53,7 +53,8 @@ export function asOrg(orgId: string | undefined): { headers: Record<string, stri
 }
 
 /** Authenticated download (files and PDFs aren't JSON): fetch with the bearer token, then save the blob. */
-export async function download(path: string, fallbackName: string, orgId?: string): Promise<void> {
+/** Downloads a file. Returns the server's X-Content-SHA256 (when sent) and whether the bytes received hash to it. */
+export async function download(path: string, fallbackName: string, orgId?: string): Promise<{ sha256: string | null; matches: boolean | null }> {
   const token = sessions.token();
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -74,7 +75,14 @@ export async function download(path: string, fallbackName: string, orgId?: strin
     throw new ApiError(res.status, detail);
   }
   const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? fallbackName;
-  const url = URL.createObjectURL(await res.blob());
+  const blob = await res.blob();
+  const sha256 = res.headers.get("X-Content-SHA256");
+  let matches: boolean | null = null;
+  if (sha256 && globalThis.crypto?.subtle) {
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()));
+    matches = Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("") === sha256;
+  }
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = name;
@@ -82,6 +90,7 @@ export async function download(path: string, fallbackName: string, orgId?: strin
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  return { sha256, matches };
 }
 
 /** Pull the token out of a magic-link or invitation link (mock mode returns these as dev_link). */

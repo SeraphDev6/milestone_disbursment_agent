@@ -222,7 +222,10 @@ def test_deliverable_release_defaults_to_on_submit_and_keeps_old_hashes(client, 
 def test_deliverable_release_is_part_of_the_signed_hash(client, draft):
     plain, _, ctx1 = create_draft(client, draft)
     on_capture, _, ctx2 = create_draft(
-        client, {**draft, "deliverable_release": "on_capture"}, payer_email="p2@harbor.org", payee_email="e2@river.org"
+        client,
+        {**draft, "deliverable_release": "on_capture", "dispute_window_days": 3},
+        payer_email="p2@harbor.org",
+        payee_email="e2@river.org",
     )
     a1, a2 = get(client, plain, ctx1["payer"]).json(), get(client, on_capture, ctx2["payer"]).json()
     assert a2["deliverable_release"] == "on_capture"
@@ -234,7 +237,7 @@ def test_deliverable_release_is_part_of_the_signed_hash(client, draft):
 
 
 def test_on_capture_with_auto_release_and_no_reviewer_warns(client, draft):
-    body = {**draft, "deliverable_release": "on_capture"}
+    body = {**draft, "deliverable_release": "on_capture", "dispute_window_days": 3}
     aid, _, ctx = create_draft(client, body)
     r = confirm(client, aid, ctx["payer"], auto_release_enabled=True)
     assert r.status_code == 200

@@ -49,6 +49,7 @@ class GitHubError(Exception):
 class GitHubAPI(Protocol):
     def check_runs(self, repo: str, sha: str) -> list[dict]: ...
     def pr_files(self, repo: str, number: int) -> list[dict]: ...
+    def commit(self, repo: str, ref: str) -> dict: ...
 
 
 class GitHubClient:
@@ -72,6 +73,12 @@ class GitHubClient:
 
     def pr_files(self, repo: str, number: int) -> list[dict]:
         return self._get(f"/repos/{repo}/pulls/{number}/files")  # type: ignore[return-value]
+
+    def commit(self, repo: str, ref: str) -> dict:
+        """The commit a ref points to: {'sha': ..., 'commit': {'tree': {'sha': ...}}, ...}."""
+        if not valid_repo(repo) or not re.fullmatch(r"[A-Za-z0-9._/-]{1,200}", ref) or ".." in ref:
+            raise GitHubError("invalid repo or ref")
+        return self._get(f"/repos/{repo}/commits/{ref}")  # type: ignore[return-value]
 
 
 @dataclass

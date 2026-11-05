@@ -7,6 +7,7 @@ import type {
   Comparator,
   CriterionDraft,
   DeliverableRelease,
+  EvidenceVisibility,
   EvidenceType,
   ExtractionResult,
   MilestoneDraft,
@@ -44,6 +45,7 @@ export type DraftForm = {
   require_reviewer_approval: boolean;
   dispute_window_days: number;
   deliverable_release: DeliverableRelease;
+  min_evidence_visibility: EvidenceVisibility;
   counterparty_email: string;
   reviewer_emails: string[];
   source_document_uri: string | null;
@@ -83,6 +85,7 @@ export function blankDraft(): DraftForm {
     require_reviewer_approval: false,
     dispute_window_days: 0,
     deliverable_release: "on_submit",
+    min_evidence_visibility: "hash_only",
     counterparty_email: "",
     reviewer_emails: [],
     source_document_uri: null,
@@ -161,6 +164,7 @@ export function agreementOut(d: DraftForm): AgreementCreate {
     require_reviewer_approval: d.require_reviewer_approval,
     dispute_window_days: d.dispute_window_days,
     deliverable_release: d.deliverable_release ?? "on_submit",
+    min_evidence_visibility: d.min_evidence_visibility ?? "hash_only",
     source_document_uri: d.source_document_uri,
     counterparty_email: d.counterparty_email.trim(),
     reviewer_emails: d.reviewer_emails.map((e) => e.trim()).filter(Boolean),

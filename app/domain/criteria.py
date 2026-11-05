@@ -19,11 +19,13 @@ from app.models import (
     Comparator,
     Criterion,
     DeliverableRelease,
+    EvidenceVisibility,
     LintIssue,
     LintLevel,
     LintReport,
     MilestoneBase,
     Role,
+    SettlementMode,
     VerificationMethod,
 )
 
@@ -268,6 +270,33 @@ def lint_agreement(agreement: AgreementBase, *, reviewer_invited: bool = False) 
     """Works on a request body (AgreementCreate) or a stored Agreement: both carry total_amount and milestones.
     `reviewer_invited`: a reviewer is invited but hasn't joined yet (stored agreements only)."""
     report = lint_tranches(agreement.total_amount, agreement.milestones)  # type: ignore[attr-defined]
+    on_capture = getattr(agreement, "deliverable_release", None) == DeliverableRelease.on_capture
+    if on_capture and getattr(agreement, "settlement_mode", None) == SettlementMode.escrow_release:
+        if getattr(agreement, "dispute_window_days", 0) < 1:
+            report.issues.insert(
+                0,
+                _issue(
+                    LintLevel.error,
+                    "reveal_without_window",
+                    "dispute_window_days",
+                    "The payer sees the work only once it's paid for, and with no dispute window the payee is "
+                    "paid at the same moment: the payer has no chance to check what they paid for.",
+                    "Set a dispute window of at least 1 day, or release deliverables on submit.",
+                ),
+            )
+            report.ok = False
+    elif on_capture and getattr(agreement, "settlement_mode", None) == SettlementMode.invoice_on_verify:
+        report.issues.append(
+            _issue(
+                LintLevel.warning,
+                "reveal_after_payment",
+                "deliverable_release",
+                "Invoice mode has no dispute window: the payer sees the work once the invoice is paid, and the "
+                "payment can't be contested in the engine after that.",
+                "Use escrow with a dispute window if the payer should be able to check the work before the payee "
+                "is paid.",
+            )
+        )
     if getattr(agreement, "deliverable_release", None) == DeliverableRelease.on_capture and getattr(
         agreement, "auto_release_enabled", False
     ):
@@ -352,10 +381,12 @@ def assign_criterion_ids(milestones: Sequence[MilestoneBase]) -> None:
 
 
 def criteria_hash(
-    milestones: Sequence[MilestoneBase], deliverable_release: DeliverableRelease = DeliverableRelease.on_submit
+    milestones: Sequence[MilestoneBase],
+    deliverable_release: DeliverableRelease = DeliverableRelease.on_submit,
+    min_evidence_visibility: EvidenceVisibility = EvidenceVisibility.hash_only,
 ) -> str:
     """Hash of everything a party signs off on: tranche order and MilestoneBase's fields (title, amount, due date,
-    criteria), plus deliverable_release when it isn't the default. Works on request bodies and stored rows alike,
+    criteria), plus deliverable_release and min_evidence_visibility when deliverable_release isn't the default. Works on request bodies and stored rows alike,
     since both are MilestoneBase."""
     payload: list = []
     for m in milestones:
@@ -364,6 +395,10 @@ def criteria_hash(
         payload.append(data)
     if deliverable_release != DeliverableRelease.on_submit:
         # Only when set, so agreements signed before the setting existed keep their hash.
-        payload = {"deliverable_release": str(deliverable_release), "milestones": payload}
+        payload = {
+            "deliverable_release": str(deliverable_release),
+            "min_evidence_visibility": str(min_evidence_visibility),
+            "milestones": payload,
+        }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()

@@ -6,7 +6,7 @@ import { useAgreementCtx, useOrgCtx } from "@/app/context";
 import { useTitle } from "@/app/RouteAnnouncer";
 import { useSessions } from "@/auth/session";
 import { actionText, actorText } from "@/domain/actors";
-import { date, dateTime, measureText, money, percent, ROLE_LABEL, shortHash } from "@/domain/format";
+import { date, dateTime, measureText, money, percent, ROLE_LABEL, shortHash, VISIBILITY_LABEL } from "@/domain/format";
 import { can } from "@/domain/permissions";
 import { Busy, Button, Callout, layout, PermissionNote, toast } from "@/design/components";
 import s from "./Packet.module.css";
@@ -60,7 +60,7 @@ export function Packet() {
             <div><dt>Released</dt><dd>{money(p.agreement.released, cur)}</dd></div>
             <div><dt>Settlement</dt><dd>{p.agreement.settlement_mode === "escrow_release" ? "Escrow release" : "Invoice on verify"}</dd></div>
             <div><dt>Dispute window</dt><dd>{p.agreement.dispute_window_days ? `${p.agreement.dispute_window_days} days` : "None"}</dd></div>
-            <div><dt>Evidence visible</dt><dd>{p.agreement.deliverable_release === "on_capture" ? "Once paid" : "On submit"}</dd></div>
+            <div><dt>Evidence visible</dt><dd>{p.agreement.deliverable_release === "on_capture" ? `Once paid (before that, at least: ${VISIBILITY_LABEL[(p.agreement.min_evidence_visibility ?? "hash_only") as keyof typeof VISIBILITY_LABEL]?.label.toLowerCase()})` : "On submit"}</dd></div>
             <div><dt>Auto-release</dt><dd>{p.agreement.auto_release_enabled ? `On at ${percent(p.agreement.auto_release_threshold)}` : "Off"}</dd></div>
             <div><dt>Criteria hash</dt><dd className="figures">{p.agreement.criteria_hash ?? "not locked"}</dd></div>
           </dl>
@@ -89,10 +89,11 @@ export function Packet() {
               ))}
             </ol>
             <h4 className={s.h4}>Evidence</h4>
+            {m.evidence_withheld && <p className={s.muted}>The payee's evidence opens to you once this tranche is paid. Until then this packet shows the verdict and each item's fingerprint.</p>}
             {m.evidence.length ? (
               <table className={s.table}>
                 <thead><tr><th scope="col">#</th><th scope="col">Title</th><th scope="col">Source</th><th scope="col">Pinned version</th><th scope="col">Received</th></tr></thead>
-                <tbody>{m.evidence.map((e, k) => <tr key={e.id}><td>e{k + 1}</td><td>{e.title}</td><td>{e.source}</td><td className="figures">{shortHash(e.pinned_ref, 8, 4)}</td><td>{dateTime(e.received_at)}</td></tr>)}</tbody>
+                <tbody>{m.evidence.map((e, k) => <tr key={e.id}><td>e{k + 1}</td><td>{e.title}</td><td>{e.source}</td><td className="figures">{shortHash(e.file_sha256 ? `sha256:${e.file_sha256}` : e.pinned_ref, 8, 4)}</td><td>{dateTime(e.received_at)}</td></tr>)}</tbody>
               </table>
             ) : <p className={s.muted}>None.</p>}
             <h4 className={s.h4}>Verdicts</h4>
@@ -108,8 +109,26 @@ export function Packet() {
                     </li>
                   ))}
                 </ul>
+                {v.skeptic && (
+                  <p className={s.muted}>
+                    Second opinion ({v.skeptic.model}, {v.skeptic.prompt_version}):{" "}
+                    {v.skeptic.error ? `couldn't run (${v.skeptic.error}), so a person decides` : v.skeptic.disagrees_on.length ? `disagreed on ${v.skeptic.disagrees_on.join(", ")}` : "agreed"}. {v.skeptic.rationale}
+                  </p>
+                )}
               </div>
             )) : <p className={s.muted}>None.</p>}
+            {(m.delivery ?? []).length > 0 && (
+              <>
+                <h4 className={s.h4}>Delivery</h4>
+                <ul className={s.list}>
+                  {(m.delivery ?? []).map((d, k) => (
+                    <li key={k}>
+                      {dateTime(d.at)}: {d.action === "deliverable_released" ? "Evidence opened to the payer at capture" : d.action === "handover_checked" ? `Handover checked: ${d.matches ? (d.how === "same_tree" ? "same files as verified" : "same commit as verified") : "does not match what was verified"}` : d.matches ? "Downloaded; matches what was verified" : "Download refused: file doesn't match what was verified"} · {actorText(d.actor, names)}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
             {m.reviews.length > 0 && (
               <>
                 <h4 className={s.h4}>Reviews</h4>
