@@ -22,6 +22,7 @@ import {
   type Problem,
 } from "@/design/components";
 import { Link } from "react-router";
+import { HandoverButton, HandoverStatus, isCommitPinned, type HandoverRecord } from "./Handover";
 import { Results } from "./Verdict";
 import s from "./Tranche.module.css";
 
@@ -38,7 +39,14 @@ async function fetchOriginal(e: EvidenceRead, orgId: string) {
 }
 
 /** Evidence on file, numbered so verdict citations ([e1]) can point at it. */
-export function EvidenceList({ evidence, orgId }: { evidence: EvidenceRead[]; orgId: string }) {
+export function EvidenceList({
+  evidence, orgId, handovers = {}, checkHandover,
+}: {
+  evidence: EvidenceRead[];
+  orgId: string;
+  handovers?: Record<string, HandoverRecord>;
+  checkHandover?: Parameters<typeof HandoverButton>[0]["check"];
+}) {
   if (!evidence.length) return <p style={{ color: "var(--text-secondary)" }}>No evidence on file yet.</p>;
   return (
     <ol className={s.evidence} aria-label="Evidence on file">
@@ -69,6 +77,7 @@ export function EvidenceList({ evidence, orgId }: { evidence: EvidenceRead[]; or
                 ))}
               </div>
             )}
+            {isCommitPinned(e) && <HandoverStatus record={handovers[e.id]} />}
             {e.excerpt && <pre className={s.excerpt} aria-label={`First lines of ${e.title}`}>{e.excerpt}</pre>}
             <div className={layout.row}>
               {e.has_file && !e.withheld && (
@@ -76,6 +85,7 @@ export function EvidenceList({ evidence, orgId }: { evidence: EvidenceRead[]; or
                   Download original<span className="sr-only">: {e.title}</span>
                 </Button>
               )}
+              {checkHandover && isCommitPinned(e) && <HandoverButton evidence={e} check={checkHandover} />}
               {e.artifact_uris.map((u) => (
                 <a key={u} href={u} target="_blank" rel="noreferrer noopener">{new URL(u, location.origin).host}<span className="sr-only"> (opens in a new tab)</span></a>
               ))}

@@ -17,6 +17,8 @@ import type {
   AgreementCreate,
   EvidenceCreate,
   EvidenceVisibility,
+  HandoverCheck,
+  HandoverResult,
   MilestoneDraft,
   MilestoneStatus,
   OrgRole,
@@ -460,6 +462,11 @@ export function useTrancheActions(agreementId: string, milestoneId: string, orgI
     void: useMutation({ mutationFn: () => call(api.POST("/milestones/{milestone_id}/void", { ...m, ...o })), onSuccess: done }),
     release: useMutation({ mutationFn: () => call(api.POST("/milestones/{milestone_id}/release", { ...m, ...o })), onSuccess: done }),
     reverify: useMutation({ mutationFn: () => call(api.POST("/milestones/{milestone_id}/verify", { ...m, ...o })), onSuccess: done }),
+    handover: useMutation({
+      mutationFn: ({ evidenceId, body }: { evidenceId: string; body: HandoverCheck }) =>
+        call(api.POST("/evidence/{evidence_id}/handover", { params: { path: { evidence_id: evidenceId } }, body, ...o })) as Promise<HandoverResult>,
+      onSuccess: done,
+    }),
     review: useMutation({
       mutationFn: (body: { decision: "approve" | "reject"; note?: string | null }) =>
         call(api.POST("/milestones/{milestone_id}/review", { ...m, body, ...o })),

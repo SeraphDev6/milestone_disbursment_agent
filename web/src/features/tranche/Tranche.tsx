@@ -11,6 +11,7 @@ import { IN_FLIGHT, MILESTONE_STAMPS } from "@/domain/status";
 import { Busy, Callout, Crumbs, layout, PageHeader, Sheet, Stamp } from "@/design/components";
 import { Actions } from "./Actions";
 import { AddEvidence, EvidenceList } from "./Evidence";
+import { latestHandovers } from "./Handover";
 import { StateTrack } from "./StateTrack";
 import { Timeline } from "./Timeline";
 import { Results, VerdictSummary } from "./Verdict";
@@ -112,7 +113,7 @@ export function Tranche() {
             )}
           </Sheet>
           <Sheet title="Evidence on file">
-            {evidence.isPending ? <Busy label="Loading evidence" /> : <EvidenceList evidence={evidence.data ?? []} orgId={org.orgId} />}
+            {evidence.isPending ? <Busy label="Loading evidence" /> : <EvidenceList evidence={evidence.data ?? []} orgId={org.orgId} handovers={latestHandovers(events)} checkHandover={acts.handover} />}
           </Sheet>
           {isPayee && (
             <AddEvidence
