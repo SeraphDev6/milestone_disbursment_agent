@@ -186,6 +186,12 @@ async function fetchArchive(h: GitHubHandoverRead, orgId: string) {
  * Code handed over from the contractor's private repo once the tranche was paid: a PR into the client's repo, or a
  * source archive. Each was checked against the git tree of the commit the verifier read before it was handed over.
  */
+function handoverTitle(h: GitHubHandoverRead): string {
+  if (h.transferred_to) return `Repository transferred: ${h.transferred_to}`;
+  if (h.method === "transfer") return "Repository transfer";
+  return h.method === "pull_request" ? `Pull request into ${h.target_repo}` : "Source archive";
+}
+
 export function HandedOver({ handovers, orgId, retry }: { handovers: GitHubHandoverRead[]; orgId: string; retry: Retry }) {
   async function again(h: GitHubHandoverRead) {
     try {
@@ -201,23 +207,31 @@ export function HandedOver({ handovers, orgId, retry }: { handovers: GitHubHando
         <li key={h.id} className={layout.stack} style={{ gap: "var(--space-2)" }}>
           <span className={layout.row}>
             <Stamp flat spec={DELIVERY[h.status] ?? DELIVERY.pending!} />
-            <strong>{h.method === "pull_request" ? `Pull request into ${h.target_repo}` : "Source archive"}</strong>
+            <strong>{handoverTitle(h)}</strong>
           </span>
           <p className={s.evMeta}>
             From {h.source_repo} at <code title={h.pinned_sha}>{shortHash(h.pinned_sha, 10, 4)}</code>
             {h.tree_sha && <> · files match tree <code title={h.tree_sha}>{shortHash(h.tree_sha, 10, 4)}</code></>}
             {h.delivered_at && <> · {dateTime(h.delivered_at)}</>}
           </p>
+          {h.method === "transfer" && h.status === "pending" && (
+            <p className={s.evMeta}>
+              Waiting for the contractor to transfer {h.source_repo} to {h.transfer_to?.length ? h.transfer_to.join(" or ") : "a GitHub account where the client has the GitHub App"}, with the verified commit on its default branch. The transfer is picked up automatically.
+            </p>
+          )}
           {h.error && h.status !== "delivered" && <p className={s.evMeta} style={{ color: "var(--text-secondary)" }}>{h.error}</p>}
           <span className={layout.row}>
             {h.pr_url && (
               <a href={h.pr_url} target="_blank" rel="noreferrer noopener">Open the pull request<span className="sr-only"> (opens in a new tab)</span></a>
             )}
-            {h.method === "archive" && h.status === "delivered" && (
+            {h.transferred_to && (
+              <a href={`https://github.com/${h.transferred_to}`} target="_blank" rel="noreferrer noopener">Open {h.transferred_to}<span className="sr-only"> (opens in a new tab)</span></a>
+            )}
+            {h.archive_sha256 && h.status === "delivered" && (
               <Button size="sm" icon="download" onPress={() => fetchArchive(h, orgId)}>Download archive</Button>
             )}
             {h.status !== "delivered" && (
-              <Button size="sm" onPress={() => again(h)} isPending={retry.isPending}>Retry now</Button>
+              <Button size="sm" onPress={() => again(h)} isPending={retry.isPending}>{h.method === "transfer" ? "Check now" : "Retry now"}</Button>
             )}
           </span>
         </li>

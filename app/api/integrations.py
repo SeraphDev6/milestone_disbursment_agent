@@ -47,10 +47,12 @@ class GitHubRegistration(SQLModel):
         "named `mde-<milestone id>`, pins the commit, and the code goes to the client only once the tranche is paid. "
         "Defaults to contractor_repo when the agreement withholds work until capture, else merged_pr.",
     )
-    handover: Literal["pull_request", "archive"] = Field(
+    handover: Literal["pull_request", "archive", "transfer"] = Field(
         default="pull_request",
         description="contractor_repo: how the code reaches the client once paid. pull_request opens a PR into "
-        "client_repo (the client installs the GitHub App on it); archive keeps a source archive for them to download.",
+        "client_repo (the client installs the GitHub App on it); archive keeps a source archive for them to download; "
+        "transfer: you transfer this repo to the client's GitHub account and the app only watches for it. A transfer "
+        "with the verified commit on the default branch completes any of the three.",
     )
     client_repo: str | None = Field(
         default=None, max_length=200, description="contractor_repo with handover=pull_request: the client's repo."
@@ -75,12 +77,16 @@ class GitHubIntegration(SQLModel):
     events: list[str] = ["pull_request"]
     labels: list[MilestoneLabel]
     mode: str = Field(default="merged_pr", description="merged_pr or contractor_repo.")
-    handover: str | None = Field(default=None, description="contractor_repo: pull_request or archive.")
+    handover: str | None = Field(default=None, description="contractor_repo: pull_request, archive or transfer.")
     client_repo: str | None = None
     handover_ready: bool | None = Field(
         default=None,
-        description="handover=pull_request: whether the client's org has the GitHub App on client_repo yet. The "
-        "handover waits (and is retried) until it does.",
+        description="pull_request: whether the client's org has the GitHub App on client_repo yet. transfer: whether "
+        "it has the app on any GitHub account to transfer to. The handover waits (and is retried) until it does.",
+    )
+    transfer_to: list[str] = Field(
+        default_factory=list,
+        description="contractor_repo: the client's GitHub accounts with the app, where a transfer is recognised.",
     )
 
 
@@ -102,6 +108,7 @@ def register_github(
     mode = body.mode or ("contractor_repo" if on_capture else "merged_pr")
     app = request.app.state.github_app
     installation_id = None
+    repo_id = None
     if body.use_app or mode == "contractor_repo":
         rows = github_app.installations(session, [access.party.org_id or ""])
         installation_id = github_app.installation_for_repo(app, rows, body.repo)
@@ -126,7 +133,7 @@ def register_github(
                 f"install the GitHub App on {body.repo} from your organization's settings first; a contractor repo "
                 "is read through the app",
             )
-        _check_withheld(app, session, installation_id, payer_orgs, body.repo)
+        repo_id = _check_withheld(app, session, installation_id, payer_orgs, body.repo)
         if body.handover == "pull_request":
             if not body.client_repo or not github.valid_repo(body.client_repo):
                 raise HTTPException(
@@ -136,6 +143,8 @@ def register_github(
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "client_repo must be the client's repo")
             payer_installs = github_app.installations(session, payer_orgs)
             handover_ready = github_app.installation_for_repo(app, payer_installs, body.client_repo) is not None
+        elif body.handover == "transfer":
+            handover_ready = bool(github_app.installations(session, payer_orgs))
     handover = body.handover if mode == "contractor_repo" else None
     client_repo = body.client_repo if handover == "pull_request" else None
     row = session.exec(
@@ -155,16 +164,20 @@ def register_github(
             mode=mode,
             handover=handover,
             handover_repo=client_repo,
+            repo_id=repo_id,
         )
         session.add(row)
         session.flush()
         record_audit(session, a.id, access.actor, "github_connected", detail=detail)
         session.commit()
-    elif (installation_id and row.installation_id != installation_id) or (
-        (row.mode, row.handover, row.handover_repo) != (mode, handover, client_repo)
+    elif (
+        (installation_id and row.installation_id != installation_id)
+        or ((row.mode, row.handover, row.handover_repo) != (mode, handover, client_repo))
+        or (repo_id and row.repo_id != repo_id)
     ):
         row.installation_id = installation_id or row.installation_id  # switched to the app
         row.mode, row.handover, row.handover_repo = mode, handover, client_repo
+        row.repo_id = repo_id or row.repo_id
         record_audit(session, a.id, access.actor, "github_connected", detail=detail)
         session.commit()
     base = request.app.state.settings.api_base_url
@@ -180,13 +193,16 @@ def register_github(
         handover=row.handover,
         client_repo=row.handover_repo,
         handover_ready=handover_ready,
+        transfer_to=sorted({i.account_login for i in github_app.installations(session, payer_orgs)})
+        if row.mode == "contractor_repo"
+        else [],
         events=["pull_request", "release", "push"] if row.mode == "contractor_repo" else ["pull_request"],
     )
 
 
-def _check_withheld(app, session, installation_id: int, payer_orgs: list[str], repo: str) -> None:
+def _check_withheld(app, session, installation_id: int, payer_orgs: list[str], repo: str) -> int | None:
     """A contractor repo only withholds the code if the client can't read it: private, and none of the client
-    org's own installations can see it."""
+    org's own installations can see it. Returns GitHub's id for the repo."""
     try:
         info = app.client(installation_id).repo(repo)
     except github.GitHubError as e:
@@ -201,6 +217,7 @@ def _check_withheld(app, session, installation_id: int, payer_orgs: list[str], r
             f"the client's organization can already read {repo} through its GitHub App installation, so the code "
             "isn't withheld; use a repo only you can read",
         )
+    return info.get("id")
 
 
 def ingest_pr(state, integration_id: str, pr: github.MergedPR, milestone_ids: list[str]) -> None:

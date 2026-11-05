@@ -19,7 +19,9 @@ export function Timeline({ events, names }: { events: AuditEventRead[]; names: A
           e.action === "handover_checked"
             ? e.detail?.matches ? "Matches what was verified" : "Doesn't match what was verified"
             : e.action === "deliverable_handed_over"
-              ? `Checked against the verified files; ${e.detail?.pr_url ? `PR into ${String(e.detail?.target_repo)}` : "source archive kept"}`
+              ? e.detail?.transferred_to
+                ? `Repo transferred to the client as ${String(e.detail.transferred_to)}, with the verified commit`
+                : `Checked against the verified files; ${e.detail?.pr_url ? `PR into ${String(e.detail?.target_repo)}` : "source archive kept"}`
               : null;
         return (
           <li key={i} className={s.tlItem}>

@@ -14,6 +14,7 @@ from app.db import record_audit, utcnow
 from app.integrations import github
 from app.models import GitHubInstallationRead, Integration, Milestone, OrgRole, WebhookEvent
 from app.services import github_app as service
+from app.services import handover
 
 router = APIRouter(tags=["github"])
 
@@ -148,6 +149,11 @@ def _ingest(state, integration_ids: list[str], pr: github.MergedPR) -> None:
             ingest_pr(state, iid, pr, matched)
 
 
+def _check_handovers(state) -> None:
+    with state.sessionmaker() as session:
+        handover.run(session, state.github_app)
+
+
 def _ingest_tag(state, integration_ids: list[str], tc: github.TaggedCommit) -> None:
     from app.api.integrations import ingest_tag
 
@@ -212,6 +218,19 @@ async def app_webhook(
             else:
                 outcome = f"queued for {len(integrations)} agreement(s)"
                 background.add_task(_ingest, request.app.state, [i.id for i in integrations], pr)
+    elif (x_github_event == "repository" and payload.get("action") == "transferred") or (
+        x_github_event == "installation_repositories" and payload.get("action") == "added"
+    ):
+        repos = (
+            [payload.get("repository") or {}]
+            if x_github_event == "repository"
+            else payload.get("repositories_added") or []
+        )
+        ids = [int(r["id"]) for r in repos if isinstance(r, dict) and r.get("id")]
+        n = handover.poke(session, ids) if ids else 0
+        outcome = f"{n} handover(s) to check" if n else "ignored: no handover waits on this repo"
+        if n:
+            background.add_task(_check_handovers, request.app.state)
     elif x_github_event in ("release", "push"):
         tc = github.parse_tagged_commit(x_github_event, payload, utcnow())
         if tc is None:

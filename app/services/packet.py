@@ -34,7 +34,8 @@ def _delivery_result(d: dict) -> str:
     if d["action"] == "deliverable_mismatch" or d.get("matches") is False:
         return "DOES NOT MATCH what was verified"
     if d["action"] == "deliverable_handed_over":
-        where = d.get("pr_url") or "source archive"
+        where = d.get("pr_url") or (f"repo transferred: {d['transferred_to']}" if d.get("transferred_to") else None)
+        where = where or "source archive"
         return f"tree {str(d.get('tree_sha'))[:12]} matches; {where}"
     if d["action"] == "handover_queued":
         return f"{d.get('method')} from {d.get('source_repo')}@{str(d.get('pinned_sha'))[:12]}"

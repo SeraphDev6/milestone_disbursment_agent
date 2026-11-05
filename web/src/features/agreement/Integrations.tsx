@@ -37,7 +37,7 @@ function GitHub() {
   const chosen = typed ? repo.trim() : picked;
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GitHubIntegration | null>(null);
-  const [handover, setHandover] = useState<"pull_request" | "archive">("pull_request");
+  const [handover, setHandover] = useState<"pull_request" | "archive" | "transfer">("pull_request");
   const [clientRepo, setClientRepo] = useState("");
   const [clientError, setClientError] = useState<string | null>(null);
   const allowed = can(seat, "connect_github");
@@ -109,10 +109,11 @@ function GitHub() {
                 <RadioGroup
                   label="Once a tranche is paid, hand the code over as"
                   value={handover}
-                  onChange={(v) => setHandover(v as "pull_request" | "archive")}
+                  onChange={(v) => setHandover(v as "pull_request" | "archive" | "transfer")}
                   options={[
                     { id: "pull_request", label: "A pull request into the client's repo", description: "The client installs the GitHub App on their repo. The PR has exactly the files that were verified." },
                     { id: "archive", label: "A source archive", description: "Kept here for the client to download, checked against the verified commit." },
+                    { id: "transfer", label: "Transferring this repository", description: "You transfer the repo to the client's GitHub account yourself; the app only watches for it. The client gets the whole repo, including work for tranches not yet paid." },
                   ]}
                 />
                 {handover === "pull_request" && (
@@ -128,11 +129,19 @@ function GitHub() {
             <p>Publish a release, or push a tag, named with a tranche's label (a suffix like <code>-v2</code> is fine), or merge a PR carrying the label. Its commit becomes that tranche's evidence. Add a line <code>Preview: https://…</code> to the release notes to give the payer something to try.</p>
             {result.handover === "pull_request" ? (
               <p>Once paid, a PR with exactly the verified files is opened into <strong>{result.client_repo}</strong>.</p>
+            ) : result.handover === "transfer" ? (
+              <p>Once paid, transfer this repo to {(result.transfer_to ?? []).length ? <strong>{(result.transfer_to ?? []).join(" or ")}</strong> : "the client's GitHub account"} (GitHub: Settings › Transfer ownership), with the verified commit on its default branch. The transfer is picked up automatically.</p>
             ) : (
               <p>Once paid, a source archive of the verified commit is kept here for the client to download.</p>
             )}
+            {result.handover !== "transfer" && (result.transfer_to ?? []).length > 0 && (
+              <p>Transferring the repo to {(result.transfer_to ?? []).join(" or ")} also completes a handover.</p>
+            )}
             {result.handover_ready === false && (
-              <p><strong>{result.client_repo} isn't reachable yet.</strong> The client's organization needs the GitHub App installed on it; until then the handover waits and is retried.</p>
+              <p>
+                <strong>{result.handover === "transfer" ? "The client has no GitHub account with the app yet." : `${result.client_repo} isn't reachable yet.`}</strong>{" "}
+                The client's organization needs the GitHub App installed{result.handover === "transfer" ? " on the account that will receive the repo" : " on it"}; until then the handover waits and is retried.
+              </p>
             )}
             <h3 style={{ fontSize: "var(--text-lg)", marginTop: "var(--space-4)" }}>Labels</h3>
             <ul style={{ margin: 0 }}>

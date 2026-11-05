@@ -349,7 +349,7 @@ def test_setup_manifest_points_github_at_this_deployment():
         "pull_requests": "write",
         "checks": "write",
     }
-    assert set(m["default_events"]) == {"pull_request", "release", "push"}
+    assert set(m["default_events"]) == {"pull_request", "release", "push", "repository"}
 
 
 def test_setup_credentials_load_into_settings(tmp_path):

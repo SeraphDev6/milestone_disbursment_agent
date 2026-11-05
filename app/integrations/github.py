@@ -9,7 +9,8 @@ Two modes (Integration.mode):
 - merged_pr: PRs merged into the registered repo. The client usually owns that repo, so it has the code at merge;
   for agreements whose work is released on submit.
 - contractor_repo: the work stays in the contractor's private repo, evidence is a pinned commit, and the code is
-  handed over (a PR into the client's repo, or a source archive) only once the tranche is captured.
+  handed over (a PR into the client's repo, a source archive, or the contractor transferring the repo to the client)
+  only once the tranche is captured.
 
 Facts this adapter vouches for (and a payee can't assert through the API):
 - the merge commit SHA (pinned_ref), so later pushes can't change what was verified;
@@ -62,7 +63,8 @@ class GitHubAPI(Protocol):
 
 
 class GitHubWriter(GitHubAPI, Protocol):
-    """What a handover needs: read the contractor's repo, write a branch and a PR into the client's."""
+    """What a handover needs: read the contractor's repo, write a branch and a PR into the client's, or find the repo
+    after it was transferred to the client."""
 
     def repo(self, repo: str) -> dict: ...
     def tarball(self, repo: str, sha: str) -> bytes: ...
@@ -71,6 +73,8 @@ class GitHubWriter(GitHubAPI, Protocol):
     def create_commit(self, repo: str, message: str, tree: str, parents: list[str]) -> str: ...
     def create_ref(self, repo: str, ref: str, sha: str) -> None: ...
     def open_pull(self, repo: str, title: str, head: str, base: str, body: str) -> str: ...
+    def repository(self, repo_id: int) -> dict: ...
+    def compare(self, repo: str, base: str, head: str) -> str: ...
 
 
 class GitHubClient:
@@ -116,6 +120,19 @@ class GitHubClient:
         if r.status_code != 200:
             raise GitHubError(f"GitHub {r.status_code} for the archive of {repo}@{sha[:12]}")
         return r.content
+
+    def repository(self, repo_id: int) -> dict:
+        """A repo by its id, which survives renames and transfers. 404 when this token can't read it."""
+        return self._get(f"/repositories/{int(repo_id)}")  # type: ignore[return-value]
+
+    def compare(self, repo: str, base: str, head: str) -> str:
+        """identical, ahead (head contains base), behind or diverged."""
+        if not valid_repo(repo) or not _SHA.fullmatch(base) or not re.fullmatch(r"[A-Za-z0-9._/-]{1,200}", head):
+            raise GitHubError("invalid repo or ref")
+        if ".." in head:
+            raise GitHubError("invalid ref")
+        r = self._get(f"/repos/{repo}/compare/{base}...{head}")
+        return str(r.get("status"))  # type: ignore[union-attr]
 
     def create_blob(self, repo: str, data: bytes) -> str:
         return self._post(

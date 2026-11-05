@@ -9,7 +9,7 @@
 
 The app's permissions (set in the manifest, scripts/github_app_setup.py): metadata read; contents, pull requests and
 checks write. Write access to contents and pull requests is only used to hand work over: a branch and a PR into the
-client's repo once a tranche is paid. Events: installation, pull_request, release, push.
+client's repo once a tranche is paid. Events: installation, pull_request, release, push, repository (transfers).
 """
 
 import hashlib
@@ -41,6 +41,24 @@ class Installation:
 class GitHubApp(Protocol):
     slug: str
     webhook_secret: str
+
+    def transfer(self, repo: str, new_owner: str) -> str:
+        """The owner transfers `repo` to `new_owner`: its id, history and commits move, it leaves every installation
+        and joins the new owner's (as with "all repositories"). Returns the new full name."""
+        self.describe(repo)
+        new = f"{new_owner}/{repo.split('/', 1)[1]}"
+        self.repo_ids[new] = self.repo_ids.pop(repo)
+        for table in (self.history, self.repo_meta):
+            if repo in table:
+                table[new] = table.pop(repo)
+        for table in (self.commits, self.tarballs):
+            for r, ref in [k for k in table if k[0] == repo]:
+                table[(new, ref)] = table.pop((r, ref))
+        for iid, names in self.repo_lists.items():
+            names[:] = [n for n in names if n != repo]
+            if self.installs[iid].account_login.lower() == new_owner.lower():
+                names.append(new)
+        return new
 
     def install_url(self, state: str) -> str: ...
     def exchange_code(self, code: str) -> str: ...
@@ -112,6 +130,24 @@ class RealGitHubApp:
         return data["token"]
 
     # --- installing ----------------------------------------------------------------------
+
+    def transfer(self, repo: str, new_owner: str) -> str:
+        """The owner transfers `repo` to `new_owner`: its id, history and commits move, it leaves every installation
+        and joins the new owner's (as with "all repositories"). Returns the new full name."""
+        self.describe(repo)
+        new = f"{new_owner}/{repo.split('/', 1)[1]}"
+        self.repo_ids[new] = self.repo_ids.pop(repo)
+        for table in (self.history, self.repo_meta):
+            if repo in table:
+                table[new] = table.pop(repo)
+        for table in (self.commits, self.tarballs):
+            for r, ref in [k for k in table if k[0] == repo]:
+                table[(new, ref)] = table.pop((r, ref))
+        for iid, names in self.repo_lists.items():
+            names[:] = [n for n in names if n != repo]
+            if self.installs[iid].account_login.lower() == new_owner.lower():
+                names.append(new)
+        return new
 
     def install_url(self, state: str) -> str:
         return f"{self._web_url}/apps/{quote(self.slug)}/installations/new?{urlencode({'state': state})}"
@@ -202,7 +238,22 @@ class MockGitHubClient:
 
     def repo(self, repo: str) -> dict:
         self._visible(repo)
-        return {"full_name": repo, "private": True, "default_branch": "main", **self._app.repo_meta.get(repo, {})}
+        return self._app.describe(repo)
+
+    def repository(self, repo_id: int) -> dict:
+        for name, rid in self._app.repo_ids.items():
+            if rid == repo_id and name in self._app.repo_lists.get(self._iid, []):
+                return self._app.describe(name)
+        raise GitHubError(f"GitHub 404 for /repositories/{repo_id}")
+
+    def compare(self, repo: str, base: str, head: str) -> str:
+        self._visible(repo)
+        if (repo, base) not in self._app.commits:
+            raise GitHubError(f"GitHub 404 for /repos/{repo}/compare/{base}...{head}")
+        history = self._app.history.get(repo, [])
+        if base not in history:
+            return "diverged"
+        return "identical" if history[-1] == base else "ahead"
 
     def tarball(self, repo: str, sha: str) -> bytes:
         self._visible(repo)
@@ -256,6 +307,8 @@ class MockGitHubApp:
     blobs: dict[str, bytes] = field(default_factory=dict)
     refs: dict[tuple[str, str], str] = field(default_factory=dict)
     pulls: list[dict] = field(default_factory=list)
+    repo_ids: dict[str, int] = field(default_factory=dict)
+    history: dict[str, list[str]] = field(default_factory=dict)  # commits on each repo's default branch, oldest first
     _ids: count = field(default_factory=lambda: count(1001))
 
     def install(self, account: str, repos: list[str]) -> tuple[int, str]:
@@ -267,12 +320,22 @@ class MockGitHubApp:
         self.codes[code] = iid
         return iid, code
 
-    def push(self, repo: str, files: dict[str, bytes], tag: str | None = None) -> tuple[str, str]:
-        """Commit `files` to `repo` (and tag it): what a contractor pushing work would leave. Returns (sha, tree)."""
+    def describe(self, repo: str) -> dict:
+        rid = self.repo_ids.setdefault(repo, 500000 + len(self.repo_ids))
+        meta = {"private": True, "default_branch": "main", **self.repo_meta.get(repo, {})}
+        return {"id": rid, "full_name": repo, "owner": {"login": repo.split("/", 1)[0]}, **meta}
+
+    def push(
+        self, repo: str, files: dict[str, bytes], tag: str | None = None, on_default: bool = True
+    ) -> tuple[str, str]:
+        """Commit `files` to `repo` (and tag it): what a contractor pushing work would leave. Returns (sha, tree).
+        on_default=False leaves the commit off the default branch (e.g. only on a tag)."""
         entries = [gittree.Entry(path, "100644", data) for path, data in files.items()]
         tree = gittree.tree_id(entries)
         sha = hashlib.sha1(f"{repo}{tree}{tag}".encode()).hexdigest()
         self.commits[(repo, sha)] = (sha, tree)
+        if on_default:
+            self.history.setdefault(repo, []).append(sha)
         if tag:
             self.commits[(repo, tag)] = (sha, tree)
         buf = io.BytesIO()
@@ -284,6 +347,24 @@ class MockGitHubApp:
                 tar.addfile(info, io.BytesIO(e.data))
         self.tarballs[(repo, sha)] = buf.getvalue()
         return sha, tree
+
+    def transfer(self, repo: str, new_owner: str) -> str:
+        """The owner transfers `repo` to `new_owner`: its id, history and commits move, it leaves every installation
+        and joins the new owner's (as with "all repositories"). Returns the new full name."""
+        self.describe(repo)
+        new = f"{new_owner}/{repo.split('/', 1)[1]}"
+        self.repo_ids[new] = self.repo_ids.pop(repo)
+        for table in (self.history, self.repo_meta):
+            if repo in table:
+                table[new] = table.pop(repo)
+        for table in (self.commits, self.tarballs):
+            for r, ref in [k for k in table if k[0] == repo]:
+                table[(new, ref)] = table.pop((r, ref))
+        for iid, names in self.repo_lists.items():
+            names[:] = [n for n in names if n != repo]
+            if self.installs[iid].account_login.lower() == new_owner.lower():
+                names.append(new)
+        return new
 
     def install_url(self, state: str) -> str:
         return f"{self.base_url}/mock/github/install?{urlencode({'state': state})}"

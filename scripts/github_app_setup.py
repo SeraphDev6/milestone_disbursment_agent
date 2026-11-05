@@ -10,8 +10,9 @@ variables into the deployment's environment (Render: Environment > Add from .env
 
 The app asks for: metadata read; contents, pull requests and checks write. Write access to contents and pull requests
 is only used to hand paid work over as a branch and PR into the client's repo (contractor-owned repos); everything
-else is read. Events: pull_request, release, push (installation events are always sent). User authorization during
-installation is on, which the install flow relies on.
+else is read. Events: pull_request, release, push, and repository (to see a contractor repo transferred to the
+client); installation events are always sent. User authorization during installation is on, which the install flow
+relies on.
 """
 
 import argparse
@@ -44,7 +45,7 @@ def manifest(public_url: str, redirect_url: str, name: str, public: bool) -> dic
         "setup_on_update": False,
         "public": public,
         "default_permissions": {"contents": "write", "metadata": "read", "pull_requests": "write", "checks": "write"},
-        "default_events": ["pull_request", "release", "push"],
+        "default_events": ["pull_request", "release", "push", "repository"],
     }
 
 

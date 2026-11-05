@@ -1955,7 +1955,7 @@ export interface components {
             evidence_id: string;
             /**
              * Method
-             * @description pull_request: a PR into the client's repo. archive: a source archive to download.
+             * @description pull_request: a PR into the client's repo. archive: a source archive to download. transfer: the contractor transfers the repo to the client's GitHub account. A transfer completes any of them.
              */
             method: string;
             /**
@@ -1971,8 +1971,18 @@ export interface components {
             /** Target Repo */
             target_repo?: string | null;
             /**
+             * Transferred To
+             * @description Set when the repo was transferred to the client: its name under their account.
+             */
+            transferred_to?: string | null;
+            /**
+             * Transfer To
+             * @description GitHub accounts the repo can be transferred to: the client's accounts with the GitHub App.
+             */
+            transfer_to?: string[];
+            /**
              * Status
-             * @description pending (retried), delivered or failed.
+             * @description pending (retried; a transfer is waited on indefinitely), delivered or failed.
              */
             status: string;
             /** Attempts */
@@ -2055,16 +2065,21 @@ export interface components {
             mode?: string;
             /**
              * Handover
-             * @description contractor_repo: pull_request or archive.
+             * @description contractor_repo: pull_request, archive or transfer.
              */
             handover?: string | null;
             /** Client Repo */
             client_repo?: string | null;
             /**
              * Handover Ready
-             * @description handover=pull_request: whether the client's org has the GitHub App on client_repo yet. The handover waits (and is retried) until it does.
+             * @description pull_request: whether the client's org has the GitHub App on client_repo yet. transfer: whether it has the app on any GitHub account to transfer to. The handover waits (and is retried) until it does.
              */
             handover_ready?: boolean | null;
+            /**
+             * Transfer To
+             * @description contractor_repo: the client's GitHub accounts with the app, where a transfer is recognised.
+             */
+            transfer_to?: string[];
         };
         /** GitHubOrgStatus */
         GitHubOrgStatus: {
@@ -2101,11 +2116,11 @@ export interface components {
             mode?: ("merged_pr" | "contractor_repo") | null;
             /**
              * Handover
-             * @description contractor_repo: how the code reaches the client once paid. pull_request opens a PR into client_repo (the client installs the GitHub App on it); archive keeps a source archive for them to download.
+             * @description contractor_repo: how the code reaches the client once paid. pull_request opens a PR into client_repo (the client installs the GitHub App on it); archive keeps a source archive for them to download; transfer: you transfer this repo to the client's GitHub account and the app only watches for it. A transfer with the verified commit on the default branch completes any of the three.
              * @default pull_request
              * @enum {string}
              */
-            handover?: "pull_request" | "archive";
+            handover?: "pull_request" | "archive" | "transfer";
             /**
              * Client Repo
              * @description contractor_repo with handover=pull_request: the client's repo.

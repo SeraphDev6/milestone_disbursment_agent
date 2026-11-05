@@ -1,4 +1,4 @@
-"""contractor-owned repos: integration mode and handover, github_handovers
+"""contractor-owned repos: integration mode, handover and repo id, github_handovers
 
 Revision ID: e6a1c4f8b2d9
 Revises: d5f9b3e7a2c1
@@ -27,6 +27,7 @@ def upgrade() -> None:
         )
         batch_op.add_column(sa.Column("handover", sqlmodel.sql.sqltypes.AutoString(length=16), nullable=True))
         batch_op.add_column(sa.Column("handover_repo", sqlmodel.sql.sqltypes.AutoString(length=200), nullable=True))
+        batch_op.add_column(sa.Column("repo_id", sa.BigInteger(), nullable=True))
 
     op.create_table(
         "github_handovers",
@@ -36,8 +37,10 @@ def upgrade() -> None:
         sa.Column("integration_id", sqlmodel.sql.sqltypes.AutoString(length=36), nullable=False),
         sa.Column("method", sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
         sa.Column("source_repo", sqlmodel.sql.sqltypes.AutoString(length=200), nullable=False),
+        sa.Column("repo_id", sa.BigInteger(), nullable=True),
         sa.Column("pinned_sha", sqlmodel.sql.sqltypes.AutoString(length=40), nullable=False),
         sa.Column("target_repo", sqlmodel.sql.sqltypes.AutoString(length=200), nullable=True),
+        sa.Column("transferred_to", sqlmodel.sql.sqltypes.AutoString(length=200), nullable=True),
         sa.Column("status", sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
         sa.Column("attempts", sa.Integer(), nullable=False),
         sa.Column("next_attempt_at", sa.DateTime(timezone=True), nullable=False),
@@ -72,6 +75,7 @@ def downgrade() -> None:
             batch_op.drop_index(batch_op.f(f"ix_github_handovers_{col}"))
     op.drop_table("github_handovers")
     with op.batch_alter_table("integrations", schema=None) as batch_op:
+        batch_op.drop_column("repo_id")
         batch_op.drop_column("handover_repo")
         batch_op.drop_column("handover")
         batch_op.drop_column("mode")

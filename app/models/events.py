@@ -65,14 +65,17 @@ class Integration(SQLModel, table=True):
     # contractor_repo: `target` is the contractor's private repo; evidence is a pinned commit (labelled PR, release
     # or tag) and the code is handed over only once the tranche is captured, as `handover` says.
     mode: str = Field(default="merged_pr", max_length=16)
-    handover: str | None = Field(default=None, max_length=16)  # pull_request or archive (contractor_repo only)
+    handover: str | None = Field(default=None, max_length=16)  # pull_request, archive or transfer (contractor_repo)
     handover_repo: str | None = Field(default=None, max_length=200)  # the client's repo, for pull_request
+    # GitHub's id for `target`. It survives renames and transfers, so a transfer to the client can be recognised.
+    repo_id: int | None = Field(default=None, sa_type=BigInteger)
 
 
 class GitHubHandover(SQLModel, table=True):
-    """Handing a captured tranche's code from the contractor's repo to the client: a PR into the client's repo, or
-    a source archive kept here. Worked by a retrying loop, so payment never waits on GitHub. The code is checked
-    against the verified commit's tree before anything is handed over."""
+    """Handing a captured tranche's code from the contractor's repo to the client: a PR into the client's repo, a
+    source archive kept here, or the contractor transferring the repo to the client (which also completes the other
+    two). Worked by a retrying loop, so payment never waits on GitHub. The code is checked against the verified commit
+    before the handover counts."""
 
     __tablename__ = "github_handovers"
     __table_args__ = (UniqueConstraint("milestone_id", "evidence_id"),)
@@ -81,10 +84,12 @@ class GitHubHandover(SQLModel, table=True):
     milestone_id: str | None = fk("milestones.id")
     evidence_id: str | None = fk("evidence.id")
     integration_id: str | None = fk("integrations.id")
-    method: str = Field(max_length=16)  # pull_request or archive
+    method: str = Field(max_length=16)  # pull_request, archive or transfer
     source_repo: str = Field(max_length=200)
+    repo_id: int | None = Field(default=None, sa_type=BigInteger)  # source_repo's GitHub id, to follow a transfer
     pinned_sha: str = Field(max_length=40)
     target_repo: str | None = Field(default=None, max_length=200)
+    transferred_to: str | None = Field(default=None, max_length=200)  # the repo's name once the client owns it
     status: str = Field(default="pending", max_length=16, index=True)  # pending, delivered, failed
     attempts: int = 0
     next_attempt_at: datetime = timestamp()
@@ -100,11 +105,21 @@ class GitHubHandoverRead(SQLModel):
     id: str
     milestone_id: str
     evidence_id: str
-    method: str = Field(description="pull_request: a PR into the client's repo. archive: a source archive to download.")
+    method: str = Field(
+        description="pull_request: a PR into the client's repo. archive: a source archive to download. transfer: the "
+        "contractor transfers the repo to the client's GitHub account. A transfer completes any of them."
+    )
     source_repo: str = Field(description="The contractor's repo the work was verified in.")
     pinned_sha: str = Field(description="The verified commit.")
     target_repo: str | None = None
-    status: str = Field(description="pending (retried), delivered or failed.")
+    transferred_to: str | None = Field(
+        default=None, description="Set when the repo was transferred to the client: its name under their account."
+    )
+    transfer_to: list[str] = Field(
+        default_factory=list,
+        description="GitHub accounts the repo can be transferred to: the client's accounts with the GitHub App.",
+    )
+    status: str = Field(description="pending (retried; a transfer is waited on indefinitely), delivered or failed.")
     attempts: int
     tree_sha: str | None = Field(default=None, description="Verified tree the handed-over code was checked against.")
     pr_url: str | None = None

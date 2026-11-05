@@ -169,13 +169,15 @@ export function deliveryText(d: Record<string, unknown>): string {
     case "handover_checked":
       return `Handover checked: ${d.matches ? (d.how === "same_tree" ? "same files as verified" : "same commit as verified") : "does not match what was verified"}`;
     case "handover_queued":
-      return `Handover queued: ${d.method === "pull_request" ? "pull request" : "source archive"} from ${String(d.source_repo)} at ${short(d.pinned_sha)}`;
+      return `Handover queued: ${d.method === "pull_request" ? "pull request" : d.method === "transfer" ? "repo transfer" : "source archive"} from ${String(d.source_repo)} at ${short(d.pinned_sha)}`;
     case "handover_retried":
       return "Handover retried";
     case "handover_failed":
       return `Handover failed: ${String(d.why ?? "")}`;
     case "deliverable_handed_over":
-      return `Handed over (files match tree ${short(d.tree_sha)}): ${d.pr_url ? String(d.pr_url) : "source archive"}`;
+      return d.transferred_to
+        ? `Handed over: repo transferred to the client as ${String(d.transferred_to)}, verified commit on its default branch`
+        : `Handed over (files match tree ${short(d.tree_sha)}): ${d.pr_url ? String(d.pr_url) : "source archive"}`;
     case "deliverable_mismatch":
       return d.handover_id ? `Handover stopped: the ${String(d.stage)} doesn't reproduce the verified tree` : "Download refused: file doesn't match what was verified";
     default:

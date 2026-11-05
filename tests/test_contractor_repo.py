@@ -337,3 +337,95 @@ def test_no_pr_when_github_stores_a_different_tree_in_the_client_repo(client, de
     assert row.status == "failed" and "different tree" in row.error and app_of(client).pulls == []
     [bad] = audit(client, m1, "deliverable_mismatch")
     assert bad.detail["stage"] == "push" and bad.detail["got_tree"] == "f" * 40
+
+
+# --- transfer: the contractor hands the repo itself over; the app only watches ----------
+
+
+def transferred(client, keys, new_name, delivery="t1"):
+    gh = app_of(client)
+    payload = {
+        "action": "transferred",
+        "repository": {"id": gh.repo_ids[new_name], "full_name": new_name},
+        "changes": {"owner": {"from": {"user": {"login": "devco"}}}},
+        "installation": {"id": keys["payer_iid"]},
+    }
+    r = app_delivery(client, payload, event="repository", delivery=delivery)
+    assert r.status_code == 200, r.text
+    return r.json()["outcome"]
+
+
+def test_transfer_is_watched_for_and_never_given_up_on(client, deal):
+    aid, m1, keys = deal
+    r = register(client, aid, keys, handover="transfer", client_repo=None)
+    assert r.status_code == 200, r.text
+    assert r.json()["handover_ready"] is True and r.json()["transfer_to"] == ["acme"]
+    fund(client, m1, keys)
+    _, sha, tree = deliver_release(client, keys, m1)
+    approve(client, m1, keys)
+
+    for _ in range(handover.MAX_ATTEMPTS + 2):  # the contractor transfers when ready; no failure for waiting
+        [row] = rows(client, m1)
+        client.post(f"/handovers/{row.id}/retry", headers=h(keys["payee"]))
+        assert work_handovers(client) == 0
+    [row] = rows(client, m1)
+    assert row.status == "pending" and "hasn't been transferred" in row.error
+    [shown] = client.get(f"/milestones/{m1}/handovers", headers=h(keys["payee"])).json()
+    assert shown["transfer_to"] == ["acme"]
+
+    new = app_of(client).transfer("devco/shop-work", "acme")
+    assert transferred(client, keys, new) == "1 handover(s) to check"  # checked straight away, in the background
+    [shown] = client.get(f"/milestones/{m1}/handovers", headers=h(keys["payer"])).json()
+    assert shown["status"] == "delivered" and shown["transferred_to"] == "acme/shop-work"
+    assert shown["tree_sha"] == tree and shown["pinned_sha"] == sha
+    assert app_of(client).pulls == []  # nothing written to GitHub
+    [done] = audit(client, m1, "deliverable_handed_over")
+    assert done.detail["transferred_to"] == "acme/shop-work" and done.detail["matches"]
+
+
+def test_a_transfer_also_completes_a_pr_handover(client, deal):
+    aid, m1, keys = deal
+    assert register(client, aid, keys).status_code == 200  # handover=pull_request
+    fund(client, m1, keys)
+    deliver_release(client, keys, m1)
+    approve(client, m1, keys)
+    app_of(client).transfer("devco/shop-work", "acme")  # before the loop got to it
+
+    assert work_handovers(client) == 1
+    [row] = rows(client, m1)
+    assert row.status == "delivered" and row.transferred_to == "acme/shop-work" and row.pr_url is None
+    assert app_of(client).pulls == []
+
+
+def test_a_transfer_without_the_verified_commit_on_the_default_branch_keeps_waiting(client, deal):
+    aid, m1, keys = deal
+    assert register(client, aid, keys, handover="transfer", client_repo=None).status_code == 200
+    fund(client, m1, keys)
+    _, sha, _ = deliver_release(client, keys, m1)
+    approve(client, m1, keys)
+    gh = app_of(client)
+    gh.history["devco/shop-work"].remove(sha)  # e.g. only on the tag, or the branch was rewritten
+    gh.transfer("devco/shop-work", "acme")
+
+    assert work_handovers(client) == 0
+    [row] = rows(client, m1)
+    assert row.status == "pending" and "isn't on its default branch" in row.error and row.transferred_to is None
+
+    gh.history["acme/shop-work"].append(sha)
+    client.post(f"/handovers/{row.id}/retry", headers=h(keys["payer"]))
+    assert work_handovers(client) == 1
+
+
+def test_a_transfer_to_someone_other_than_the_client_doesnt_count(client, deal):
+    aid, m1, keys = deal
+    assert register(client, aid, keys, handover="transfer", client_repo=None).status_code == 200
+    fund(client, m1, keys)
+    deliver_release(client, keys, m1)
+    approve(client, m1, keys)
+    gh = app_of(client)
+    gh.install("elsewhere", [])
+    new = gh.transfer("devco/shop-work", "elsewhere")
+
+    assert transferred(client, keys, new) == "1 handover(s) to check"
+    [row] = rows(client, m1)
+    assert row.status == "pending" and row.transferred_to is None
