@@ -288,7 +288,13 @@ def test_downloads_after_reveal_carry_and_record_the_hash(client, draft):
     digest = hashlib.sha256(REPORT.encode()).hexdigest()
     assert r.headers["X-Content-SHA256"] == digest and r.headers["X-Pinned-Ref"].startswith("sha256:")
     [dl] = [e for e in actions(client, m2) if e.action == "deliverable_downloaded"]
-    assert dl.detail == {"evidence_id": eid, "sha256": digest, "committed_sha256": digest, "matches": True}
+    assert dl.detail == {
+        "evidence_id": eid,
+        "side": "payer",
+        "sha256": digest,
+        "committed_sha256": digest,
+        "matches": True,
+    }
     packet = client.get(f"/agreements/{aid}/compliance-packet", headers=h(ctx["payer"])).json()
     delivery = next(m for m in packet["milestones"] if m["id"] == m2)["delivery"]
     assert [d["action"] for d in delivery] == ["deliverable_released", "deliverable_downloaded"]

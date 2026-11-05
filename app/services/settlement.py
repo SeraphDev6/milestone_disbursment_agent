@@ -29,6 +29,7 @@ from app.db import as_utc, record_audit
 from app.integrations.paypal import CreatedOrder, PayPalError, PayPalGateway
 from app.models import (
     AgreementStatus,
+    AuditEvent,
     DeliverableRelease,
     Disbursement,
     DisbursementKind,
@@ -1057,6 +1058,8 @@ def _customer_dispute(session: Session, event_type: str, res: dict, actor: str, 
         "outcome": (res.get("dispute_outcome") or {}).get("outcome_code"),
         "amount": (res.get("dispute_amount") or {}).get("value"),
     }
+    if event_type == "CUSTOMER.DISPUTE.CREATED" and m.revealed_at is not None:
+        _dispute_pack_ready(session, m, actor, detail)
     if (
         event_type == "CUSTOMER.DISPUTE.CREATED"
         and m.status == MilestoneStatus.held
@@ -1069,6 +1072,28 @@ def _customer_dispute(session: Session, event_type: str, res: dict, actor: str, 
     )
     _note(session, m, actor, action, **detail)
     return f"dispute {event_type.rsplit('.', 1)[-1].lower()} recorded"
+
+
+def _dispute_pack_ready(session: Session, m: Milestone, actor: str, detail: dict) -> None:
+    """The payer disputed a payment for work already opened to them: the payee's answer is the record. Tell the
+    payee side where its dispute pack is (behind sign-in; evidence isn't emailed)."""
+    seen = session.exec(
+        select(AuditEvent).where(AuditEvent.milestone_id == m.id, AuditEvent.action == "dispute_pack_ready")
+    ).all()
+    if any((e.detail or {}).get("dispute_id") == detail.get("dispute_id") for e in seen):
+        return
+    _note(session, m, actor, "dispute_pack_ready", dispute_id=detail.get("dispute_id"))
+    notify_side(
+        session,
+        m,
+        Role.payee,
+        tranche_subject(m, "Payment disputed"),
+        f"The payer opened a PayPal dispute ({detail.get('reason') or 'no reason given'}) on the payment for "
+        f"'{m.title}', whose work was opened to them on {as_utc(m.revealed_at):%B %d, %Y}. Your dispute pack is on "
+        "the tranche: the criteria both sides signed, the hashes of what was verified, the verdict with citations, "
+        "and every time the payer side opened or downloaded the work. Answer the dispute on PayPal with it.",
+        tone="alert",
+    )
 
 
 DISPUTE_POLL_LOOKBACK = timedelta(days=3)  # re-read disputes updated this recently; covers missed hourly runs

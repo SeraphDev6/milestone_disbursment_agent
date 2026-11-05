@@ -828,6 +828,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/milestones/{milestone_id}/payer-view": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the payer side sees of this tranche's evidence and verdict
+         * @description For the payee (to see what they're showing) and reviewers (to judge what the payer is deciding on, next to the full evidence). The payer side gets its own view, which is the same thing.
+         */
+        get: operations["payer_view_milestones__milestone_id__payer_view_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/evidence/{evidence_id}/file": {
         parameters: {
             query?: never;
@@ -1102,6 +1122,26 @@ export interface paths {
         };
         /** Every event for one tranche: who did what, when, and why */
         get: operations["milestone_audit_milestones__milestone_id__audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/milestones/{milestone_id}/dispute-pack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One tranche's record for answering a chargeback (payee or reviewer)
+         * @description The signed criteria, the commitment (hashes of what was verified), when the work was opened to the payer, every payer-side view and download since, the verdict with citations, and the payments.
+         */
+        get: operations["dispute_pack_milestones__milestone_id__dispute_pack_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2700,6 +2740,21 @@ export interface components {
              * @description Send an admin of the payee org here to connect their PayPal account.
              */
             onboarding_url: string;
+        };
+        /** PayerView */
+        PayerView: {
+            /**
+             * Withheld
+             * @description True while the payer side gets the filtered view (on_capture, not captured).
+             */
+            withheld: boolean;
+            /**
+             * Evidence
+             * @description The evidence list exactly as the payer side gets it.
+             */
+            evidence: components["schemas"]["EvidenceRead"][];
+            /** @description The latest verdict exactly as the payer side gets it. */
+            verdict: components["schemas"]["VerdictRead"] | null;
         };
         /**
          * PayoutRoute
@@ -5131,6 +5186,41 @@ export interface operations {
             };
         };
     };
+    payer_view_milestones__milestone_id__payer_view_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Which of your orgs you act for, if you belong to several. */
+                "X-Org-Id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                milestone_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PayerView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     download_file_evidence__evidence_id__file_get: {
         parameters: {
             query?: never;
@@ -5736,6 +5826,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditEventRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dispute_pack_milestones__milestone_id__dispute_pack_get: {
+        parameters: {
+            query?: {
+                format?: "json" | "pdf";
+            };
+            header?: {
+                /** @description Which of your orgs you act for, if you belong to several. */
+                "X-Org-Id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                milestone_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

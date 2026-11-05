@@ -7,11 +7,19 @@ payee, reviewers and the verifier always see everything. Audit details and outbo
 evidence content, so they need no filtering.
 
 At capture the tranche is revealed (`Milestone.revealed_at`) and the restriction lifts for good.
+
+Which side saw what, and when, is recorded (`record_view`): each side's reads of an on_capture tranche's evidence,
+filtered or full, so a reviewer's decision and a chargeback answer can point to what each side had in front of it.
 """
 
 from collections.abc import Iterable
+from datetime import timedelta
 
+from sqlmodel import Session, select
+
+from app.db import record_audit, utcnow
 from app.models import (
+    AuditEvent,
     CriterionResult,
     DeliverableRelease,
     Evidence,
@@ -101,3 +109,35 @@ def evidence_read(e: Evidence, m: Milestone, role: Role | str | None) -> Evidenc
 def rationale_for_payer(m: Milestone, v: Verdict) -> str:
     """The verdict rationale as the payer side may read it (emails)."""
     return _rationale(m, v.evidence_ids, v.rationale) if withheld(m) else v.rationale
+
+
+VIEW_LOG_EVERY = timedelta(hours=1)  # one evidence_viewed per reader, tranche and view per hour
+
+
+def record_view(session: Session, m: Milestone, actor: str, role: Role | str | None, evidence_ids: list[str]) -> None:
+    """On on_capture agreements, note that this side read the tranche's evidence, and whether it saw the filtered
+    (withheld) or the full view. Repeated reads within VIEW_LOG_EVERY that add nothing aren't logged again."""
+    if m.agreement.deliverable_release != DeliverableRelease.on_capture or not evidence_ids:
+        return
+    view = "filtered" if restricted(role, m) else "full"
+    recent = session.exec(
+        select(AuditEvent).where(
+            AuditEvent.milestone_id == m.id,
+            AuditEvent.actor == actor,
+            AuditEvent.action == "evidence_viewed",
+            AuditEvent.at >= utcnow() - VIEW_LOG_EVERY,
+        )
+    ).all()
+    if any(
+        e.detail.get("view") == view and set(e.detail.get("evidence_ids") or []) >= set(evidence_ids) for e in recent
+    ):
+        return
+    record_audit(
+        session,
+        m.agreement_id,
+        actor,
+        "evidence_viewed",
+        milestone_id=m.id,
+        detail={"side": str(role) if role else None, "view": view, "evidence_ids": evidence_ids},
+    )
+    session.commit()

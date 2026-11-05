@@ -9,7 +9,7 @@ from sqlmodel import select
 from app.api.deps import AgreementAccessDep, MilestoneAccessDep, SessionDep
 from app.models import AuditEvent, AuditEventRead
 from app.services.access import Action
-from app.services.packet import build_packet, render_pdf
+from app.services.packet import build_dispute_pack, build_packet, render_pdf
 
 router = APIRouter(tags=["audit"])
 
@@ -31,6 +31,27 @@ def milestone_audit(milestone_id: str, auth: MilestoneAccessDep, session: Sessio
     access.require(Action.view)
     query = select(AuditEvent).where(AuditEvent.milestone_id == m.id).order_by(AuditEvent.at)
     return [AuditEventRead.model_validate(e) for e in session.exec(query).all()]
+
+
+@router.get(
+    "/milestones/{milestone_id}/dispute-pack",
+    summary="One tranche's record for answering a chargeback (payee or reviewer)",
+    description="The signed criteria, the commitment (hashes of what was verified), when the work was opened to "
+    "the payer, every payer-side view and download since, the verdict with citations, and the payments.",
+)
+def dispute_pack(
+    milestone_id: str, auth: MilestoneAccessDep, session: SessionDep, format: Literal["json", "pdf"] = "json"
+) -> Response:
+    access, m = auth
+    access.require(Action.dispute_pack)
+    pack = build_dispute_pack(session, m)
+    if format == "pdf":
+        return Response(
+            render_pdf(pack),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="dispute-pack-{milestone_id}.pdf"'},
+        )
+    return Response(json.dumps(pack, indent=2, default=str), media_type="application/json")
 
 
 @router.get(

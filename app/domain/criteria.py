@@ -297,23 +297,31 @@ def lint_agreement(agreement: AgreementBase, *, reviewer_invited: bool = False) 
                 "is paid.",
             )
         )
-    if getattr(agreement, "deliverable_release", None) == DeliverableRelease.on_capture and getattr(
-        agreement, "auto_release_enabled", False
-    ):
-        reviewers = getattr(agreement, "reviewer_emails", None) or [
-            p for p in getattr(agreement, "parties", []) if p.role == Role.reviewer
-        ]
-        if not reviewers and not reviewer_invited:
-            report.issues.append(
-                _issue(
-                    LintLevel.warning,
-                    "pays_on_model_alone",
-                    "deliverable_release",
-                    "Auto-release is on, the payer can't see the work until it's paid for, and there is no "
-                    "reviewer: the payer would pay on the model's verdict alone.",
-                    "Invite a reviewer, turn off auto-release, or release deliverables on submit.",
-                )
+    reviewers = getattr(agreement, "reviewer_emails", None) or [
+        p for p in getattr(agreement, "parties", []) if p.role == Role.reviewer
+    ]
+    if on_capture and (reviewers or reviewer_invited) and not getattr(agreement, "require_reviewer_approval", False):
+        report.issues.append(
+            _issue(
+                LintLevel.warning,
+                "payer_reviews_unseen_work",
+                "require_reviewer_approval",
+                "The payer can't see the work until it's paid for, but a tranche in review can be approved by the "
+                "payer, who would be judging work they haven't seen.",
+                "Require a reviewer's approval: the reviewer sees all the evidence, and the payer can still reject.",
             )
+        )
+    if on_capture and getattr(agreement, "auto_release_enabled", False) and not reviewers and not reviewer_invited:
+        report.issues.append(
+            _issue(
+                LintLevel.warning,
+                "pays_on_model_alone",
+                "deliverable_release",
+                "Auto-release is on, the payer can't see the work until it's paid for, and there is no "
+                "reviewer: the payer would pay on the model's verdict alone.",
+                "Invite a reviewer, turn off auto-release, or release deliverables on submit.",
+            )
+        )
     return report
 
 

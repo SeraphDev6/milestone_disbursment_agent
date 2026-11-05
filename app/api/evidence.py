@@ -182,10 +182,35 @@ async def upload_evidence(
     openapi_extra={"x-mcp-tool": "list_evidence"},
     summary="Evidence on file for a tranche",
 )
-def list_evidence(milestone_id: str, auth: MilestoneAccessDep) -> list[EvidenceRead]:
+def list_evidence(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep) -> list[EvidenceRead]:
     access, m = auth
     access.require(Action.view)
-    return [disclosure.evidence_read(e, m, access.party.role) for e in m.evidence]
+    shown = [disclosure.evidence_read(e, m, access.party.role) for e in m.evidence]
+    disclosure.record_view(session, m, access.actor, access.party.role, [e.id for e in shown])
+    return shown
+
+
+class PayerView(SQLModel):
+    withheld: bool = Field(description="True while the payer side gets the filtered view (on_capture, not captured).")
+    evidence: list[EvidenceRead] = Field(description="The evidence list exactly as the payer side gets it.")
+    verdict: VerdictRead | None = Field(description="The latest verdict exactly as the payer side gets it.")
+
+
+@router.get(
+    "/milestones/{milestone_id}/payer-view",
+    summary="What the payer side sees of this tranche's evidence and verdict",
+    description="For the payee (to see what they're showing) and reviewers (to judge what the payer is deciding "
+    "on, next to the full evidence). The payer side gets its own view, which is the same thing.",
+)
+def payer_view(milestone_id: str, auth: MilestoneAccessDep) -> PayerView:
+    access, m = auth
+    access.require(Action.view)
+    v = verification.latest_verdict(m)
+    return PayerView(
+        withheld=disclosure.restricted(Role.payer, m),
+        evidence=[disclosure.evidence_read(e, m, Role.payer) for e in m.evidence],
+        verdict=disclosure.verdict_read(v, m, Role.payer) if v else None,
+    )
 
 
 @router.get(
@@ -208,14 +233,23 @@ def download_file(evidence_id: str, auth: EvidenceAccessDep, session: SessionDep
     payer_after_reveal = (
         access.party.role == Role.payer and m.agreement.deliverable_release == DeliverableRelease.on_capture
     )
-    if payer_after_reveal or not matches:
+    on_capture = m.agreement.deliverable_release == DeliverableRelease.on_capture
+    if payer_after_reveal or not matches or on_capture:
         record_audit(
             session,
             m.agreement_id,
             access.actor,
-            "deliverable_downloaded" if matches else "deliverable_mismatch",
+            ("deliverable_downloaded" if payer_after_reveal else "evidence_downloaded")
+            if matches
+            else "deliverable_mismatch",
             milestone_id=m.id,
-            detail={"evidence_id": ev.id, "sha256": digest, "committed_sha256": ev.file.sha256, "matches": matches},
+            detail={
+                "evidence_id": ev.id,
+                "side": str(access.party.role),
+                "sha256": digest,
+                "committed_sha256": ev.file.sha256,
+                "matches": matches,
+            },
         )
         session.commit()
     if not matches:

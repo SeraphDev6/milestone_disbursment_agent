@@ -29,6 +29,7 @@ class Action(StrEnum):
     connect_github = "connect_github"
     dispute = "dispute"
     compliance_packet = "compliance_packet"
+    dispute_pack = "dispute_pack"
     manage_subscriptions = "manage_subscriptions"
     assign = "assign"
     contest = "contest"
@@ -54,6 +55,7 @@ RULES: dict[Action, dict[Role, OrgRole]] = {
     Action.connect_github: {E: A},
     Action.dispute: {E: A},
     Action.compliance_packet: {P: M, R: M},
+    Action.dispute_pack: {E: M, R: M},  # the payee's answer to a chargeback; the payer has the packet
     Action.manage_subscriptions: {P: A, E: A, R: A},
     Action.assign: {P: M, E: M},
     # A contest pauses a held tranche's payout. Each side can only concede: the payer withdraws it (pay the
