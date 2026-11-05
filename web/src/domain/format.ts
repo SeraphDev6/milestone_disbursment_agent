@@ -71,7 +71,7 @@ export const VISIBILITY_LABEL = {
   hash_only: { label: "Pass/fail only", description: "The payer sees which criteria passed and the file's fingerprint (hash)." },
   verdict_only: { label: "Pass/fail and values found", description: "Also the value found for each measure, e.g. “214 attendees”." },
   excerpt: { label: "Plus the verifier's quotes", description: "Also the short quotes the verifier cited and its reasoning." },
-  preview: { label: "Plus a preview", description: "Previews aren't generated yet, so for now this is the same as quotes." },
+  preview: { label: "Plus a preview", description: "Quotes, plus a watermarked preview: chosen PDF pages, a small copy of an image, or a sheet's headers and totals. Never the original." },
 } as const;
 export const VISIBILITY_ORDER = ["hash_only", "verdict_only", "excerpt", "preview"] as const;
 export const COMPARATOR_LABEL = {

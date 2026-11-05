@@ -352,6 +352,7 @@ def build_commit_evidence(tc: TaggedCommit, api: GitHubAPI) -> tuple[EvidenceCre
         external_ref=commit_url,
         dated=tc.at.date(),
         artifact_uris=[u for u in (preview, tc.url, commit_url) if u],
+        preview_url=preview,
     )
     facts = {} if ci.green is None else {"ci_green": ci.green}
     return evidence, facts, sha

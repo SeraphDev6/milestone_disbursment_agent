@@ -828,6 +828,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/milestones/{milestone_id}/payer-view": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the payer side sees of this tranche's evidence and verdict
+         * @description For the payee (to see what they're showing) and reviewers (to judge what the payer is deciding on, next to the full evidence). The payer side gets its own view, which is the same thing.
+         */
+        get: operations["payer_view_milestones__milestone_id__payer_view_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/evidence/{evidence_id}/file": {
         parameters: {
             query?: never;
@@ -840,6 +860,26 @@ export interface paths {
          * @description The response carries X-Content-SHA256 (the file's hash, checked against the hash recorded at upload, which is what the verifier read) and X-Pinned-Ref. On a deliverable_release=on_capture agreement the payer side can download only once the tranche is captured; each such download is recorded in the audit log.
          */
         get: operations["download_file_evidence__evidence_id__file_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evidence/{evidence_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download the payer-facing preview of an evidence file (payer_visibility=preview)
+         * @description Derived from the original (watermarked PDF pages, a downscaled watermarked image, or a sheet's headers and totals), never the original itself. The payer side may open it before capture when the item's visibility is preview; the payee and reviewers always can, to see what the payer sees.
+         */
+        get: operations["download_preview_evidence__evidence_id__preview_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1102,6 +1142,26 @@ export interface paths {
         };
         /** Every event for one tranche: who did what, when, and why */
         get: operations["milestone_audit_milestones__milestone_id__audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/milestones/{milestone_id}/dispute-pack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One tranche's record for answering a chargeback (payee or reviewer)
+         * @description The signed criteria, the commitment (hashes of what was verified), when the work was opened to the payer, every payer-side view and download since, the verdict with citations, and the payments.
+         */
+        get: operations["dispute_pack_milestones__milestone_id__dispute_pack_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1501,6 +1561,11 @@ export interface components {
             dated?: string | null;
             /** @description on_capture agreements: what the payer sees of these files before capture. */
             payer_visibility?: components["schemas"]["EvidenceVisibility"] | null;
+            /**
+             * Preview Pages
+             * @description payer_visibility=preview: the PDF pages the payer's preview shows, e.g. '1-2,5' (at most 5; default the first two). Images and spreadsheets get their own previews.
+             */
+            preview_pages?: string | null;
         };
         /** ClaimIn */
         ClaimIn: {
@@ -1794,6 +1859,16 @@ export interface components {
              */
             artifact_uris?: string[];
             /**
+             * Preview Url
+             * @description A preview the payee hosts for the payer to try (a deployed build, a demo). Shown to the payer side at any visibility, since giving one is the payee's choice to show it; it isn't checked.
+             */
+            preview_url?: string | null;
+            /**
+             * Preview Expires At
+             * @description When the preview link stops being shown. Defaults to 30 days after submission.
+             */
+            preview_expires_at?: string | null;
+            /**
              * External Ref
              * @description Source-native id (file id, URL). Defaults to a content hash.
              */
@@ -1828,6 +1903,19 @@ export interface components {
             artifact_uris: string[];
             /** Has File */
             has_file: boolean;
+            /**
+             * Has Preview
+             * @description A payer-facing preview exists and this caller may open it (/evidence/{id}/preview).
+             * @default false
+             */
+            has_preview?: boolean;
+            /**
+             * Preview Url
+             * @description The payee's preview link, while it hasn't expired.
+             */
+            preview_url?: string | null;
+            /** Preview Expires At */
+            preview_expires_at?: string | null;
             /**
              * Received At
              * Format: date-time
@@ -2700,6 +2788,21 @@ export interface components {
              * @description Send an admin of the payee org here to connect their PayPal account.
              */
             onboarding_url: string;
+        };
+        /** PayerView */
+        PayerView: {
+            /**
+             * Withheld
+             * @description True while the payer side gets the filtered view (on_capture, not captured).
+             */
+            withheld: boolean;
+            /**
+             * Evidence
+             * @description The evidence list exactly as the payer side gets it.
+             */
+            evidence: components["schemas"]["EvidenceRead"][];
+            /** @description The latest verdict exactly as the payer side gets it. */
+            verdict: components["schemas"]["VerdictRead"] | null;
         };
         /**
          * PayoutRoute
@@ -5131,6 +5234,41 @@ export interface operations {
             };
         };
     };
+    payer_view_milestones__milestone_id__payer_view_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Which of your orgs you act for, if you belong to several. */
+                "X-Org-Id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                milestone_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PayerView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     download_file_evidence__evidence_id__file_get: {
         parameters: {
             query?: never;
@@ -5154,6 +5292,39 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_preview_evidence__evidence_id__preview_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Which of your orgs you act for, if you belong to several. */
+                "X-Org-Id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                evidence_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -5736,6 +5907,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditEventRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dispute_pack_milestones__milestone_id__dispute_pack_get: {
+        parameters: {
+            query?: {
+                format?: "json" | "pdf";
+            };
+            header?: {
+                /** @description Which of your orgs you act for, if you belong to several. */
+                "X-Org-Id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                milestone_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

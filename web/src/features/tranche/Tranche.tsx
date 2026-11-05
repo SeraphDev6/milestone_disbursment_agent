@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useParams } from "react-router";
-import { isMock, useEvidence, useGitHubRepos, useHandovers, useHealth, useMilestoneAudit, useRetryHandover, useTrancheActions, useVerdict } from "@/api/queries";
+import { isMock, useEvidence, useGitHubRepos, useHandovers, useHealth, useMilestoneAudit, usePayerView, useRetryHandover, useTrancheActions, useVerdict } from "@/api/queries";
 import { useAgreementCtx, useOrgCtx, paths } from "@/app/context";
 import { useTitle } from "@/app/RouteAnnouncer";
 import { useSessions } from "@/auth/session";
@@ -8,7 +8,8 @@ import type { ActorNames } from "@/domain/actors";
 import { date, dateTime, money } from "@/domain/format";
 import { canOnTranche } from "@/domain/permissions";
 import { IN_FLIGHT, MILESTONE_STAMPS } from "@/domain/status";
-import { Busy, Callout, Crumbs, layout, PageHeader, Sheet, Stamp } from "@/design/components";
+import { Busy, Callout, Crumbs, layout, PageHeader, Sheet, Stamp, Tabs } from "@/design/components";
+import { ACCESS_ACTIONS, AccessLog, DisputePack, PayerSees } from "./Access";
 import { Actions } from "./Actions";
 import { AddEvidence, EvidenceList } from "./Evidence";
 import { HandedOver, latestHandovers } from "./Handover";
@@ -36,6 +37,9 @@ export function Tranche() {
   const repos = useGitHubRepos(org.orgId, hasCode);
   const handovers = useHandovers(milestoneId, org.orgId, !!m?.revealed_at && hasCode);
   const retryHandover = useRetryHandover(milestoneId, org.orgId);
+  const onCapture = a.deliverable_release === "on_capture";
+  const comparePayer = onCapture && seat.role !== "payer";
+  const payerView = usePayerView(milestoneId, org.orgId, comparePayer && (evidence.data?.length ?? 0) > 0, status);
 
   const names: ActorNames = useMemo(
     () => ({
@@ -57,6 +61,8 @@ export function Tranche() {
   const working = IN_FLIGHT.has(m.status);
   const payeeName = a.parties.find((p) => p.role === "payee")?.display_name ?? "the payee";
   const contestEvent = [...events].reverse().find((e) => e.action === "contested");
+  const payerName = a.parties.find((p) => p.role === "payer")?.display_name ?? "the payer";
+  const fullList = evidence.isPending ? <Busy label="Loading evidence" /> : <EvidenceList evidence={evidence.data ?? []} orgId={org.orgId} handovers={latestHandovers(events)} checkHandover={acts.handover} repos={(repos.data ?? []).map((r) => r.repo)} />;
 
   return (
     <div className={layout.stackLg}>
@@ -122,7 +128,18 @@ export function Tranche() {
             </Sheet>
           )}
           <Sheet title="Evidence on file">
-            {evidence.isPending ? <Busy label="Loading evidence" /> : <EvidenceList evidence={evidence.data ?? []} orgId={org.orgId} handovers={latestHandovers(events)} checkHandover={acts.handover} repos={(repos.data ?? []).map((r) => r.repo)} />}
+            {comparePayer && (evidence.data?.length ?? 0) > 0 ? (
+              <Tabs
+                label="Whose view of the evidence"
+                defaultSelected="full"
+                tabs={[
+                  { id: "full", label: "Full evidence", content: fullList },
+                  { id: "payer", label: `What ${payerName} sees`, content: <PayerSees view={payerView.data} criteria={m.criteria} orgId={org.orgId} payerName={payerName} /> },
+                ]}
+              />
+            ) : (
+              fullList
+            )}
           </Sheet>
           {isPayee && (
             <AddEvidence
@@ -139,8 +156,18 @@ export function Tranche() {
         <div className={layout.stack}>
           <Actions a={a} m={m} seat={seat} verdict={v} acts={acts} rejected={rejected} />
           <Sheet title="History" titleLevel={2} tight>
-            {audit.isPending ? <Busy label="Loading history" /> : <Timeline events={events} names={names} />}
+            {audit.isPending ? <Busy label="Loading history" /> : <Timeline events={events.filter((e) => !ACCESS_ACTIONS.has(e.action))} names={names} />}
           </Sheet>
+          {onCapture && (
+            <Sheet title="Who opened the evidence" titleLevel={2} tight>
+              {audit.isPending ? <Busy label="Loading" /> : <AccessLog events={events} names={names} />}
+            </Sheet>
+          )}
+          {m.revealed_at && seat.role !== "payer" && (
+            <Sheet title="Dispute pack" titleLevel={2} tight>
+              <DisputePack milestoneId={m.id} orgId={org.orgId} />
+            </Sheet>
+          )}
         </div>
       </div>
     </div>

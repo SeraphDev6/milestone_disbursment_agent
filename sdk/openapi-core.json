@@ -377,6 +377,19 @@
               }
             ],
             "description": "on_capture agreements: what the payer sees of these files before capture."
+          },
+          "preview_pages": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "payer_visibility=preview: the PDF pages the payer's preview shows, e.g. '1-2,5' (at most 5; default the first two). Images and spreadsheets get their own previews.",
+            "title": "Preview Pages"
           }
         },
         "required": [
@@ -903,6 +916,32 @@
               }
             ],
             "description": "deliverable_release=on_capture: what the payer sees of this item before capture. Defaults to the agreement's min_evidence_visibility and can't be below it. Ignored for on_submit agreements."
+          },
+          "preview_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the preview link stops being shown. Defaults to 30 days after submission.",
+            "title": "Preview Expires At"
+          },
+          "preview_url": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A preview the payee hosts for the payer to try (a deployed build, a demo). Shown to the payer side at any visibility, since giving one is the payee's choice to show it; it isn't checked.",
+            "title": "Preview Url"
           },
           "title": {
             "description": "File name or short label, e.g. 'Q2 sign-in sheets.csv'.",

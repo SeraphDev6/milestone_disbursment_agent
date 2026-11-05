@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     # Encrypts secrets stored for later use (orgs' SSO client secrets) and signs browser CSRF tokens. Must be set
     # and kept stable outside mock mode.
     secret_key: SecretStr = SecretStr("dev-only-insecure-secret-key")
+    # Encrypts stored files at rest (AES-256-GCM). 32 bytes, base64. Unset: derived from SECRET_KEY. To rotate, set a
+    # new key and list the old ones (comma-separated) in FILE_ENCRYPTION_OLD_KEYS, then run `app.jobs encrypt-files`.
+    file_encryption_key: SecretStr | None = None
+    file_encryption_old_keys: SecretStr | None = None
+    # Custody of held deliverables. Unset keeps originals for good. Set: this many days after a tranche closes
+    # (settled, refunded, or its agreement cancelled, with no activity since), and never before PayPal's 180-day
+    # chargeback window from capture ends, the `daily` job either deletes the original files and evidence text
+    # (keeping their hashes) or makes them payee-only.
+    retention_days: int | None = Field(default=None, ge=0)
+    retention_action: Literal["delete", "payee_only"] = "delete"
     # When set, creating agreements and extracting documents (which spends model credits) requires X-Org-Key.
     org_api_key: str | None = None
     # Apply pending Alembic migrations at startup. Safe with one app instance; turn off and run

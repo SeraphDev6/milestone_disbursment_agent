@@ -12,6 +12,7 @@ from app.api.mcp import build_mcp
 from app.api.spa import DIST, has_build, make_spa
 from app.config import API_PREFIX, Mode, Settings, get_settings, use_claude
 from app.db import make_engine, make_sessionmaker, migrate
+from app.integrations import filecrypt
 from app.integrations.crypto import SecretBox
 from app.integrations.email import make_mailer
 from app.integrations.github import GitHubClient
@@ -172,6 +173,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.oidc = OIDCClient(allow_local=settings.is_mock, resolve=resolve_host)
     app.state.txt_lookup = lookup_txt
     app.state.secrets = SecretBox(settings.secret_key.get_secret_value())
+    filecrypt.configure(filecrypt.FileCipher.from_settings(settings))
 
     @app.exception_handler(ServiceError)
     async def _service_error(request: Request, exc: ServiceError) -> JSONResponse:

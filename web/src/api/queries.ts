@@ -453,6 +453,15 @@ export function useEvidence(milestoneId: string, orgId: string, status?: Milesto
   });
 }
 
+/** The tranche as the payer side gets it, for the payee and reviewers while the work is withheld. */
+export function usePayerView(milestoneId: string, orgId: string, enabled: boolean, status?: MilestoneStatus) {
+  return useQuery({
+    queryKey: [...keys.evidence(milestoneId), "payer-view", status],
+    queryFn: () => call(api.GET("/milestones/{milestone_id}/payer-view", { ...mp(milestoneId), ...asOrg(orgId) })),
+    enabled,
+  });
+}
+
 /** Latest verdict; null (not an error) when there isn't one yet. */
 export function useVerdict(milestoneId: string, orgId: string, status?: MilestoneStatus) {
   return useQuery({
@@ -505,12 +514,13 @@ export function useTrancheActions(agreementId: string, milestoneId: string, orgI
       onSuccess: done,
     }),
     upload: useMutation({
-      mutationFn: ({ files, note, dated, payer_visibility }: { files: File[]; note?: string; dated?: string; payer_visibility?: EvidenceVisibility }) => {
+      mutationFn: ({ files, note, dated, payer_visibility, preview_pages }: { files: File[]; note?: string; dated?: string; payer_visibility?: EvidenceVisibility; preview_pages?: string }) => {
         const fd = new FormData();
         for (const f of files) fd.append("files", f, f.name);
         if (note) fd.append("note", note);
         if (dated) fd.append("dated", dated);
         if (payer_visibility) fd.append("payer_visibility", payer_visibility);
+        if (preview_pages) fd.append("preview_pages", preview_pages);
         return call(
           api.POST("/milestones/{milestone_id}/uploads", {
             ...m,

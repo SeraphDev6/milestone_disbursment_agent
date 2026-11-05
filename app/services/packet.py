@@ -48,6 +48,34 @@ def _delivery_result(d: dict) -> str:
     return ""
 
 
+# Reads of a tranche's evidence: list views (filtered or full), downloads of originals and handed-over archives.
+ACCESS_ACTIONS = ("evidence_viewed", "evidence_downloaded", "deliverable_downloaded", "preview_downloaded")
+
+
+def _access(e: AuditEvent) -> dict:
+    d = e.detail or {}
+    side = d.get("side") or ("payer" if e.action == "deliverable_downloaded" else None)
+    return {
+        "at": _iso(e.at),
+        "actor": e.actor,
+        "side": side,
+        "action": e.action,
+        "view": d.get("view") or ("preview" if e.action == "preview_downloaded" else "full"),
+        "evidence_ids": d.get("evidence_ids") or ([d["evidence_id"]] if d.get("evidence_id") else []),
+        "handover_id": d.get("handover_id"),
+        "sha256": d.get("sha256"),
+    }
+
+
+def _access_what(x: dict) -> str:
+    if x["action"] == "evidence_viewed":
+        return f"viewed {len(x['evidence_ids'])} item(s), {x['view']} view"
+    if x["action"] == "preview_downloaded":
+        return f"opened the preview of {', '.join(x['evidence_ids'])}"
+    target = f"archive {x['handover_id'][:8]}" if x.get("handover_id") else f"file {', '.join(x['evidence_ids'])}"
+    return f"downloaded {target}, sha256 {str(x.get('sha256'))[:16]}"
+
+
 def milestone_section(session: Session, m: Milestone, role: Role | str | None = None) -> dict:
     """`role`: the side asking. The payer side gets the filtered view while the tranche's evidence is withheld
     (deliverable_release=on_capture, not yet captured); None or another side gets everything."""
@@ -114,6 +142,7 @@ def milestone_section(session: Session, m: Milestone, role: Role | str | None = 
                 "deliverable_handed_over",
             )
         ],
+        "access_log": [_access(e) for e in events if e.action in ACCESS_ACTIONS],
         "reviews": [
             {"at": _iso(e.at), "actor": e.actor, "action": e.action, "note": (e.detail or {}).get("note")}
             for e in events
@@ -232,8 +261,9 @@ def render_pdf(packet: dict) -> bytes:
     h1, h2, h3 = styles["Title"], styles["Heading2"], styles["Heading3"]
     small = styles["BodyText"].clone("small", fontSize=8, leading=10)
     a = packet["agreement"]
+    title = f"{packet.get('kind', 'Compliance packet')}: {a['title']}"
     flow: list = [
-        _p(f"Compliance packet: {a['title']}", h1),
+        _p(title, h1),
         _p(f"Generated {packet['generated_at']} | Agreement {a['id']}", small),
         Spacer(1, 8),
         _table(
@@ -263,6 +293,8 @@ def render_pdf(packet: dict) -> bytes:
             small,
         ),
     ]
+    if packet.get("dispute"):
+        flow += _dispute_flow(packet["dispute"], h2, small)
     for m in packet["milestones"]:
         flow += [_p(f"{m['title']} ({a['currency']} {m['amount']}): {m['status']}", h2), _p("Acceptance criteria", h3)]
         flow.append(
@@ -345,6 +377,16 @@ def render_pdf(packet: dict) -> bytes:
                     small,
                 ),
             ]
+        if m.get("access_log"):
+            flow += [
+                _p("Who opened the evidence", h3),
+                _table(
+                    [["When", "Who", "Side", "What"]]
+                    + [[x["at"], x["actor"], x["side"], _access_what(x)] for x in m["access_log"]],
+                    [1.4 * inch, 1.9 * inch, 0.7 * inch, 2.5 * inch],
+                    small,
+                ),
+            ]
         if m["reviews"]:
             flow += [
                 _p("Reviews", h3),
@@ -375,7 +417,95 @@ def render_pdf(packet: dict) -> bytes:
         ),
     ]
     buf = io.BytesIO()
-    SimpleDocTemplate(
-        buf, pagesize=LETTER, title=f"Compliance packet: {a['title']}", leftMargin=0.75 * inch, rightMargin=0.75 * inch
-    ).build(flow)
+    SimpleDocTemplate(buf, pagesize=LETTER, title=title, leftMargin=0.75 * inch, rightMargin=0.75 * inch).build(flow)
     return buf.getvalue()
+
+
+def _dispute_flow(d: dict, h2, small) -> list:
+    rows = [
+        ["Revealed to the payer", d["revealed_at"] or "not revealed"],
+        ["Criteria hash both parties signed", d["criteria_hash"]],
+    ] + [[f"Committed: {c['title']}", c["commitment"]] for c in d["commitments"]]
+    flow: list = [
+        _p("Dispute summary", h2),
+        _p(
+            "The payee delivered against criteria both parties signed; the verdict below was reached before the "
+            "work was opened to the payer, and the payer's access to it afterwards is listed.",
+            small,
+        ),
+        _table([["", ""], *rows], [2.2 * inch, 4.3 * inch], small),
+    ]
+    if d["payer_access"]:
+        flow += [
+            Spacer(1, 6),
+            _p("The payer side's access to the delivered work", small),
+            _table(
+                [["When", "Who", "What"]] + [[x["at"], x["actor"], _access_what(x)] for x in d["payer_access"]],
+                [1.5 * inch, 2.2 * inch, 2.8 * inch],
+                small,
+            ),
+        ]
+    if d["paypal_disputes"]:
+        flow += [
+            Spacer(1, 6),
+            _table(
+                [["When", "PayPal dispute", "Reason", "Status"]]
+                + [[x["at"], x["dispute_id"], x["reason"], x["status"]] for x in d["paypal_disputes"]],
+                [1.5 * inch, 1.8 * inch, 1.8 * inch, 1.4 * inch],
+                small,
+            ),
+        ]
+    return flow
+
+
+def build_dispute_pack(session: Session, m: Milestone) -> dict:
+    """One tranche's record for answering a chargeback or customer dispute: the signed criteria, the commitment
+    (what was verified, by hash), when the work was opened to the payer, everything the payer side opened since,
+    the verdict with citations and the payments. Built for the payee, so nothing is filtered."""
+    a = m.agreement
+    packet = build_packet(session, a, Role.payee)
+    section = next(x for x in packet["milestones"] if x["id"] == m.id)
+    events = session.exec(select(AuditEvent).where(AuditEvent.milestone_id == m.id).order_by(AuditEvent.at)).all()
+    released = next((e for e in events if e.action == "deliverable_released"), None)
+    by_id = {e.id: e for e in m.evidence}
+    commitments = []
+    for item in (released.detail or {}).get("evidence", []) if released else []:
+        ev = by_id.get(item.get("id") or item.get("evidence_id") or "")
+        commitments.append(
+            {
+                "title": ev.title if ev else item.get("id"),
+                "commitment": " / ".join(
+                    str(x) for x in (item.get("pinned_ref"), item.get("file_sha256") or item.get("sha256")) if x
+                ),
+            }
+        )
+    if not commitments:
+        commitments = [
+            {
+                "title": e.title,
+                "commitment": " / ".join(x for x in (e.pinned_ref, e.file.sha256 if e.file else None) if x),
+            }
+            for e in m.evidence
+        ]
+    return packet | {
+        "kind": "Dispute pack",
+        "milestones": [section],
+        "ledger": [e for e in packet["ledger"] if e["milestone_id"] == m.id],
+        "dispute": {
+            "milestone_id": m.id,
+            "revealed_at": _iso(m.revealed_at),
+            "criteria_hash": a.criteria_hash,
+            "commitments": commitments,
+            "payer_access": [x for x in section["access_log"] if x["side"] == "payer"],
+            "paypal_disputes": [
+                {
+                    "at": _iso(e.at),
+                    "dispute_id": (e.detail or {}).get("dispute_id"),
+                    "reason": (e.detail or {}).get("reason"),
+                    "status": (e.detail or {}).get("status"),
+                }
+                for e in events
+                if (e.detail or {}).get("dispute_id")
+            ],
+        },
+    }

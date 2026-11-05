@@ -46,6 +46,7 @@ export type SettlementRead = S["SettlementRead"];
 export type SettlementStatus = S["SettlementStatus"];
 export type FundingSummary = Req<S["FundingSummary"], "in_dispute_window" | "refunded">;
 export type EvidenceRead = S["EvidenceRead"];
+export type PayerView = S["PayerView"];
 export type EvidenceCreate = S["EvidenceCreate"];
 export type EvidenceAccepted = S["EvidenceAccepted"];
 export type VerdictRead = Req<S["VerdictRead"], "is_precheck">;
