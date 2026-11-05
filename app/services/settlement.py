@@ -660,6 +660,7 @@ def disburse_due(session: Session, gw: PayPalGateway, now: datetime, actor: str 
     release of contested direct captures. Run from the scheduler (hourly is plenty)."""
     counts = {"paid_out": 0, "checked": 0, "auto_released": 0, "errors": 0}
     counts.update(follow_pending(session, gw, now, actor))
+    counts.update(poll_disputes(session, gw, now))  # before paying, so a dispute PayPal didn't announce pauses it
     for m in session.exec(
         select(Milestone).where(col(Milestone.status).in_((MilestoneStatus.held, MilestoneStatus.contested)))
     ).all():
@@ -1028,6 +1029,53 @@ def _customer_dispute(session: Session, event_type: str, res: dict, actor: str, 
     return f"dispute {event_type.rsplit('.', 1)[-1].lower()} recorded"
 
 
+DISPUTE_POLL_LOOKBACK = timedelta(days=3)  # re-read disputes updated this recently; covers missed hourly runs
+DISPUTE_POLL_HORIZON = timedelta(days=180)  # PayPal's window for a buyer to open a dispute
+
+
+def poll_disputes(session: Session, gw: PayPalGateway, now: datetime) -> dict[str, int]:
+    """Backstop to CUSTOMER.DISPUTE.* webhooks (another team saw none in sandbox): ask the Disputes API about
+    disputes on captures we know about and handle each new state exactly like the webhook would. Asks the platform
+    account (platform-route captures) and each connected payee with a recent direct-route capture."""
+    counts = {"disputes_recorded": 0, "dispute_accounts_unreadable": 0}
+    recent = session.exec(
+        select(Milestone.payout_route, Milestone.payee_merchant_id)
+        .where(col(Milestone.captured_at).is_not(None), col(Milestone.captured_at) >= now - DISPUTE_POLL_HORIZON)
+        .distinct()
+    ).all()
+    accounts = {merchant if route == PayoutRoute.direct else None for route, merchant in recent}
+    for merchant in sorted(accounts, key=lambda a: a or ""):
+        try:
+            disputes = gw.list_disputes(updated_after=now - DISPUTE_POLL_LOOKBACK, payee_merchant_id=merchant)
+        except PayPalError:
+            counts["dispute_accounts_unreadable"] += 1  # e.g. a payee onboarded before READ_SELLER_DISPUTE
+            continue
+        for res in disputes:
+            dispute_id = res.get("dispute_id")
+            if not dispute_id:
+                continue
+            event_id = f"poll:{dispute_id}:{res.get('update_time') or res.get('status')}"[:80]
+            if session.get(WebhookEvent, event_id) is not None:
+                continue
+            seen = session.exec(
+                select(WebhookEvent.id).where(
+                    WebhookEvent.resource_id == dispute_id, col(WebhookEvent.event_type).in_(DISPUTE_EVENTS)
+                )
+            ).first()
+            kind = "RESOLVED" if res.get("status") == "RESOLVED" else ("UPDATED" if seen else "CREATED")
+            event_type = f"CUSTOMER.DISPUTE.{kind}"
+            outcome = _customer_dispute(session, event_type, res, "system:dispute_poll", now)
+            session.add(WebhookEvent(id=event_id, event_type=event_type, resource_id=dispute_id, outcome=outcome))
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()  # a concurrent run recorded it
+                continue
+            if not outcome.startswith("ignored"):
+                counts["disputes_recorded"] += 1
+    return counts
+
+
 def _related(resource: dict, key: str) -> str | None:
     return (resource.get("supplementary_data") or {}).get("related_ids", {}).get(key)
 
@@ -1130,7 +1178,8 @@ def handle_webhook(session: Session, event: dict, now: datetime, gw: PayPalGatew
         return "duplicate"
     res = event.get("resource") or {}
     outcome = _dispatch(session, event_type, res, now)
-    session.add(WebhookEvent(id=event_id, event_type=event_type, resource_id=res.get("id"), outcome=outcome))
+    resource_id = res.get("id") or res.get("dispute_id")  # dispute resources carry dispute_id, not id
+    session.add(WebhookEvent(id=event_id, event_type=event_type, resource_id=resource_id, outcome=outcome))
     try:
         session.commit()
     except IntegrityError:

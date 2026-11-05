@@ -28,6 +28,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Protocol
 from urllib.parse import urlsplit
@@ -234,6 +235,11 @@ class PayPalGateway(Protocol):
 
     def verify_webhook(self, headers: dict[str, str], event: dict) -> bool: ...
 
+    def list_disputes(self, *, updated_after: datetime, payee_merchant_id: str | None) -> list[dict]: ...
+
+    # Disputes updated since `updated_after`, in the CUSTOMER.DISPUTE.* webhook resource shape. With a payee
+    # merchant id, that connected payee's disputes (direct-route captures live in their account).
+
 
 def _money(amount: Decimal, currency: str) -> dict:
     return {"currency_code": currency, "value": f"{amount:.2f}"}
@@ -257,6 +263,7 @@ class MockPayPal:
     invoices: dict[str, dict] = field(default_factory=dict)
     referrals: dict[str, dict] = field(default_factory=dict)  # tracking id -> {return_url, merchant_id}
     merchants: dict[str, MerchantStatus] = field(default_factory=dict)
+    disputes: list[tuple[str | None, dict]] = field(default_factory=list)  # (payee merchant id or None, dispute)
     next_capture_status: str = "COMPLETED"  # tests flip this to PENDING / DECLINED
     next_payout_status: str = "SUCCESS"  # PENDING, UNCLAIMED, FAILED
     fail_next: PayPalError | None = None  # tests inject a failure for the next call (PayPal did nothing)
@@ -574,6 +581,25 @@ class MockPayPal:
 
     def verify_webhook(self, headers, event) -> bool:
         return headers.get("paypal-transmission-sig") == MOCK_WEBHOOK_SIGNATURE
+
+    # --- disputes ---
+
+    def open_dispute(self, capture_id: str, *, payee_merchant_id: str | None = None, **fields) -> dict:
+        """What a payer does in PayPal's Resolution Center. Tests update the returned dict to move it on."""
+        d = {
+            "dispute_id": self._id("DISPUTE"),
+            "reason": "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+            "status": "OPEN",
+            "update_time": datetime.now(UTC).isoformat(),
+            "disputed_transactions": [{"seller_transaction_id": capture_id}],
+            **fields,
+        }
+        self.disputes.append((payee_merchant_id, d))
+        return d
+
+    def list_disputes(self, *, updated_after, payee_merchant_id) -> list[dict]:
+        self._maybe_fail()
+        return [dict(d) for owner, d in self.disputes if owner == payee_merchant_id]
 
 
 # --- Sandbox / live REST ---------------------------------------------------------------
@@ -951,7 +977,9 @@ class SandboxPayPal:
                         "rest_api_integration": {
                             "integration_method": "PAYPAL",
                             "integration_type": "THIRD_PARTY",
-                            "third_party_details": {"features": ["PAYMENT", "REFUND", "DELAY_FUNDS_DISBURSEMENT"]},
+                            "third_party_details": {
+                                "features": ["PAYMENT", "REFUND", "DELAY_FUNDS_DISBURSEMENT", "READ_SELLER_DISPUTE"]
+                            },
                         }
                     },
                 }
@@ -1067,6 +1095,33 @@ class SandboxPayPal:
         except PayPalError:
             return False
         return data.get("verification_status") == "SUCCESS"
+
+    # --- disputes ---
+
+    def list_disputes(self, *, updated_after, payee_merchant_id) -> list[dict]:
+        """GET /v1/customer/disputes, following `next` links. Reading a connected payee's disputes needs the
+        READ_SELLER_DISPUTE feature from onboarding and the acting-for-payee assertion; PayPal answers 403 for
+        payees who connected before that feature was requested."""
+        headers = {}
+        if payee_merchant_id:
+            headers["PayPal-Auth-Assertion"] = self._assertion(payee_merchant_id)
+        params: dict | None = {
+            "update_time_after": updated_after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+            "page_size": 50,
+        }
+        path, out = "/v1/customer/disputes", []
+        for _ in range(20):  # 1,000 disputes per run is far beyond what this platform sees
+            data = self._call("GET", path, params=params, headers=headers)
+            for item in data.get("items") or []:
+                if not item.get("disputed_transactions"):  # summaries may omit them; the detail has them
+                    item = self._call("GET", f"/v1/customer/disputes/{item['dispute_id']}", headers=headers)
+                out.append(item)
+            nxt = next((link["href"] for link in data.get("links") or [] if link.get("rel") == "next"), None)
+            if not nxt:
+                break
+            parts = urlsplit(nxt)
+            path, params = parts.path + (f"?{parts.query}" if parts.query else ""), None
+        return out
 
 
 def make_gateway(settings) -> PayPalGateway:

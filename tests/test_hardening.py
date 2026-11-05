@@ -259,6 +259,76 @@ def test_dispute_for_an_unknown_transaction_is_ignored(client):
     assert webhook(client, event).json() == {"outcome": "ignored: no tranche for this dispute"}
 
 
+def test_dispute_poll_pauses_a_tranche_when_no_webhook_arrives(client, draft):
+    aid, (m1, _), ctx = create_active(client, {**draft, "dispute_window_days": 3})
+    connect_paypal(client, ctx)
+    s = captured(client, aid, ctx, m1)
+    merchant = tranche(client, m1).payee_merchant_id
+    assert merchant
+    d = gw(client).open_dispute(s["paypal_ref"], payee_merchant_id=merchant)
+    counts = run_payouts(client, utcnow() + timedelta(days=5))  # window closed: the poll must run before paying
+    assert counts["disputes_recorded"] == 1 and counts["paid_out"] == 0
+    assert tranche(client, m1).status == "contested"
+    assert run_payouts(client, utcnow() + timedelta(days=5))["disputes_recorded"] == 0  # same state: deduped
+    d.update(status="RESOLVED", update_time="2026-12-01T00:00:00Z")
+    assert run_payouts(client, utcnow() + timedelta(days=6))["disputes_recorded"] == 1
+    assert audit_actions(client, m1)[-2:] == ["contested", "paypal_dispute_resolved"]
+
+
+def test_dispute_poll_after_the_webhook_records_an_update_not_a_second_contest(client, draft):
+    aid, (m1, _), ctx = create_active(client, {**draft, "dispute_window_days": 3})  # platform route
+    s = captured(client, aid, ctx, m1)
+    d = gw(client).open_dispute(s["paypal_ref"])
+    event = {"id": "WH-D5", "event_type": "CUSTOMER.DISPUTE.CREATED", "resource": dict(d)}
+    assert webhook(client, event).json() == {"outcome": "dispute opened: payout paused"}
+    run_payouts(client, utcnow())
+    assert audit_actions(client, m1)[-2:] == ["contested", "paypal_dispute_updated"]
+
+
+def test_dispute_poll_skips_accounts_it_cannot_read(client, draft):
+    aid, (m1, _), ctx = create_active(client, {**draft, "dispute_window_days": 3})
+    captured(client, aid, ctx, m1)
+    gw(client).fail_next = PayPalError("PayPal 403: NOT_AUTHORIZED", status=403)
+    counts = run_payouts(client, utcnow())
+    assert counts["dispute_accounts_unreadable"] == 1 and tranche(client, m1).status == "held"
+
+
+def test_dispute_poll_makes_no_calls_without_captures(client):
+    gw(client).fail_next = PayPalError("should not be called")
+    assert run_payouts(client, utcnow())["dispute_accounts_unreadable"] == 0
+
+
+def test_sandbox_lists_disputes_across_pages_and_fills_in_transactions():
+    calls = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls.append((req.url.path, dict(req.url.params), req.headers.get("PayPal-Auth-Assertion")))
+        if req.url.path == "/v1/oauth2/token":
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 3600})
+        if req.url.path == "/v1/customer/disputes" and "page" not in req.url.params:
+            return httpx.Response(
+                200,
+                json={
+                    "items": [{"dispute_id": "PP-D-1", "disputed_transactions": [{"seller_transaction_id": "C1"}]}],
+                    "links": [{"rel": "next", "href": "https://api-m.sandbox.paypal.com/v1/customer/disputes?page=2"}],
+                },
+            )
+        if req.url.path == "/v1/customer/disputes":
+            return httpx.Response(200, json={"items": [{"dispute_id": "PP-D-2"}], "links": []})
+        if req.url.path == "/v1/customer/disputes/PP-D-2":
+            return httpx.Response(200, json={"dispute_id": "PP-D-2", "disputed_transactions": [{"x": 1}]})
+        return httpx.Response(404, json={"name": "NOT_FOUND"})
+
+    base = "https://api-m.sandbox.paypal.com"
+    pp = SandboxPayPal(client_id="cid", client_secret="s", base_url=base, webhook_id=None)
+    pp._client = httpx.Client(base_url=base, transport=httpx.MockTransport(handler))
+    out = pp.list_disputes(updated_after=utcnow() - timedelta(days=3), payee_merchant_id="MERCHANT1")
+    assert [d["dispute_id"] for d in out] == ["PP-D-1", "PP-D-2"]
+    first = next(c for c in calls if c[0] == "/v1/customer/disputes")
+    assert first[1]["page_size"] == "50" and first[1]["update_time_after"].endswith("Z")
+    assert all(c[2] for c in calls if c[0].startswith("/v1/customer/disputes"))  # acting for the payee
+
+
 def test_contested_platform_tranche_pays_the_payee_after_28_days(client, draft):
     aid, (m1, _), ctx = create_active(client, {**draft, "dispute_window_days": 3})  # platform route
     captured(client, aid, ctx, m1)
