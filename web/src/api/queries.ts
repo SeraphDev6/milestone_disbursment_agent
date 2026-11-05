@@ -16,6 +16,7 @@ import type {
   VerdictRead,
   AgreementCreate,
   EvidenceCreate,
+  EvidenceVisibility,
   MilestoneDraft,
   MilestoneStatus,
   OrgRole,
@@ -343,9 +344,10 @@ export function usePacket(agreementId: string, orgId: string, enabled: boolean) 
 
 /** Shape of the compliance packet JSON (app/services/packet.py); untyped in OpenAPI because it's a raw Response. */
 export type PacketResult = { criterion_id: string; met: boolean; decided_by: string; observed?: string | null; evidence_ids: string[]; quote?: string | null; missing?: string | null };
+export type PacketSkeptic = { results: PacketResult[]; rationale: string; confidence: number; model: string; prompt_version: string; disagrees_on: string[]; error?: string | null };
 export type CompliancePacket = {
   generated_at: string;
-  agreement: { id: string; title: string; total_amount: string; currency: string; settlement_mode: string; status: string; criteria_hash: string | null; auto_release_enabled: boolean; auto_release_threshold: number; released: string; dispute_window_days?: number; deliverable_release?: string };
+  agreement: { id: string; title: string; total_amount: string; currency: string; settlement_mode: string; status: string; criteria_hash: string | null; auto_release_enabled: boolean; auto_release_threshold: number; released: string; dispute_window_days?: number; deliverable_release?: string; min_evidence_visibility?: string };
   parties: { role: string; name: string; paypal_email: string | null; confirmed_criteria_hash: string | null; confirmed_at: string | null }[];
   milestones: {
     id: string;
@@ -353,9 +355,12 @@ export type CompliancePacket = {
     amount: string;
     due_date: string | null;
     status: string;
+    revealed_at?: string | null;
+    evidence_withheld?: boolean;
     criteria: { id?: string; statement: string; measure: { metric: string; comparator: string; target?: unknown; unit?: string | null }; verification?: string; check_id?: string | null }[];
-    evidence: { id: string; title: string; type: string; source: string; external_ref: string; pinned_ref: string; dated: string | null; received_at: string; submitted_by: string; has_original_file: boolean }[];
-    verdicts: { id: string; created_at: string; met: boolean; gate: string; model: string; prompt_version: string; model_confidence: number; criteria_hash: string; evidence_ids: string[]; results: PacketResult[]; rationale: string }[];
+    evidence: { id: string; title: string; type: string; source: string; external_ref: string | null; pinned_ref: string; file_sha256?: string | null; payer_visibility?: string; dated: string | null; received_at: string; submitted_by: string; has_original_file: boolean }[];
+    verdicts: { id: string; created_at: string; met: boolean; gate: string; model: string; prompt_version: string; model_confidence: number; criteria_hash: string; evidence_ids: string[]; results: PacketResult[]; rationale: string; skeptic?: PacketSkeptic | null }[];
+    delivery?: ({ at: string; actor: string; action: string; matches?: boolean; how?: string; evidence_id?: string } & Record<string, unknown>)[];
     reviews: { at: string; actor: string; action: string; note: string | null }[];
     settlements: { attempt: number; mode: string; idempotency_key: string; paypal_ref: string | null; status: string; error: string | null; at: string }[];
     payout_route?: string | null;
@@ -469,11 +474,12 @@ export function useTrancheActions(agreementId: string, milestoneId: string, orgI
       onSuccess: done,
     }),
     upload: useMutation({
-      mutationFn: ({ files, note, dated }: { files: File[]; note?: string; dated?: string }) => {
+      mutationFn: ({ files, note, dated, payer_visibility }: { files: File[]; note?: string; dated?: string; payer_visibility?: EvidenceVisibility }) => {
         const fd = new FormData();
         for (const f of files) fd.append("files", f, f.name);
         if (note) fd.append("note", note);
         if (dated) fd.append("dated", dated);
+        if (payer_visibility) fd.append("payer_visibility", payer_visibility);
         return call(
           api.POST("/milestones/{milestone_id}/uploads", {
             ...m,

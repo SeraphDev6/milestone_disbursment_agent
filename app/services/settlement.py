@@ -29,6 +29,7 @@ from app.db import as_utc, record_audit
 from app.integrations.paypal import CreatedOrder, PayPalError, PayPalGateway
 from app.models import (
     AgreementStatus,
+    DeliverableRelease,
     Disbursement,
     DisbursementKind,
     LedgerEntry,
@@ -283,6 +284,42 @@ def _ensure_live_hold(session: Session, gw: PayPalGateway, m: Milestone, actor: 
         session.commit()
 
 
+def _reveal(session: Session, m: Milestone, actor: str, now: datetime) -> None:
+    """deliverable_release=on_capture: the payer's money is captured, so the payer side gets the full evidence.
+    Records the commitment (evidence ids and hashes) the payer can check downloads against. Never undone."""
+    a = m.agreement
+    if a.deliverable_release != DeliverableRelease.on_capture or m.revealed_at is not None:
+        return
+    m.revealed_at = now
+    commitment = [
+        {"evidence_id": e.id, "pinned_ref": e.pinned_ref, "file_sha256": e.file.sha256 if e.file else None}
+        for e in m.evidence
+    ]
+    window_ends = m.release_due_at if m.release_due_at and as_utc(m.release_due_at) > now else None
+    _note(
+        session,
+        m,
+        actor,
+        "deliverable_released",
+        evidence=commitment,
+        dispute_window_ends=window_ends.isoformat() if window_ends else None,
+    )
+    window = (
+        f" You can contest it until {as_utc(window_ends):%B %d, %Y %H:%M} UTC; after that the payee is paid."
+        if window_ends
+        else ""
+    )
+    notify_side(
+        session,
+        m,
+        Role.payer,
+        tranche_subject(m, "Work delivered"),
+        f"'{m.title}' is paid for, so the payee's work is now open to you: {len(commitment)} evidence item(s), each "
+        f"checked against the hash that was verified when you download it.{window}",
+        tone="review",
+    )
+
+
 def _paid_at_capture(m: Milestone) -> bool:
     return m.payout_route == PayoutRoute.direct and m.agreement.dispute_window_days == 0
 
@@ -299,6 +336,7 @@ def _apply_capture_status(session: Session, s: Settlement, status: str, actor: s
         if _paid_at_capture(m):
             _ledger(session, m, "disbursed", ref)
             transition(session, m, MilestoneStatus.settled, actor, "settled", capture_id=ref, attempt=s.attempt)
+            _reveal(session, m, actor, now)
             return
         m.release_due_at = now + timedelta(days=m.agreement.dispute_window_days)
         transition(
@@ -312,6 +350,7 @@ def _apply_capture_status(session: Session, s: Settlement, status: str, actor: s
             payout_route=m.payout_route,
             release_due_at=m.release_due_at.isoformat(),
         )
+        _reveal(session, m, actor, now)
     elif status == "PENDING":
         _note(session, m, actor, "capture_pending", capture_id=s.paypal_ref, attempt=s.attempt)
     else:
@@ -894,12 +933,14 @@ def _close_invoice(
         m.captured_at = m.release_due_at = now
         _ledger(session, m, "collected", ref)
         transition(session, m, MilestoneStatus.held, actor, "invoice_paid", invoice_id=s.paypal_ref, attempt=s.attempt)
+        _reveal(session, m, actor, now)
         session.info.setdefault("payout_due", set()).add(m.id)
         return "invoice paid"
     if paid:
         s.status = SettlementStatus.succeeded
         _ledger(session, m, "paid", ref)
         transition(session, m, MilestoneStatus.settled, actor, "settled", paypal_ref=ref, attempt=s.attempt)
+        _reveal(session, m, actor, now)
         return "invoice paid"
     s.status = status or SettlementStatus.failed
     _ledger(session, m, "invoice_cancelled", s.paypal_ref or f"request:{s.id}")

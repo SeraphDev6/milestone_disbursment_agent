@@ -294,7 +294,7 @@ def confirm(agreement_id: str, body: ConfirmRequest, access: AgreementAccessDep,
                 "lint": report.model_dump(mode="json"),
             },
         )
-    current = criteria_hash(row.milestones, row.deliverable_release)
+    current = criteria_hash(row.milestones, row.deliverable_release, row.min_evidence_visibility)
     if body.criteria_hash != current:
         raise HTTPException(
             status.HTTP_409_CONFLICT,

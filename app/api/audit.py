@@ -42,7 +42,7 @@ def compliance_packet(
     agreement_id: str, access: AgreementAccessDep, session: SessionDep, format: Literal["json", "pdf"] = "json"
 ) -> Response:
     access.require(Action.compliance_packet)
-    packet = build_packet(session, access.party.agreement)
+    packet = build_packet(session, access.party.agreement, access.party.role)
     if format == "pdf":
         return Response(
             render_pdf(packet),

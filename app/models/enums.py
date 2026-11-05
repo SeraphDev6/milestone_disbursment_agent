@@ -13,6 +13,20 @@ class DeliverableRelease(StrEnum):
     on_capture = "on_capture"  # only once the tranche is captured: the payer pays on the verdict (SOWs)
 
 
+class EvidenceVisibility(StrEnum):
+    """What the payer sees of one evidence item before capture, when deliverable_release is on_capture.
+    Ordered from least to most disclosed; the pinned hash is shown at every level."""
+
+    hash_only = "hash_only"  # pass/fail per criterion and the pinned content hash
+    verdict_only = "verdict_only"  # + the observed value and the `missing` text
+    excerpt = "excerpt"  # + the verifier's short citation quote and rationale
+    preview = "preview"  # + a generated preview (until previews exist, the same as excerpt)
+
+    @property
+    def rank(self) -> int:
+        return ["hash_only", "verdict_only", "excerpt", "preview"].index(self.value)
+
+
 class PayoutRoute(StrEnum):
     """How a tranche's money reaches the payee."""
 

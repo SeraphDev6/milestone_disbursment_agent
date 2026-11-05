@@ -16,7 +16,15 @@ from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.columns import PydanticJSON, enum_type, fk, id_field, timestamp
 from app.models.criteria import Criterion, LintReport
-from app.models.enums import AgreementStatus, DeliverableRelease, MilestoneStatus, PayoutRoute, Role, SettlementMode
+from app.models.enums import (
+    AgreementStatus,
+    DeliverableRelease,
+    EvidenceVisibility,
+    MilestoneStatus,
+    PayoutRoute,
+    Role,
+    SettlementMode,
+)
 from app.models.identity import EMAIL_PATTERN
 
 if TYPE_CHECKING:
@@ -105,6 +113,7 @@ class Milestone(MilestoneBase, table=True):
     payee_merchant_id: str | None = Field(default=None, max_length=32)
     captured_at: datetime | None = timestamp(optional=True)
     release_due_at: datetime | None = timestamp(optional=True)  # end of the dispute window
+    revealed_at: datetime | None = timestamp(optional=True)  # on_capture: when the payer got the full evidence
 
     agreement: "Agreement" = Relationship(back_populates="milestones")
     settlements: list["Settlement"] = Relationship(
@@ -141,6 +150,11 @@ class MilestoneRead(MilestoneBase):
     captured_at: datetime | None = Field(default=None, description="When the payer's money was captured.")
     release_due_at: datetime | None = Field(
         default=None, description="When the dispute window closes and the payee is paid, unless contested."
+    )
+    revealed_at: datetime | None = Field(
+        default=None,
+        description="deliverable_release=on_capture: when the payer's money was captured and the full evidence "
+        "opened to the payer side. Unset while the evidence is withheld.",
     )
     pay_path: str | None = Field(
         default=None, description="Invoice mode: where the payer pays this tranche (relative to the API), while open."
@@ -193,6 +207,14 @@ class AgreementBase(SQLModel):
         description="When the payer can open the payee's full evidence: on_submit (as it arrives; usual for grants) "
         "or on_capture (only once the tranche is captured, so the payer pays on the verdict; suggested for SOWs). "
         "Part of the criteria hash both parties sign; set when the agreement is created.",
+    )
+    min_evidence_visibility: EvidenceVisibility = Field(
+        default=EvidenceVisibility.hash_only,
+        sa_type=enum_type(EvidenceVisibility, 16),
+        description="on_capture only: the least the payee may show the payer of each evidence item before capture. "
+        "hash_only (pass/fail and the pinned hash), verdict_only (+ observed values), excerpt (+ the verifier's "
+        "quotes and rationale) or preview. The payee picks a level at or above it per item. Signed with the "
+        "criteria.",
     )
 
 

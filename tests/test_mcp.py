@@ -361,3 +361,22 @@ def test_sign_in_redirects_stay_local(client):
     for bad in ("https://evil.example", "//evil.example/x", "/\\evil.example", "javascript:alert(1)", ""):
         assert safe_next(bad) == "/"
     assert safe_next("/oauth/consent?request=abc") == "/oauth/consent?request=abc"
+
+
+def test_payer_agent_gets_the_withheld_view_over_mcp(client):
+    """deliverable_release=on_capture: a payer-side agent's MCP tools see the verdict, not the work (#3)."""
+    draft = {**GOOD_DRAFT, "deliverable_release": "on_capture", "dispute_window_days": 3}
+    _aid, (_, m2), ctx = create_active(client, draft)
+    secret = "Table 2 lists 87 students with pre and post scores. SECRET-77"
+    r = client.post(
+        f"/milestones/{m2}/evidence",
+        json={"evidence_type": "document", "title": "report", "content": secret, "dated": "2027-09-01"},
+        headers=h(ctx["payee"]),
+    )
+    assert r.status_code == 202
+    key = client.post(f"/orgs/{ctx['payer_org']}/api-keys", json={"name": "erp"}, headers=h(ctx["payer"])).json()
+    for tool in ("list_evidence", "get_verdict", "explain_milestone"):
+        is_error, body = call(client, key["token"], tool, milestone_id=m2)
+        assert not is_error and "SECRET-77" not in json.dumps(body), tool
+    is_error, body = call(client, key["token"], "list_evidence", milestone_id=m2)
+    assert body[0]["withheld"] is True

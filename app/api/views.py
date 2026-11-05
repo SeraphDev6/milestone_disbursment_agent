@@ -104,7 +104,7 @@ def _reviewer_invited(row: Agreement) -> bool:
 
 
 def agreement_read(row: Agreement) -> AgreementRead:
-    current = criteria_hash(row.milestones, row.deliverable_release)
+    current = criteria_hash(row.milestones, row.deliverable_release, row.min_evidence_visibility)
     return AgreementRead.model_validate(
         row,
         update={

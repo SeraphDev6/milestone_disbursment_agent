@@ -25,6 +25,7 @@ from app.models.enums import (
     DeliverableRelease,
     DisbursementKind,
     EvidenceType,
+    EvidenceVisibility,
     InvitationKind,
     LintLevel,
     MilestoneStatus,
@@ -47,7 +48,7 @@ from app.models.events import (
     SubscriptionRead,
     WebhookEvent,
 )
-from app.models.evidence import Evidence, EvidenceCreate, EvidenceRead, StoredFile, Verdict, VerdictRead
+from app.models.evidence import Evidence, EvidenceCreate, EvidenceRead, SkepticPass, StoredFile, Verdict, VerdictRead
 from app.models.identity import (
     ApiKeyCreate,
     ApiKeyCreated,
@@ -92,6 +93,7 @@ __all__ = [
     "EvidenceCreate",
     "EvidenceRead",
     "EvidenceType",
+    "EvidenceVisibility",
     "FundingSummary",
     "Integration",
     "Invitation",
@@ -135,6 +137,7 @@ __all__ = [
     "SettlementMode",
     "SettlementRead",
     "SettlementStatus",
+    "SkepticPass",
     "StoredFile",
     "Subscription",
     "SubscriptionCreate",

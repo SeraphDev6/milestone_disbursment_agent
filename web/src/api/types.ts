@@ -9,12 +9,14 @@ type S = components["schemas"];
  */
 type Req<T, K extends keyof T> = Omit<T, K> & { [P in K]-?: NonNullable<T[P]> };
 
-export type AgreementRead = Omit<Req<S["AgreementRead"], "currency" | "auto_release_threshold" | "require_reviewer_approval" | "pending_invitations" | "dispute_window_days" | "deliverable_release">, "lint" | "milestones" | "funding"> & { lint: LintReport; milestones: MilestoneRead[]; funding: FundingSummary };
+export type AgreementRead = Omit<Req<S["AgreementRead"], "currency" | "auto_release_threshold" | "require_reviewer_approval" | "pending_invitations" | "dispute_window_days" | "deliverable_release" | "min_evidence_visibility">, "lint" | "milestones" | "funding"> & { lint: LintReport; milestones: MilestoneRead[]; funding: FundingSummary };
 export type AgreementCreate = S["AgreementCreate"];
 export type AgreementCreated = S["AgreementCreated"];
 export type AgreementSummary = Req<S["AgreementSummary"], "in_dispute_window" | "refunded">;
 export type AgreementStatus = S["AgreementStatus"];
 export type DeliverableRelease = S["DeliverableRelease"];
+export type EvidenceVisibility = S["EvidenceVisibility"];
+export type SkepticPass = Req<S["SkepticPass"], "disagrees_on">;
 export type MilestoneRead = Omit<S["MilestoneRead"], "criteria"> & { criteria: Criterion[] };
 export type MilestoneDraft = S["MilestoneCreate-Input"];
 export type MilestoneStatus = S["MilestoneStatus"];

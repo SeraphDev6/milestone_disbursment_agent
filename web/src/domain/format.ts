@@ -66,6 +66,14 @@ export const ROLE_LABEL = { payer: "Payer", payee: "Payee", reviewer: "Reviewer"
 export const SIDE_NOUN = { payer: "Paying", payee: "Receiving", reviewer: "Reviewing" } as const;
 export const MODE_LABEL = { escrow_release: "Escrow release", invoice_on_verify: "Invoice on verify" } as const;
 export const RELEASE_LABEL = { on_submit: "Work visible on submit", on_capture: "Work visible once paid" } as const;
+/** What the payer sees of an evidence item before capture (deliverable_release = on_capture), least first. */
+export const VISIBILITY_LABEL = {
+  hash_only: { label: "Pass/fail only", description: "The payer sees which criteria passed and the file's fingerprint (hash)." },
+  verdict_only: { label: "Pass/fail and values found", description: "Also the value found for each measure, e.g. “214 attendees”." },
+  excerpt: { label: "Plus the verifier's quotes", description: "Also the short quotes the verifier cited and its reasoning." },
+  preview: { label: "Plus a preview", description: "Previews aren't generated yet, so for now this is the same as quotes." },
+} as const;
+export const VISIBILITY_ORDER = ["hash_only", "verdict_only", "excerpt", "preview"] as const;
 export const COMPARATOR_LABEL = {
   at_least: "at least",
   at_most: "at most",

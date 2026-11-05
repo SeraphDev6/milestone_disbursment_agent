@@ -66,6 +66,7 @@ export function Tranche() {
             {m.due_date && <span>Due {date(m.due_date)}</span>}
             {m.funded_at && !m.captured_at && <span>Hold placed {date(m.funded_at)}</span>}
             {m.captured_at && <span>Captured {date(m.captured_at)}</span>}
+            {a.deliverable_release === "on_capture" && <span>{m.revealed_at ? `Work opened to the payer ${date(m.revealed_at)}` : "Work opens to the payer once paid"}</span>}
             {m.payout_route && <span>{m.payout_route === "direct" ? `Paid straight to ${payeeName}'s PayPal` : `Paid through the platform to ${payeeName}`}</span>}
           </>
         }
@@ -121,6 +122,7 @@ export function Tranche() {
               submitReason={submit.ok ? undefined : submit.reason}
               onSubmitted={() => document.getElementById("main")?.scrollIntoView({ behavior: "smooth" })}
               actions={acts}
+              minVisibility={a.deliverable_release === "on_capture" ? a.min_evidence_visibility : undefined}
             />
           )}
         </div>

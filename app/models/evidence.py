@@ -7,7 +7,7 @@ from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.columns import PydanticJSON, enum_type, fk, id_field, timestamp
 from app.models.criteria import CriterionResult
-from app.models.enums import EvidenceType
+from app.models.enums import EvidenceType, EvidenceVisibility
 
 
 class StoredFile(SQLModel, table=True):
@@ -58,6 +58,9 @@ class Evidence(EvidenceBase, table=True):
         default_factory=dict, sa_type=JSON, description="Facts an adapter established at intake, e.g. ci_green."
     )
     file_id: str | None = fk("files.id", optional=True)
+    payer_visibility: EvidenceVisibility = Field(
+        default=EvidenceVisibility.hash_only, sa_type=enum_type(EvidenceVisibility, 16)
+    )
     received_at: datetime = timestamp()
 
     file: StoredFile | None = Relationship()
@@ -69,6 +72,11 @@ class EvidenceCreate(EvidenceBase):
     external_ref: str | None = Field(
         default=None, max_length=500, description="Source-native id (file id, URL). Defaults to a content hash."
     )
+    payer_visibility: EvidenceVisibility | None = Field(
+        default=None,
+        description="deliverable_release=on_capture: what the payer sees of this item before capture. Defaults to "
+        "the agreement's min_evidence_visibility and can't be below it. Ignored for on_submit agreements.",
+    )
 
 
 class EvidenceRead(SQLModel):
@@ -76,16 +84,58 @@ class EvidenceRead(SQLModel):
     source: str
     evidence_type: EvidenceType
     title: str
-    excerpt: str = Field(description="First 500 characters of the text the checks and verifier read.")
+    excerpt: str | None = Field(
+        description="First 500 characters of the text the checks and verifier read. Null while withheld."
+    )
     dated: date | None
     check_results: dict[str, bool]
-    artifact_uris: list[str]
+    artifact_uris: list[str] = Field(description="Links to the originals. Empty while withheld.")
     has_file: bool
     received_at: datetime
+    pinned_ref: str = Field(
+        description="The commitment: content hash ('sha256:...') or commit SHA of exactly what was verified."
+    )
+    file_sha256: str | None = Field(
+        default=None, description="SHA-256 of the original uploaded file; a download must hash to this."
+    )
+    payer_visibility: EvidenceVisibility = Field(
+        description="What the payer sees of this item before capture (deliverable_release=on_capture)."
+    )
+    withheld: bool = Field(
+        default=False,
+        description="True when this caller is on the payer side and the tranche isn't captured yet: content, "
+        "links and the file are held back until capture.",
+    )
 
     @classmethod
-    def from_row(cls, e: Evidence) -> "EvidenceRead":
-        return cls.model_validate(e, update={"excerpt": e.content[:500], "has_file": e.file_id is not None})
+    def from_row(cls, e: Evidence, *, withheld: bool = False) -> "EvidenceRead":
+        return cls.model_validate(
+            e,
+            update={
+                "excerpt": None if withheld else e.content[:500],
+                "artifact_uris": [] if withheld else e.artifact_uris,
+                "has_file": e.file_id is not None,
+                "file_sha256": e.file.sha256 if e.file is not None else None,
+                "withheld": withheld,
+            },
+        )
+
+
+class SkepticPass(SQLModel):
+    """A second verifier run told to look for reasons each criterion is NOT met. Auto-release needs both passes
+    to agree that every model-judged criterion is met."""
+
+    results: list[CriterionResult] = Field(description="The skeptic's result per model-judged criterion.")
+    rationale: str = Field(description="The skeptic's explanation.")
+    confidence: float = Field(ge=0, le=1, description="The skeptic's self-reported confidence.")
+    model: str = Field(description="Model id used.")
+    prompt_version: str = Field(description="Skeptic prompt version, for replay.")
+    disagrees_on: list[str] = Field(
+        default_factory=list, description="Criteria the first pass found met and the skeptic did not."
+    )
+    error: str | None = Field(
+        default=None, description="Set when the skeptic couldn't run; the tranche goes to review."
+    )
 
 
 class VerdictBase(SQLModel):
@@ -101,6 +151,11 @@ class VerdictBase(SQLModel):
     prompt_version: str = Field(max_length=32, description="Verifier prompt version, for replay.")
     is_precheck: bool = Field(default=False, description="True for payee pre-checks; never moves state.")
     gate: str = Field(max_length=32, description="auto_release, needs_review or precheck.")
+    skeptic: SkepticPass | None = Field(
+        default=None,
+        sa_type=PydanticJSON(SkepticPass),
+        description="Second opinion, run before an auto-release on deliverable_release=on_capture agreements.",
+    )
 
 
 class Verdict(VerdictBase, table=True):
