@@ -160,10 +160,13 @@ Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
   withholds the work until payment, to release them at capture. What it does with them:
   - **Who can open them:** the payee side and reviewers, always; the payer side only what the payee chose to show
     (hashes, the verdict, quotes or a watermarked preview) until the tranche is captured, then the originals. The
-    verifier model reads them to judge the criteria. Platform operators can read the database; nobody else.
+    verifier model reads them to judge the criteria. Platform operators can read the database and the bucket;
+    nobody else.
   - **Every read is recorded:** which side viewed or downloaded which item, and whether it saw the withheld or
     the full view. That record is the payee's dispute pack.
-  - **Storage:** in the database, encrypted at rest; object storage with short-lived links is planned.
+  - **Storage:** encrypted at rest by the app (AES-256-GCM), in the database or, with `FILE_STORAGE=s3`, a
+    Cloudflare R2 (or any S3-compatible) bucket that only ever holds ciphertext. Every download goes through the
+    app, which checks access, records the read and checks the file's hash; there are no direct bucket links.
   - **Retention:** kept until the operator's `RETENTION_DAYS` after a tranche closes (never within 180 days of
     capture), then deleted or kept for the payee only. Off by default, so files are kept until deleted.
   - **Not done:** the engine doesn't take ownership of the work, use it for anything but verifying and releasing

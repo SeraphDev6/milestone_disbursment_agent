@@ -91,7 +91,7 @@ class EncryptedBytes(TypeDecorator):
     cache_ok = True
 
     def process_bind_param(self, value, dialect):
-        if value is None or _cipher is None or is_encrypted(value):
+        if not value or _cipher is None or is_encrypted(value):
             return value
         return _cipher.encrypt(bytes(value))
 

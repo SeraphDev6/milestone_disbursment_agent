@@ -35,7 +35,7 @@ from app.models import (
     Verdict,
     VerificationMethod,
 )
-from app.services import ServiceError, disclosure, settlement
+from app.services import ServiceError, disclosure, files, settlement
 from app.services.notifications import notify_side, tranche_subject
 
 ACCEPTS_EVIDENCE = {
@@ -55,7 +55,7 @@ class VerificationError(ServiceError):
 
 
 def attachments_of(rows: list[Evidence]) -> dict[str, tuple[bytes, str]]:
-    return {e.id: (e.file.data, e.file.media_type) for e in rows if e.file is not None}
+    return {e.id: (files.read(e.file), e.file.media_type) for e in rows if e.file is not None}
 
 
 # --- judging ---------------------------------------------------------------------------

@@ -38,9 +38,18 @@ services:
         sync: false
       - key: RESEND_API_KEY
         sync: false
+      - key: S3_ENDPOINT_URL
+        sync: false # R2: https://<account id>.r2.cloudflarestorage.com
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
 
   # Hourly: pay tranches whose dispute window closed, follow Payouts in flight, mirror PayPal's 28-day release.
-  # The jobs never encrypt or decrypt anything, so their generated SECRET_KEY only has to be non-default.
+  # The jobs share the web service's SECRET_KEY: stored files are encrypted with a key derived from it (unless
+  # FILE_ENCRYPTION_KEY is set), and the daily retention sweep and `encrypt-files` write those files.
   - type: cron
     name: milestone-engine-payouts
     runtime: python
@@ -54,7 +63,10 @@ services:
           name: milestone-engine-db
           property: connectionString
       - key: SECRET_KEY
-        generateValue: true
+        fromService:
+          type: web
+          name: milestone-engine
+          envVarKey: SECRET_KEY
       - key: AUTO_MIGRATE
         value: "false"
       - key: PUBLIC_BASE_URL
@@ -82,7 +94,10 @@ services:
           name: milestone-engine-db
           property: connectionString
       - key: SECRET_KEY
-        generateValue: true
+        fromService:
+          type: web
+          name: milestone-engine
+          envVarKey: SECRET_KEY
       - key: AUTO_MIGRATE
         value: "false"
       - key: PUBLIC_BASE_URL
@@ -94,6 +109,14 @@ services:
       - key: PAYPAL_PARTNER_MERCHANT_ID
         sync: false
       - key: RESEND_API_KEY
+        sync: false
+      - key: S3_ENDPOINT_URL
+        sync: false # R2: https://<account id>.r2.cloudflarestorage.com
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
         sync: false
 
 # Literal values shared by every service. Change MODE and EMAIL_PROVIDER here once the keys are in place.
@@ -108,6 +131,11 @@ envVarGroups:
         value: console
       - key: EMAIL_FROM
         value: "Milestone Ledger <notify@mail.milestone-ledger.com>"
+      # s3: files go to the R2 bucket set (S3_*) on the web and daily services; after the first deploy with it, run
+      # `python -m app.jobs encrypt-files` once from the web service's shell to move the files already in Postgres.
+      # database keeps them in Postgres (the app won't start with s3 and no bucket settings).
+      - key: FILE_STORAGE
+        value: s3
 
 databases:
   - name: milestone-engine-db

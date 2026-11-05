@@ -12,8 +12,9 @@ from app.models.enums import EvidenceType, EvidenceVisibility
 
 
 class StoredFile(SQLModel, table=True):
-    """Original uploaded bytes, encrypted at rest (app/integrations/filecrypt.py). In the database for now; object
-    storage later. Retention (app/services/custody.py) may purge the bytes, keeping the hash and metadata."""
+    """An original upload (or a preview or handed-over archive), encrypted at rest (app/integrations/filecrypt.py).
+    The bytes are in `data`, or in object storage at `storage_key` (app/integrations/filestore.py); read and write
+    them through app/services/files.py. Retention (app/services/custody.py) may purge them, keeping the hash."""
 
     __tablename__ = "files"
 
@@ -22,7 +23,8 @@ class StoredFile(SQLModel, table=True):
     media_type: str = Field(max_length=100)
     sha256: str = Field(max_length=64, index=True)
     size: int
-    data: bytes = Field(sa_type=EncryptedBytes)
+    data: bytes = Field(sa_type=EncryptedBytes)  # empty when the bytes are in object storage
+    storage_key: str | None = Field(default=None, max_length=255)
     created_at: datetime = timestamp()
     purged_at: datetime | None = timestamp(optional=True)  # bytes removed by retention; sha256 and size kept
 
