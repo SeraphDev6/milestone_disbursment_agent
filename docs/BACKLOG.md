@@ -40,10 +40,10 @@ Logged Nov 3, 2026; updated the same day after the hardening pass (items marked 
 
 | # | Pri | Issue | Next step |
 | --- | --- | --- | --- |
-| 25 | P0 | **Deployment is on hold (your call).** The live MCP vendor checklist, live webhooks and the hosted demo URL all depend on it. | **Moved to #32.** |
+| 25 | P0 | **Deployment is on hold (your call).** The live MCP vendor checklist, live webhooks and the hosted demo URL all depend on it. | **Done (Nov 4):** deployed at https://app.milestone-ledger.com (#32). |
 | 26 | P0 | **No git remote.** Nothing is pushed. The rules need a public repo with the license visible (planned: public under SeraphDev6). | **Done (Nov 4).** Public at `SeraphDev6/milestone_disbursment_agent`, AGPL-3.0 shown in the About section. |
 | 27 | P1 | **`render.yaml` has no cron jobs** for `python -m app.jobs daily` and `payouts`, and no worker. The frontend session also changed its build command (uncommitted). | **Done (Nov 3).** `render.yaml` has the `payouts` and `daily` cron jobs sharing an env group, `--proxy-headers` on the web start command, and `AUTO_MIGRATE=false` on the jobs. |
-| 28 | P1 | **Render free Postgres may not outlive judging** (winners announced Dec 21). | Decided in `render.yaml` (Nov 3): `basic-256mb`. Cost confirmation **moved to #32.** |
+| 28 | P1 | **Render free Postgres may not outlive judging** (winners announced Dec 21). | Decided in `render.yaml` (Nov 3): `basic-256mb`. Deployed (#32). |
 | 29 | P1 | **The live MCP vendor checks haven't been run:** claude.ai, Claude Code, ChatGPT, VS Code, Cursor, Gemini CLI and MCP Inspector (see `docs/MCP_CLIENTS.md`). | **Moved to #35.** |
 | 30 | P1 | **No demo seed or scripted run.** | **Partly done:** `/demo` seeds a grant with three people in mock mode. The rest **moved to #36.** |
 | 31 | P1 | **The demo video isn't recorded.** | **Moved to #37.** |
