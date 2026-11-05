@@ -6,6 +6,7 @@ import type {
   AgreementCreate,
   Comparator,
   CriterionDraft,
+  DeliverableRelease,
   EvidenceType,
   ExtractionResult,
   MilestoneDraft,
@@ -42,6 +43,7 @@ export type DraftForm = {
   auto_release_threshold: number;
   require_reviewer_approval: boolean;
   dispute_window_days: number;
+  deliverable_release: DeliverableRelease;
   counterparty_email: string;
   reviewer_emails: string[];
   source_document_uri: string | null;
@@ -80,6 +82,7 @@ export function blankDraft(): DraftForm {
     auto_release_threshold: 0.85,
     require_reviewer_approval: false,
     dispute_window_days: 0,
+    deliverable_release: "on_submit",
     counterparty_email: "",
     reviewer_emails: [],
     source_document_uri: null,
@@ -157,6 +160,7 @@ export function agreementOut(d: DraftForm): AgreementCreate {
     auto_release_threshold: d.auto_release_threshold,
     require_reviewer_approval: d.require_reviewer_approval,
     dispute_window_days: d.dispute_window_days,
+    deliverable_release: d.deliverable_release ?? "on_submit",
     source_document_uri: d.source_document_uri,
     counterparty_email: d.counterparty_email.trim(),
     reviewer_emails: d.reviewer_emails.map((e) => e.trim()).filter(Boolean),

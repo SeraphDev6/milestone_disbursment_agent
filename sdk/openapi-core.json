@@ -27,6 +27,11 @@
             "title": "Currency",
             "type": "string"
           },
+          "deliverable_release": {
+            "$ref": "#/components/schemas/DeliverableRelease",
+            "default": "on_submit",
+            "description": "When the payer can open the payee's full evidence: on_submit (as it arrives; usual for grants) or on_capture (only once the tranche is captured, so the payer pays on the verdict; suggested for SOWs). Part of the criteria hash both parties sign; set when the agreement is created."
+          },
           "dispute_window_days": {
             "default": 0,
             "description": "Escrow: days between capturing a verified tranche and paying the payee, during which the payer or a reviewer can contest it. 0 pays at once.",
@@ -160,6 +165,11 @@
             "pattern": "^[A-Z]{3}$",
             "title": "Currency",
             "type": "string"
+          },
+          "deliverable_release": {
+            "$ref": "#/components/schemas/DeliverableRelease",
+            "default": "on_submit",
+            "description": "When the payer can open the payee's full evidence: on_submit (as it arrives; usual for grants) or on_capture (only once the tranche is captured, so the payer pays on the verdict; suggested for SOWs). Part of the criteria hash both parties sign; set when the agreement is created."
           },
           "dispute_window_days": {
             "default": 0,
@@ -647,6 +657,15 @@
         ],
         "title": "CriterionResult",
         "type": "object"
+      },
+      "DeliverableRelease": {
+        "description": "When the payer can open the payee's full evidence.",
+        "enum": [
+          "on_submit",
+          "on_capture"
+        ],
+        "title": "DeliverableRelease",
+        "type": "string"
       },
       "DisbursementAttempt": {
         "properties": {

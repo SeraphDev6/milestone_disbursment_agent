@@ -206,3 +206,50 @@ def test_same_person_on_both_sides_must_choose(client, draft):
     assert get(client, aid, ctx["payer"]).status_code == 409  # ambiguous: which side?
     r = client.get(f"/agreements/{aid}", headers=h(ctx["payer"], ctx["payee_org"]))
     assert r.status_code == 200
+
+
+def test_deliverable_release_defaults_to_on_submit_and_keeps_old_hashes(client, draft):
+    from app.domain.criteria import criteria_hash
+    from app.models import MilestoneCreate
+
+    aid, _, ctx = create_draft(client, draft)
+    a = get(client, aid, ctx["payer"]).json()
+    assert a["deliverable_release"] == "on_submit"
+    tranches = [MilestoneCreate.model_validate(m) for m in a["milestones"]]
+    assert a["criteria_hash"] == criteria_hash(tranches)  # same hash as before the setting existed
+
+
+def test_deliverable_release_is_part_of_the_signed_hash(client, draft):
+    plain, _, ctx1 = create_draft(client, draft)
+    on_capture, _, ctx2 = create_draft(
+        client, {**draft, "deliverable_release": "on_capture"}, payer_email="p2@harbor.org", payee_email="e2@river.org"
+    )
+    a1, a2 = get(client, plain, ctx1["payer"]).json(), get(client, on_capture, ctx2["payer"]).json()
+    assert a2["deliverable_release"] == "on_capture"
+    assert a1["criteria_hash"] != a2["criteria_hash"]
+    stale = client.post(
+        f"/agreements/{on_capture}/confirm", json={"criteria_hash": a1["criteria_hash"]}, headers=h(ctx2["payer"])
+    )
+    assert stale.status_code == 409
+
+
+def test_on_capture_with_auto_release_and_no_reviewer_warns(client, draft):
+    body = {**draft, "deliverable_release": "on_capture"}
+    aid, _, ctx = create_draft(client, body)
+    r = confirm(client, aid, ctx["payer"], auto_release_enabled=True)
+    assert r.status_code == 200
+    codes = [i["code"] for i in r.json()["lint"]["issues"]]
+    assert "pays_on_model_alone" in codes and r.json()["lint"]["ok"]  # a warning, not a blocker
+
+    with_reviewer, _, ctx2 = create_draft(
+        client, body, reviewers=(REVIEWER_EMAIL,), payer_email="p2@harbor.org", payee_email="e2@river.org"
+    )
+    r = confirm(client, with_reviewer, ctx2["payer"], auto_release_enabled=True)
+    assert "pays_on_model_alone" not in [i["code"] for i in r.json()["lint"]["issues"]]
+
+
+def test_deliverable_release_rejects_unknown_values(client, draft):
+    token = sign_in(client, PAYER_EMAIL)
+    org = new_org(client, token, "Harbor Foundation", "pay@harbor.org")
+    body = {**draft, "deliverable_release": "never", "counterparty_email": PAYEE_EMAIL}
+    assert client.post(f"/orgs/{org}/agreements", json=body, headers=h(token)).status_code == 422

@@ -18,10 +18,12 @@ from app.models import (
     AgreementBase,
     Comparator,
     Criterion,
+    DeliverableRelease,
     LintIssue,
     LintLevel,
     LintReport,
     MilestoneBase,
+    Role,
     VerificationMethod,
 )
 
@@ -262,9 +264,28 @@ def lint_criterion(c: Criterion, path: str, milestone: MilestoneBase) -> list[Li
     return issues
 
 
-def lint_agreement(agreement: AgreementBase) -> LintReport:
-    """Works on a request body (AgreementCreate) or a stored Agreement: both carry total_amount and milestones."""
-    return lint_tranches(agreement.total_amount, agreement.milestones)  # type: ignore[attr-defined]
+def lint_agreement(agreement: AgreementBase, *, reviewer_invited: bool = False) -> LintReport:
+    """Works on a request body (AgreementCreate) or a stored Agreement: both carry total_amount and milestones.
+    `reviewer_invited`: a reviewer is invited but hasn't joined yet (stored agreements only)."""
+    report = lint_tranches(agreement.total_amount, agreement.milestones)  # type: ignore[attr-defined]
+    if getattr(agreement, "deliverable_release", None) == DeliverableRelease.on_capture and getattr(
+        agreement, "auto_release_enabled", False
+    ):
+        reviewers = getattr(agreement, "reviewer_emails", None) or [
+            p for p in getattr(agreement, "parties", []) if p.role == Role.reviewer
+        ]
+        if not reviewers and not reviewer_invited:
+            report.issues.append(
+                _issue(
+                    LintLevel.warning,
+                    "pays_on_model_alone",
+                    "deliverable_release",
+                    "Auto-release is on, the payer can't see the work until it's paid for, and there is no "
+                    "reviewer: the payer would pay on the model's verdict alone.",
+                    "Invite a reviewer, turn off auto-release, or release deliverables on submit.",
+                )
+            )
+    return report
 
 
 def lint_tranches(total_amount: Decimal, milestones: Sequence[MilestoneBase]) -> LintReport:
@@ -330,13 +351,19 @@ def assign_criterion_ids(milestones: Sequence[MilestoneBase]) -> None:
             used.add(c.id)
 
 
-def criteria_hash(milestones: Sequence[MilestoneBase]) -> str:
+def criteria_hash(
+    milestones: Sequence[MilestoneBase], deliverable_release: DeliverableRelease = DeliverableRelease.on_submit
+) -> str:
     """Hash of everything a party signs off on: tranche order and MilestoneBase's fields (title, amount, due date,
-    criteria). Works on request bodies and stored rows alike, since both are MilestoneBase."""
-    payload = []
+    criteria), plus deliverable_release when it isn't the default. Works on request bodies and stored rows alike,
+    since both are MilestoneBase."""
+    payload: list = []
     for m in milestones:
         data = MilestoneBase.model_validate(m).model_dump(mode="json")
         data["amount"] = f"{m.amount:.2f}"  # '10000' and '10000.00' (as read back from the DB) must hash the same
         payload.append(data)
+    if deliverable_release != DeliverableRelease.on_submit:
+        # Only when set, so agreements signed before the setting existed keep their hash.
+        payload = {"deliverable_release": str(deliverable_release), "milestones": payload}
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()

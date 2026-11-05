@@ -129,6 +129,7 @@ function SignPanel({ stale, onStale, onSigned }: { stale: boolean; onStale: () =
         summary={
           <>
             <p style={{ margin: 0 }}>You're signing for <strong>{org.orgName}</strong> as the {seat.role}: {a.milestones.length} tranches, {money(a.total_amount, a.currency)}.</p>
+            {a.deliverable_release === "on_capture" && <p style={{ margin: "var(--space-2) 0 0" }}>The payer sees full evidence <strong>only after each tranche is paid</strong>, so payment follows the verdict.</p>}
             {mayAuto.ok && <p style={{ margin: "var(--space-2) 0 0" }}>Auto-release: <strong>{autoRelease ? `on, at ${percent(a.auto_release_threshold)}` : "off"}</strong></p>}
           </>
         }

@@ -65,6 +65,7 @@ export function percent(value: number): string {
 export const ROLE_LABEL = { payer: "Payer", payee: "Payee", reviewer: "Reviewer" } as const;
 export const SIDE_NOUN = { payer: "Paying", payee: "Receiving", reviewer: "Reviewing" } as const;
 export const MODE_LABEL = { escrow_release: "Escrow release", invoice_on_verify: "Invoice on verify" } as const;
+export const RELEASE_LABEL = { on_submit: "Work visible on submit", on_capture: "Work visible once paid" } as const;
 export const COMPARATOR_LABEL = {
   at_least: "at least",
   at_most: "at most",

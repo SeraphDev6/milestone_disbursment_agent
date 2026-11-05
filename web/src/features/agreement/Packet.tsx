@@ -60,6 +60,7 @@ export function Packet() {
             <div><dt>Released</dt><dd>{money(p.agreement.released, cur)}</dd></div>
             <div><dt>Settlement</dt><dd>{p.agreement.settlement_mode === "escrow_release" ? "Escrow release" : "Invoice on verify"}</dd></div>
             <div><dt>Dispute window</dt><dd>{p.agreement.dispute_window_days ? `${p.agreement.dispute_window_days} days` : "None"}</dd></div>
+            <div><dt>Evidence visible</dt><dd>{p.agreement.deliverable_release === "on_capture" ? "Once paid" : "On submit"}</dd></div>
             <div><dt>Auto-release</dt><dd>{p.agreement.auto_release_enabled ? `On at ${percent(p.agreement.auto_release_threshold)}` : "Off"}</dd></div>
             <div><dt>Criteria hash</dt><dd className="figures">{p.agreement.criteria_hash ?? "not locked"}</dd></div>
           </dl>

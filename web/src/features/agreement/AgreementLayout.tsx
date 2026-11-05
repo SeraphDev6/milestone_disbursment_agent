@@ -1,6 +1,6 @@
 import { Outlet } from "react-router";
 import { useAgreementCtx, useOrgCtx, paths } from "@/app/context";
-import { money, MODE_LABEL, ROLE_LABEL } from "@/domain/format";
+import { money, MODE_LABEL, RELEASE_LABEL, ROLE_LABEL } from "@/domain/format";
 import { AGREEMENT_STAMPS } from "@/domain/status";
 import { can } from "@/domain/permissions";
 import { Crumbs, layout, PageHeader, RouteTabs, Seal, Stamp } from "@/design/components";
@@ -22,6 +22,7 @@ export function AgreementLayout() {
             <span className="figures">{money(a.total_amount, a.currency)}</span>
             <span>{MODE_LABEL[a.settlement_mode]}</span>
             {a.settlement_mode === "escrow_release" && <span>{a.dispute_window_days ? `${a.dispute_window_days}-day dispute window` : "No dispute window"}</span>}
+            {a.deliverable_release === "on_capture" && <span>{RELEASE_LABEL.on_capture}</span>}
             <span>{a.milestones.length} tranche{a.milestones.length === 1 ? "" : "s"}</span>
             <Seal hash={a.criteria_hash} locked={a.locked} label={a.locked ? "Locked criteria" : "Current criteria"} />
           </>
