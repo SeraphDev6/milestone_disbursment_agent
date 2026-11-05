@@ -110,10 +110,30 @@ def consent_revoked(session: Session, merchant_id: str, now: datetime) -> str:
     return "consent revoked"
 
 
-def onboarding_completed(session: Session, merchant_id: str | None, tracking_id: str | None) -> str:
-    """MERCHANT.ONBOARDING.COMPLETED: record the merchant id; status is read from PayPal on next use."""
-    row = session.exec(select(PayPalAccount).where(PayPalAccount.tracking_id == tracking_id)).first()
-    if row is None or not merchant_id:
+def onboarding_completed(
+    session: Session, merchant_id: str | None, tracking_id: str | None, gw: PayPalGateway | None = None
+) -> str:
+    """MERCHANT.ONBOARDING.COMPLETED: record the merchant id; status is read from PayPal on next use.
+
+    PayPal's sample event carries only merchant_id and partner_client_id (simulator, Nov 5 2026), so without a
+    tracking_id we match the merchant id we already recorded from the return URL, or ask PayPal for the tracking
+    id (merchant-integrations returns it) when the payee never came back to us."""
+    if not merchant_id:
+        return "ignored: unknown onboarding"
+    if not tracking_id:
+        if session.exec(select(PayPalAccount).where(PayPalAccount.merchant_id == merchant_id)).first() is not None:
+            return "onboarding already recorded"
+        if gw is not None:
+            try:
+                tracking_id = gw.merchant_status(merchant_id).tracking_id
+            except PayPalError:
+                tracking_id = None
+    row = (
+        session.exec(select(PayPalAccount).where(PayPalAccount.tracking_id == tracking_id)).first()
+        if tracking_id
+        else None
+    )
+    if row is None:
         return "ignored: unknown onboarding"
     row.merchant_id = merchant_id
     row.checked_at = None

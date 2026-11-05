@@ -1,0 +1,57 @@
+{
+  "create_time": "2018-08-15T20:03:06.086Z",
+  "event_type": "PAYMENT.CAPTURE.PENDING",
+  "event_version": "1.0",
+  "id": "WH-9Y180613C5171350R-3A568107UP261041K",
+  "links": [
+    {
+      "encType": "application/json",
+      "href": "https://api.sandbox.paypal.com/v1/notifications/webhooks-events/WH-9Y180613C5171350R-3A568107UP261041K",
+      "method": "GET",
+      "rel": "self"
+    },
+    {
+      "encType": "application/json",
+      "href": "https://api.sandbox.paypal.com/v1/notifications/webhooks-events/WH-9Y180613C5171350R-3A568107UP261041K/resend",
+      "method": "POST",
+      "rel": "resend"
+    }
+  ],
+  "resource": {
+    "amount": {
+      "currency_code": "USD",
+      "value": "2.51"
+    },
+    "create_time": "2018-08-15T20:02:40Z",
+    "final_capture": true,
+    "id": "02T21492PP3782704",
+    "links": [
+      {
+        "href": "https://api.sandbox.paypal.com/v2/payments/captures/02T21492PP3782704",
+        "method": "GET",
+        "rel": "self"
+      },
+      {
+        "href": "https://api.sandbox.paypal.com/v2/payments/captures/02T21492PP3782704/refund",
+        "method": "POST",
+        "rel": "refund"
+      },
+      {
+        "href": "https://api.sandbox.paypal.com/v2/checkout/orders/8PR65097T8571330M",
+        "method": "GET",
+        "rel": "up"
+      }
+    ],
+    "seller_protection": {
+      "status": "NOT_ELIGIBLE"
+    },
+    "status": "PENDING",
+    "status_details": {
+      "reason": "UNILATERAL"
+    },
+    "update_time": "2018-08-15T20:02:40Z"
+  },
+  "resource_type": "capture",
+  "resource_version": "2.0",
+  "summary": "Payment pending for $ 2.51 USD"
+}

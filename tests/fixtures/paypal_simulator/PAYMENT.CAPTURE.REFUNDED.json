@@ -1,0 +1,63 @@
+{
+  "create_time": "2018-08-15T19:14:04.543Z",
+  "event_type": "PAYMENT.CAPTURE.REFUNDED",
+  "event_version": "1.0",
+  "id": "WH-1GE84257G0350133W-6RW800890C634293G",
+  "links": [
+    {
+      "encType": "application/json",
+      "href": "https://api.sandbox.paypal.com/v1/notifications/webhooks-events/WH-1GE84257G0350133W-6RW800890C634293G",
+      "method": "GET",
+      "rel": "self"
+    },
+    {
+      "encType": "application/json",
+      "href": "https://api.sandbox.paypal.com/v1/notifications/webhooks-events/WH-1GE84257G0350133W-6RW800890C634293G/resend",
+      "method": "POST",
+      "rel": "resend"
+    }
+  ],
+  "resource": {
+    "amount": {
+      "currency_code": "USD",
+      "value": "0.99"
+    },
+    "create_time": "2018-08-15T12:13:29-07:00",
+    "id": "1Y107995YT783435V",
+    "links": [
+      {
+        "href": "https://api.sandbox.paypal.com/v2/payments/refunds/1Y107995YT783435V",
+        "method": "GET",
+        "rel": "self"
+      },
+      {
+        "href": "https://api.sandbox.paypal.com/v2/payments/captures/0JF852973C016714D",
+        "method": "GET",
+        "rel": "up"
+      }
+    ],
+    "seller_payable_breakdown": {
+      "gross_amount": {
+        "currency_code": "USD",
+        "value": "0.99"
+      },
+      "net_amount": {
+        "currency_code": "USD",
+        "value": "0.97"
+      },
+      "paypal_fee": {
+        "currency_code": "USD",
+        "value": "0.02"
+      },
+      "total_refunded_amount": {
+        "currency_code": "USD",
+        "value": "1.98"
+      }
+    },
+    "status": "COMPLETED",
+    "update_time": "2018-08-15T12:13:29-07:00"
+  },
+  "resource_type": "refund",
+  "resource_version": "2.0",
+  "summary": "A $ 0.99 USD capture payment was refunded"
+}

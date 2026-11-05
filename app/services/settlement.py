@@ -1080,13 +1080,15 @@ def _related(resource: dict, key: str) -> str | None:
     return (resource.get("supplementary_data") or {}).get("related_ids", {}).get(key)
 
 
-def _dispatch(session: Session, event_type: str, res: dict, now: datetime) -> str:
+def _dispatch(session: Session, event_type: str, res: dict, now: datetime, gw: PayPalGateway | None = None) -> str:
     actor = "webhook:paypal"
     rid = res.get("id")
 
     if event_type == "PAYMENT.AUTHORIZATION.CREATED":
         order_id = _related(res, "order_id")
         m = session.exec(select(Milestone).where(Milestone.paypal_order_id == order_id)).first() if order_id else None
+        if m is None and rid:  # PayPal's v2 sample has no related_ids; we may already hold this authorization
+            m = session.exec(select(Milestone).where(Milestone.paypal_authorization_id == rid)).first()
         if m is None:
             return "ignored: no tranche for this order"
         return "funded" if _mark_funded(session, m, rid, actor, now) else "already funded"
@@ -1156,7 +1158,7 @@ def _dispatch(session: Session, event_type: str, res: dict, now: datetime) -> st
         return _customer_dispute(session, event_type, res, actor, now)
 
     if event_type == "MERCHANT.ONBOARDING.COMPLETED":
-        return payee_accounts.onboarding_completed(session, res.get("merchant_id"), res.get("tracking_id"))
+        return payee_accounts.onboarding_completed(session, res.get("merchant_id"), res.get("tracking_id"), gw)
 
     if event_type == "MERCHANT.PARTNER-CONSENT.REVOKED":
         return payee_accounts.consent_revoked(session, res.get("merchant_id"), now)
@@ -1177,7 +1179,7 @@ def handle_webhook(session: Session, event: dict, now: datetime, gw: PayPalGatew
     if session.get(WebhookEvent, event_id) is not None:
         return "duplicate"
     res = event.get("resource") or {}
-    outcome = _dispatch(session, event_type, res, now)
+    outcome = _dispatch(session, event_type, res, now, gw)
     resource_id = res.get("id") or res.get("dispute_id")  # dispute resources carry dispute_id, not id
     session.add(WebhookEvent(id=event_id, event_type=event_type, resource_id=resource_id, outcome=outcome))
     try:

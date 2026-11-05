@@ -120,6 +120,7 @@ class MerchantStatus:
     primary_email_confirmed: bool
     permissions_granted: bool
     primary_email: str | None = None  # the connected account's own email (may differ from the org's Payouts email)
+    tracking_id: str | None = None  # the tracking id we gave PayPal when this payee started onboarding
 
 
 PAYOUT_ITEM_STATUS = {  # Payouts item transaction_status -> ours
@@ -321,6 +322,7 @@ class MockPayPal:
             status.get("primary_email_confirmed", True),
             status.get("permissions_granted", True),
             primary_email=status.get("primary_email", ref.get("email")),
+            tracking_id=tracking_id,
         )
         return mid
 
@@ -1024,6 +1026,7 @@ class SandboxPayPal:
             bool(data.get("primary_email_confirmed")),
             all(any(s.endswith(required) for s in scopes) for required in REQUIRED_SCOPES),
             primary_email=data.get("primary_email"),
+            tracking_id=data.get("tracking_id"),
         )
 
     # --- invoices and webhooks ---

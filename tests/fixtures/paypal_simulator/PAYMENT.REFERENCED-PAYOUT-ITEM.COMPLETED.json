@@ -1,0 +1,45 @@
+{
+  "create_time": "2016-08-12T09:28:45Z",
+  "event_type": "PAYMENT.REFERENCED-PAYOUT-ITEM.COMPLETED",
+  "event_version": "1.0",
+  "id": "WH-7GE86343CR033700A-1NL02845XS060644F",
+  "links": [
+    {
+      "encType": "application/json",
+      "href": "https://api.sandbox.paypal.com/v1/notifications/webhooks-events/WH-7GE86343CR033700A-1NL02845XS060644F",
+      "method": "GET",
+      "rel": "self"
+    },
+    {
+      "encType": "application/json",
+      "href": "https://api.sandbox.paypal.com/v1/notifications/webhooks-events/WH-7GE86343CR033700A-1NL02845XS060644F/resend",
+      "method": "POST",
+      "rel": "resend"
+    }
+  ],
+  "resource": {
+    "custom": "Arguntum request",
+    "external_merchant_id": "asda",
+    "external_reference_id": "2332asd",
+    "invoice_id": "as233242",
+    "item_id": "12345",
+    "payee_email": "example@example.com",
+    "payout_amount": {
+      "amount": 500,
+      "currencyCode": "USD",
+      "currencyInfo": "US_Dollar",
+      "unitAmount": 5
+    },
+    "payout_destination": "J7DZS8WTLMFLW",
+    "payout_transaction_id": "12234123123121231212",
+    "processing_state": {
+      "processing_state": "Enough funds..Success",
+      "status": "Success"
+    },
+    "reference_id": "asada2332asd",
+    "reference_type": "Transaction"
+  },
+  "resource_type": "referenced-payout-item",
+  "summary": "Referenced payout amount disbursement was completed",
+  "time_created": "1461699904"
+}

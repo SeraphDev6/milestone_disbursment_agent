@@ -1,0 +1,55 @@
+{
+  "create_time": "2016-06-06T03:44:51Z",
+  "event_type": "PAYMENT.PAYOUTS-ITEM.DENIED",
+  "event_version": "1.0",
+  "id": "WH-68L35871MU875914X-8DM79009TB591331B",
+  "links": [
+    {
+      "encType": "application/json",
+      "href": "https://api.sandbox.paypal.com/v1/notifications/webhooks-events/WH-68L35871MU875914X-8DM79009TB591331B",
+      "method": "GET",
+      "rel": "self"
+    },
+    {
+      "encType": "application/json",
+      "href": "https://api.sandbox.paypal.com/v1/notifications/webhooks-events/WH-68L35871MU875914X-8DM79009TB591331B/resend",
+      "method": "POST",
+      "rel": "resend"
+    }
+  ],
+  "resource": {
+    "links": [
+      {
+        "href": "https://api.sandbox.paypal.com/v1/payments/payouts-item/AYNYWNCHBD8KS",
+        "method": "GET",
+        "rel": "self"
+      },
+      {
+        "href": "https://api.sandbox.paypal.com/v1/payments/payouts/Q8B9WFS7ZZJ4Q",
+        "method": "GET",
+        "rel": "batch"
+      }
+    ],
+    "payout_batch_id": "Q8B9WFS7ZZJ4Q",
+    "payout_item": {
+      "amount": {
+        "currency": "USD",
+        "value": "1.0"
+      },
+      "note": "First payout",
+      "receiver": "example@example.com",
+      "recipient_type": "EMAIL",
+      "sender_item_id": "Item1"
+    },
+    "payout_item_fee": {
+      "currency": "USD",
+      "value": "0.25"
+    },
+    "payout_item_id": "AYNYWNCHBD8KS",
+    "time_processed": "2016-06-06T03:44:51Z",
+    "transaction_id": "57J64166G9424913F",
+    "transaction_status": "DENIED"
+  },
+  "resource_type": "payouts_item",
+  "summary": "A payout item was denied"
+}
