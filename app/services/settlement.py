@@ -43,7 +43,7 @@ from app.models import (
     SettlementStatus,
     WebhookEvent,
 )
-from app.services import ServiceError, payee_accounts
+from app.services import ServiceError, handover, payee_accounts
 from app.services.notifications import notify_side, tranche_subject
 
 HONOR_PERIOD = timedelta(days=3)
@@ -291,6 +291,7 @@ def _reveal(session: Session, m: Milestone, actor: str, now: datetime) -> None:
     if a.deliverable_release != DeliverableRelease.on_capture or m.revealed_at is not None:
         return
     m.revealed_at = now
+    handover.queue(session, m, actor)  # code in a contractor's repo goes over by the handover loop
     commitment = [
         {"evidence_id": e.id, "pinned_ref": e.pinned_ref, "file_sha256": e.file.sha256 if e.file else None}
         for e in m.evidence

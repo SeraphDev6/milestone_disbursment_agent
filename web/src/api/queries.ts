@@ -17,8 +17,10 @@ import type {
   AgreementCreate,
   EvidenceCreate,
   EvidenceVisibility,
+  GitHubHandoverRead,
   GitHubInstallationRead,
   GitHubOrgStatus,
+  GitHubRegistration,
   GitHubRepo,
   HandoverCheck,
   HandoverResult,
@@ -379,14 +381,33 @@ export type CompliancePacket = {
 
 export function useConnectGitHub(agreementId: string, orgId: string) {
   return useMutation({
-    mutationFn: (repo: string) =>
+    mutationFn: (body: string | GitHubRegistration) =>
       call(
         api.POST("/agreements/{agreement_id}/integrations/github", {
           params: { path: { agreement_id: agreementId } },
-          body: { repo },
+          body: typeof body === "string" ? { repo: body } : body,
           ...asOrg(orgId),
         }),
       ),
+  });
+}
+
+/** Code handed over from a contractor's repo once the tranche was paid. Polls while one is still pending. */
+export function useHandovers(milestoneId: string, orgId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["milestone", milestoneId, "handovers"],
+    queryFn: () => call(api.GET("/milestones/{milestone_id}/handovers", { ...mp(milestoneId), ...asOrg(orgId) })) as Promise<GitHubHandoverRead[]>,
+    enabled,
+    refetchInterval: (q) => ((q.state.data ?? []).some((h) => h.status === "pending") ? 15_000 : false),
+  });
+}
+
+export function useRetryHandover(milestoneId: string, orgId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (handoverId: string) =>
+      call(api.POST("/handovers/{handover_id}/retry", { params: { path: { handover_id: handoverId } }, ...asOrg(orgId) })) as Promise<GitHubHandoverRead>,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["milestone", milestoneId, "handovers"] }),
   });
 }
 

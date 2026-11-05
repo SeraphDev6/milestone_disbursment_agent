@@ -8,7 +8,15 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, Response, UploadFile, status
 from sqlmodel import Field, SQLModel, select
 
-from app.api.deps import EvidenceAccessDep, MilestoneAccessDep, SessionDep, ai, gateway, rate_limit
+from app.api.deps import (
+    EvidenceAccessDep,
+    HandoverAccessDep,
+    MilestoneAccessDep,
+    SessionDep,
+    ai,
+    gateway,
+    rate_limit,
+)
 from app.api.views import EvidenceAccepted
 from app.db import record_audit, utcnow
 from app.integrations.github import GitHubError
@@ -19,13 +27,14 @@ from app.models import (
     EvidenceCreate,
     EvidenceRead,
     EvidenceVisibility,
+    GitHubHandoverRead,
     Milestone,
     MilestoneStatus,
     Role,
     StoredFile,
     VerdictRead,
 )
-from app.services import disclosure, github_app, verification
+from app.services import disclosure, github_app, handover, verification
 from app.services.access import AccessError, Action
 from app.services.packet import milestone_section
 
@@ -225,7 +234,7 @@ def download_file(evidence_id: str, auth: EvidenceAccessDep, session: SessionDep
     )
 
 
-_PR_URL = re.compile(r"^https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/\d+")
+_PR_URL = re.compile(r"^https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/(?:pull/\d+|commit/[0-9a-f]{40})")
 
 
 @router.post(
@@ -285,6 +294,66 @@ def check_handover(
     session.commit()
     return HandoverResult(
         evidence_id=ev.id, pinned_ref=pinned, delivered_sha=delivered_sha, matches=how != "different", how=how
+    )
+
+
+@router.get(
+    "/milestones/{milestone_id}/handovers",
+    summary="Code handed over from the contractor's repo once the tranche was paid (contractor_repo integrations)",
+)
+def list_handovers(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep) -> list[GitHubHandoverRead]:
+    access, m = auth
+    access.require(Action.view)
+    return [handover.read(r, session) for r in handover.for_milestone(session, m.id)]
+
+
+@router.post("/handovers/{handover_id}/retry", summary="Try a waiting or failed handover again now (either party)")
+def retry_handover(handover_id: str, auth: HandoverAccessDep, session: SessionDep) -> GitHubHandoverRead:
+    access, row, _ = auth
+    access.require(Action.view)
+    try:
+        handover.retry(session, row, access.actor)
+    except handover.HandoverError as e:
+        raise HTTPException(e.status_code, e.message) from e
+    return handover.read(row, session)
+
+
+@router.get(
+    "/handovers/{handover_id}/archive",
+    summary="Download the source archive handed over for a paid tranche (handover=archive)",
+    description="The archive's files were checked against the verified commit's git tree before it was kept. "
+    "X-Content-SHA256 is its SHA-256; X-Git-Tree is the tree it reproduces.",
+    response_class=Response,
+)
+def download_handover(handover_id: str, auth: HandoverAccessDep, session: SessionDep) -> Response:
+    access, row, m = auth
+    access.require(Action.view)
+    f = session.get(StoredFile, row.file_id) if row.file_id else None
+    if row.status != "delivered" or f is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no archive has been handed over for this yet")
+    digest = hashlib.sha256(f.data).hexdigest()
+    record_audit(
+        session,
+        m.agreement_id,
+        access.actor,
+        "deliverable_downloaded" if digest == f.sha256 else "deliverable_mismatch",
+        milestone_id=m.id,
+        detail={"handover_id": row.id, "sha256": digest, "committed_sha256": f.sha256, "tree_sha": row.tree_sha},
+    )
+    session.commit()
+    if digest != f.sha256:
+        raise HTTPException(status.HTTP_409_CONFLICT, "the stored archive no longer matches what was handed over")
+    return Response(
+        f.data,
+        media_type=f.media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{f.filename}"',
+            "X-Content-Type-Options": "nosniff",
+            "X-Content-SHA256": digest,
+            "X-Pinned-Ref": row.pinned_sha,
+            "X-Git-Tree": row.tree_sha or "",
+            "Access-Control-Expose-Headers": "X-Content-SHA256, X-Pinned-Ref, X-Git-Tree",
+        },
     )
 
 

@@ -343,12 +343,13 @@ def test_setup_manifest_points_github_at_this_deployment():
     assert m["hook_attributes"]["url"] == "https://app.example.org/api/webhooks/github/app"
     assert m["callback_urls"] == ["https://app.example.org/api/github/app/callback"]
     assert m["request_oauth_on_install"] is True  # the install flow's access check depends on it
-    assert m["default_permissions"] == {
-        "contents": "read",
+    assert m["default_permissions"] == {  # contents and PR write: only for handing paid work over
+        "contents": "write",
         "metadata": "read",
-        "pull_requests": "read",
+        "pull_requests": "write",
         "checks": "write",
     }
+    assert set(m["default_events"]) == {"pull_request", "release", "push", "repository"}
 
 
 def test_setup_credentials_load_into_settings(tmp_path):

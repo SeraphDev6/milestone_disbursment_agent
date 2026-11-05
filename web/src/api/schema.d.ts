@@ -868,6 +868,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/milestones/{milestone_id}/handovers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Code handed over from the contractor's repo once the tranche was paid (contractor_repo integrations) */
+        get: operations["list_handovers_milestones__milestone_id__handovers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/handovers/{handover_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Try a waiting or failed handover again now (either party) */
+        post: operations["retry_handover_handovers__handover_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/handovers/{handover_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download the source archive handed over for a paid tranche (handover=archive)
+         * @description The archive's files were checked against the verified commit's git tree before it was kept. X-Content-SHA256 is its SHA-256; X-Git-Tree is the tree it reproduces.
+         */
+        get: operations["download_handover_handovers__handover_id__archive_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/milestones/{milestone_id}/precheck": {
         parameters: {
             query?: never;
@@ -1891,6 +1945,65 @@ export interface components {
              */
             unfunded: string;
         };
+        /** GitHubHandoverRead */
+        GitHubHandoverRead: {
+            /** Id */
+            id: string;
+            /** Milestone Id */
+            milestone_id: string;
+            /** Evidence Id */
+            evidence_id: string;
+            /**
+             * Method
+             * @description pull_request: a PR into the client's repo. archive: a source archive to download. transfer: the contractor transfers the repo to the client's GitHub account. A transfer completes any of them.
+             */
+            method: string;
+            /**
+             * Source Repo
+             * @description The contractor's repo the work was verified in.
+             */
+            source_repo: string;
+            /**
+             * Pinned Sha
+             * @description The verified commit.
+             */
+            pinned_sha: string;
+            /** Target Repo */
+            target_repo?: string | null;
+            /**
+             * Transferred To
+             * @description Set when the repo was transferred to the client: its name under their account.
+             */
+            transferred_to?: string | null;
+            /**
+             * Transfer To
+             * @description GitHub accounts the repo can be transferred to: the client's accounts with the GitHub App.
+             */
+            transfer_to?: string[];
+            /**
+             * Status
+             * @description pending (retried; a transfer is waited on indefinitely), delivered or failed.
+             */
+            status: string;
+            /** Attempts */
+            attempts: number;
+            /**
+             * Tree Sha
+             * @description Verified tree the handed-over code was checked against.
+             */
+            tree_sha?: string | null;
+            /** Pr Url */
+            pr_url?: string | null;
+            /**
+             * Archive Sha256
+             * @description SHA-256 of the archive; a download hashes to this.
+             */
+            archive_sha256?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Delivered At */
+            delivered_at?: string | null;
+        };
         /** GitHubInstallationRead */
         GitHubInstallationRead: {
             /** Installation Id */
@@ -1944,6 +2057,29 @@ export interface components {
             events?: string[];
             /** Labels */
             labels: components["schemas"]["MilestoneLabel"][];
+            /**
+             * Mode
+             * @description merged_pr or contractor_repo.
+             * @default merged_pr
+             */
+            mode?: string;
+            /**
+             * Handover
+             * @description contractor_repo: pull_request, archive or transfer.
+             */
+            handover?: string | null;
+            /** Client Repo */
+            client_repo?: string | null;
+            /**
+             * Handover Ready
+             * @description pull_request: whether the client's org has the GitHub App on client_repo yet. transfer: whether it has the app on any GitHub account to transfer to. The handover waits (and is retried) until it does.
+             */
+            handover_ready?: boolean | null;
+            /**
+             * Transfer To
+             * @description contractor_repo: the client's GitHub accounts with the app, where a transfer is recognised.
+             */
+            transfer_to?: string[];
         };
         /** GitHubOrgStatus */
         GitHubOrgStatus: {
@@ -1973,6 +2109,23 @@ export interface components {
              * @default true
              */
             use_app?: boolean;
+            /**
+             * Mode
+             * @description merged_pr: merged, labelled PRs in this repo are the evidence; the client usually owns it, so it has the code at merge. contractor_repo: this is your private repo; a labelled PR, or a release or tag named `mde-<milestone id>`, pins the commit, and the code goes to the client only once the tranche is paid. Defaults to contractor_repo when the agreement withholds work until capture, else merged_pr.
+             */
+            mode?: ("merged_pr" | "contractor_repo") | null;
+            /**
+             * Handover
+             * @description contractor_repo: how the code reaches the client once paid. pull_request opens a PR into client_repo (the client installs the GitHub App on it); archive keeps a source archive for them to download; transfer: you transfer this repo to the client's GitHub account and the app only watches for it. A transfer with the verified commit on the default branch completes any of the three.
+             * @default pull_request
+             * @enum {string}
+             */
+            handover?: "pull_request" | "archive" | "transfer";
+            /**
+             * Client Repo
+             * @description contractor_repo with handover=pull_request: the client's repo.
+             */
+            client_repo?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -5040,6 +5193,109 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HandoverResult"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_handovers_milestones__milestone_id__handovers_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Which of your orgs you act for, if you belong to several. */
+                "X-Org-Id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                milestone_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubHandoverRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_handover_handovers__handover_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Which of your orgs you act for, if you belong to several. */
+                "X-Org-Id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                handover_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubHandoverRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_handover_handovers__handover_id__archive_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Which of your orgs you act for, if you belong to several. */
+                "X-Org-Id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                handover_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

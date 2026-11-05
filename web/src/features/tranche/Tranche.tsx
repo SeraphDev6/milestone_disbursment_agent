@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useParams } from "react-router";
-import { isMock, useEvidence, useGitHubRepos, useHealth, useMilestoneAudit, useTrancheActions, useVerdict } from "@/api/queries";
+import { isMock, useEvidence, useGitHubRepos, useHandovers, useHealth, useMilestoneAudit, useRetryHandover, useTrancheActions, useVerdict } from "@/api/queries";
 import { useAgreementCtx, useOrgCtx, paths } from "@/app/context";
 import { useTitle } from "@/app/RouteAnnouncer";
 import { useSessions } from "@/auth/session";
@@ -11,7 +11,7 @@ import { IN_FLIGHT, MILESTONE_STAMPS } from "@/domain/status";
 import { Busy, Callout, Crumbs, layout, PageHeader, Sheet, Stamp } from "@/design/components";
 import { Actions } from "./Actions";
 import { AddEvidence, EvidenceList } from "./Evidence";
-import { latestHandovers } from "./Handover";
+import { HandedOver, latestHandovers } from "./Handover";
 import { StateTrack } from "./StateTrack";
 import { Timeline } from "./Timeline";
 import { Results, VerdictSummary } from "./Verdict";
@@ -34,6 +34,8 @@ export function Tranche() {
   const acts = useTrancheActions(a.id, milestoneId, org.orgId);
   const hasCode = (evidence.data ?? []).some((e) => /^[0-9a-f]{40}$/i.test(e.pinned_ref));
   const repos = useGitHubRepos(org.orgId, hasCode);
+  const handovers = useHandovers(milestoneId, org.orgId, !!m?.revealed_at && hasCode);
+  const retryHandover = useRetryHandover(milestoneId, org.orgId);
 
   const names: ActorNames = useMemo(
     () => ({
@@ -114,6 +116,11 @@ export function Tranche() {
               </div>
             )}
           </Sheet>
+          {(handovers.data?.length ?? 0) > 0 && (
+            <Sheet title="Handover">
+              <HandedOver handovers={handovers.data ?? []} orgId={org.orgId} retry={retryHandover} />
+            </Sheet>
+          )}
           <Sheet title="Evidence on file">
             {evidence.isPending ? <Busy label="Loading evidence" /> : <EvidenceList evidence={evidence.data ?? []} orgId={org.orgId} handovers={latestHandovers(events)} checkHandover={acts.handover} repos={(repos.data ?? []).map((r) => r.repo)} />}
           </Sheet>

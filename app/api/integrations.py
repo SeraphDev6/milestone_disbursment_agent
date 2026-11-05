@@ -2,7 +2,7 @@
 
 import json
 import secrets
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, Response, status
 from sqlmodel import Field, SQLModel, select
@@ -12,6 +12,7 @@ from app.db import record_audit
 from app.integrations import github
 from app.models import (
     AgreementStatus,
+    DeliverableRelease,
     Integration,
     Milestone,
     MilestoneStatus,
@@ -39,6 +40,23 @@ class GitHubRegistration(SQLModel):
         description="Connect through the GitHub App when one of your org's installations can read the repo (no "
         "webhook to configure). False forces the hand-configured repo webhook.",
     )
+    mode: Literal["merged_pr", "contractor_repo"] | None = Field(
+        default=None,
+        description="merged_pr: merged, labelled PRs in this repo are the evidence; the client usually owns it, so "
+        "it has the code at merge. contractor_repo: this is your private repo; a labelled PR, or a release or tag "
+        "named `mde-<milestone id>`, pins the commit, and the code goes to the client only once the tranche is paid. "
+        "Defaults to contractor_repo when the agreement withholds work until capture, else merged_pr.",
+    )
+    handover: Literal["pull_request", "archive", "transfer"] = Field(
+        default="pull_request",
+        description="contractor_repo: how the code reaches the client once paid. pull_request opens a PR into "
+        "client_repo (the client installs the GitHub App on it); archive keeps a source archive for them to download; "
+        "transfer: you transfer this repo to the client's GitHub account and the app only watches for it. A transfer "
+        "with the verified commit on the default branch completes any of the three.",
+    )
+    client_repo: str | None = Field(
+        default=None, max_length=200, description="contractor_repo with handover=pull_request: the client's repo."
+    )
 
 
 class MilestoneLabel(SQLModel):
@@ -58,6 +76,18 @@ class GitHubIntegration(SQLModel):
     content_type: str = "application/json"
     events: list[str] = ["pull_request"]
     labels: list[MilestoneLabel]
+    mode: str = Field(default="merged_pr", description="merged_pr or contractor_repo.")
+    handover: str | None = Field(default=None, description="contractor_repo: pull_request, archive or transfer.")
+    client_repo: str | None = None
+    handover_ready: bool | None = Field(
+        default=None,
+        description="pull_request: whether the client's org has the GitHub App on client_repo yet. transfer: whether "
+        "it has the app on any GitHub account to transfer to. The handover waits (and is retried) until it does.",
+    )
+    transfer_to: list[str] = Field(
+        default_factory=list,
+        description="contractor_repo: the client's GitHub accounts with the app, where a transfer is recognised.",
+    )
 
 
 @router.post(
@@ -74,15 +104,55 @@ def register_github(
         raise HTTPException(status.HTTP_409_CONFLICT, f"agreement is {a.status}")
     if not github.valid_repo(body.repo):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "repo must look like 'owner/name'")
+    on_capture = a.deliverable_release == DeliverableRelease.on_capture
+    mode = body.mode or ("contractor_repo" if on_capture else "merged_pr")
+    app = request.app.state.github_app
     installation_id = None
-    if body.use_app:
+    repo_id = None
+    if body.use_app or mode == "contractor_repo":
         rows = github_app.installations(session, [access.party.org_id or ""])
-        installation_id = github_app.installation_for_repo(request.app.state.github_app, rows, body.repo)
+        installation_id = github_app.installation_for_repo(app, rows, body.repo)
+    payer_orgs = [p.org_id or "" for p in a.parties if p.role == Role.payer]
+    handover_ready = None
+    if mode == "merged_pr" and on_capture:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "this agreement withholds the work until the tranche is paid, but merged PRs put the code in the "
+            "registered repo straight away; connect your own private repo with mode=contractor_repo",
+        )
+    if mode == "contractor_repo":
+        if not on_capture:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "contractor_repo is for agreements that withhold the work until capture (deliverable_release "
+                "on_capture); this one releases it on submit, so connect the repo with mode=merged_pr",
+            )
+        if installation_id is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f"install the GitHub App on {body.repo} from your organization's settings first; a contractor repo "
+                "is read through the app",
+            )
+        repo_id = _check_withheld(app, session, installation_id, payer_orgs, body.repo)
+        if body.handover == "pull_request":
+            if not body.client_repo or not github.valid_repo(body.client_repo):
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT, "handover=pull_request needs client_repo as 'owner/name'"
+                )
+            if body.client_repo.lower() == body.repo.lower():
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "client_repo must be the client's repo")
+            payer_installs = github_app.installations(session, payer_orgs)
+            handover_ready = github_app.installation_for_repo(app, payer_installs, body.client_repo) is not None
+        elif body.handover == "transfer":
+            handover_ready = bool(github_app.installations(session, payer_orgs))
+    handover = body.handover if mode == "contractor_repo" else None
+    client_repo = body.client_repo if handover == "pull_request" else None
     row = session.exec(
         select(Integration).where(
             Integration.agreement_id == a.id, Integration.kind == "github", Integration.target == body.repo
         )
     ).first()
+    detail = {"repo": body.repo, "via_app": bool(installation_id), "mode": mode, "handover": handover}
     if row is None:
         row = Integration(
             agreement_id=a.id,
@@ -91,20 +161,24 @@ def register_github(
             secret=secrets.token_hex(32),
             created_by=access.actor,
             installation_id=installation_id,
+            mode=mode,
+            handover=handover,
+            handover_repo=client_repo,
+            repo_id=repo_id,
         )
         session.add(row)
         session.flush()
-        record_audit(
-            session,
-            a.id,
-            access.actor,
-            "github_connected",
-            detail={"repo": body.repo, "via_app": bool(installation_id)},
-        )
+        record_audit(session, a.id, access.actor, "github_connected", detail=detail)
         session.commit()
-    elif installation_id and row.installation_id != installation_id:
-        row.installation_id = installation_id  # switched to the app
-        record_audit(session, a.id, access.actor, "github_connected", detail={"repo": body.repo, "via_app": True})
+    elif (
+        (installation_id and row.installation_id != installation_id)
+        or ((row.mode, row.handover, row.handover_repo) != (mode, handover, client_repo))
+        or (repo_id and row.repo_id != repo_id)
+    ):
+        row.installation_id = installation_id or row.installation_id  # switched to the app
+        row.mode, row.handover, row.handover_repo = mode, handover, client_repo
+        row.repo_id = repo_id or row.repo_id
+        record_audit(session, a.id, access.actor, "github_connected", detail=detail)
         session.commit()
     base = request.app.state.settings.api_base_url
     via_app = row.installation_id is not None
@@ -115,19 +189,79 @@ def register_github(
         webhook_url=None if via_app else f"{base}/webhooks/github/{row.id}",
         secret=None if via_app else row.secret,
         labels=[MilestoneLabel(milestone_id=m.id, title=m.title, label=github.label_for(m.id)) for m in a.milestones],
+        mode=row.mode,
+        handover=row.handover,
+        client_repo=row.handover_repo,
+        handover_ready=handover_ready,
+        transfer_to=sorted({i.account_login for i in github_app.installations(session, payer_orgs)})
+        if row.mode == "contractor_repo"
+        else [],
+        events=["pull_request", "release", "push"] if row.mode == "contractor_repo" else ["pull_request"],
     )
+
+
+def _check_withheld(app, session, installation_id: int, payer_orgs: list[str], repo: str) -> int | None:
+    """A contractor repo only withholds the code if the client can't read it: private, and none of the client
+    org's own installations can see it. Returns GitHub's id for the repo."""
+    try:
+        info = app.client(installation_id).repo(repo)
+    except github.GitHubError as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"couldn't look up {repo} on GitHub: {e}") from e
+    if not info.get("private"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, f"{repo} is public, so the client can already read the code; make it private"
+        )
+    if github_app.installation_for_repo(app, github_app.installations(session, payer_orgs), repo) is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"the client's organization can already read {repo} through its GitHub App installation, so the code "
+            "isn't withheld; use a repo only you can read",
+        )
+    return info.get("id")
 
 
 def ingest_pr(state, integration_id: str, pr: github.MergedPR, milestone_ids: list[str]) -> None:
     """Background: fetch CI and files from GitHub, store evidence per milestone, verify. Through the app, reads use
     the installation's token and a check run on the merge commit follows each tranche."""
+    api = _reader(state, integration_id)
+    evidence, facts = github.build_evidence(pr, api)
+    _store(
+        state, integration_id, evidence, facts, pr.merge_sha, pr.repo, f"github:{pr.merged_by}", milestone_ids, pr.url
+    )
+
+
+def ingest_tag(state, integration_id: str, tc: github.TaggedCommit, milestone_ids: list[str]) -> None:
+    """Background: a release or tag in a contractor repo. The commit it points to is the evidence."""
+    api = _reader(state, integration_id)
+    actor = f"github:{tc.author}"
+    try:
+        evidence, facts, sha = github.build_commit_evidence(tc, api)
+    except github.GitHubError as e:
+        with state.sessionmaker() as session:
+            integration = session.get(Integration, integration_id)
+            if integration is not None:
+                record_audit(
+                    session,
+                    integration.agreement_id,
+                    actor,
+                    "github_evidence_refused",
+                    detail={"tag": tc.tag, "repo": tc.repo, "reason": f"couldn't read the tagged commit: {e}"},
+                )
+                session.commit()
+        return
+    _store(state, integration_id, evidence, facts, sha, tc.repo, actor, milestone_ids, tc.url)
+
+
+def _reader(state, integration_id: str):
     with state.sessionmaker() as session:
         integration = session.get(Integration, integration_id)
         installation_id = integration.installation_id if integration else None
     app = getattr(state, "github_app", None)
-    api = app.client(installation_id) if app is not None and installation_id else state.github
-    evidence, facts = github.build_evidence(pr, api)
-    actor = f"github:{pr.merged_by}"
+    return app.client(installation_id) if app is not None and installation_id else state.github
+
+
+def _store(state, integration_id, evidence, facts, sha: str, repo: str, actor: str, milestone_ids, url: str) -> None:
+    app = getattr(state, "github_app", None)
     to_verify = []
     with state.sessionmaker() as session:
         integration = session.get(Integration, integration_id)
@@ -137,7 +271,7 @@ def ingest_pr(state, integration_id: str, pr: github.MergedPR, milestone_ids: li
                 continue
             try:
                 _, created = verification.submit_evidence(
-                    session, m, evidence, source="github", actor=actor, check_results=facts, pinned_ref=pr.merge_sha
+                    session, m, evidence, source="github", actor=actor, check_results=facts, pinned_ref=sha
                 )
             except verification.VerificationError as e:
                 record_audit(
@@ -146,12 +280,12 @@ def ingest_pr(state, integration_id: str, pr: github.MergedPR, milestone_ids: li
                     actor,
                     "github_evidence_refused",
                     milestone_id=m.id,
-                    detail={"pr": pr.url, "reason": e.message},
+                    detail={"source": url, "reason": e.message},
                 )
                 session.commit()
                 continue
-            if installation_id and app is not None:
-                github_app.track(session, m, installation_id, pr.repo, pr.merge_sha)
+            if integration.installation_id and app is not None:
+                github_app.track(session, m, integration.installation_id, repo, sha)
                 session.commit()
             if created and m.status == MilestoneStatus.evidence_received:
                 to_verify.append(m.id)

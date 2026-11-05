@@ -17,6 +17,7 @@ from app.integrations.email import make_mailer
 from app.integrations.github_app import make_github_app
 from app.integrations.paypal import make_gateway
 from app.services.github_app import publish_checks
+from app.services.handover import run as run_handovers
 from app.services.notifications import NOTIFIER, Notifier
 from app.services.outbound import deliver_due
 from app.services.settlement import disburse_due, expire_stale_holds, expire_stale_invoices
@@ -51,8 +52,10 @@ def main(argv: list[str]) -> int:
             print(", ".join(f"{k.replace('_', ' ')}: {v}" for k, v in counts.items()))
         else:
             sent = deliver_due(session, now, allow_http=settings.is_mock)
-            checks = publish_checks(session, make_github_app(settings), notifier.tranche_link, now)
-            print(f"delivered {sent} webhook(s), posted {checks} GitHub check run(s)")
+            gh = make_github_app(settings)
+            checks = publish_checks(session, gh, notifier.tranche_link, now)
+            handed = run_handovers(session, gh, now)
+            print(f"delivered {sent} webhook(s), posted {checks} GitHub check run(s), handed over {handed} tranche(s)")
     return 0
 
 
