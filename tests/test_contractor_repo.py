@@ -429,3 +429,48 @@ def test_a_transfer_to_someone_other_than_the_client_doesnt_count(client, deal):
     assert transferred(client, keys, new) == "1 handover(s) to check"
     [row] = rows(client, m1)
     assert row.status == "pending" and row.transferred_to is None
+
+
+def test_after_a_transfer_the_connection_follows_the_repo(client):
+    from app.models import Evidence, GitHubCheck, Integration
+
+    sow = sow_on_capture()
+    second = copy.deepcopy(sow["milestones"][0]) | {"title": "Milestone 2: receipts", "amount": "3000.00"}
+    sow["milestones"] = [sow["milestones"][0] | {"amount": "3000.00"}, second]
+    aid, (m1, m2), keys = create_active(client, sow)
+    keys["payee_iid"] = link(client, keys["payee"], keys["payee_org"], account="devco", repos=("devco/shop-work",))[
+        "installation_id"
+    ]
+    keys["payer_iid"] = link(client, keys["payer"], keys["payer_org"], account="acme", repos=("acme/shop",))[
+        "installation_id"
+    ]
+    assert register(client, aid, keys, handover="transfer", client_repo=None).status_code == 200
+    fund(client, m1, keys)
+    deliver_release(client, keys, m1)
+    approve(client, m1, keys)
+    gh = app_of(client)
+    new = gh.transfer("devco/shop-work", "acme")
+    assert transferred(client, keys, new) == "1 handover(s) to check"
+    assert rows(client, m1)[0].status == "delivered"
+
+    with client.app.state.sessionmaker() as s:
+        [integration] = s.exec(select(Integration).where(Integration.agreement_id == aid)).all()
+        assert (integration.target, integration.installation_id) == ("acme/shop-work", keys["payer_iid"])
+        [check] = s.exec(select(GitHubCheck).where(GitHubCheck.milestone_id == m1)).all()
+        assert (check.repo, check.installation_id) == ("acme/shop-work", keys["payer_iid"])
+    [moved] = [e for e in audit_all(client, aid) if e.action == "github_repo_moved"]
+    assert moved.detail["from"] == "devco/shop-work" and moved.detail["to"] == "acme/shop-work"
+
+    # The next tranche's release, now in the client's repo, arrives through the client's installation and counts.
+    sha, _ = gh.push(new, {"src/receipts.tsx": b"export const R = 1;\n"}, tag=f"mde-{m2}")
+    payload = release_event(new, f"mde-{m2}") | {"installation": {"id": keys["payer_iid"]}}
+    r = app_delivery(client, payload, event="release", delivery="r2")
+    assert r.json()["outcome"] == "queued for 1 agreement(s)", r.text
+    with client.app.state.sessionmaker() as s:
+        [ev] = s.exec(select(Evidence).where(Evidence.milestone_id == m2)).all()
+        assert ev.pinned_ref == sha
+
+
+def audit_all(client, aid) -> list[AuditEvent]:
+    with client.app.state.sessionmaker() as s:
+        return list(s.exec(select(AuditEvent).where(AuditEvent.agreement_id == aid)))

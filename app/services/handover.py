@@ -27,6 +27,7 @@ from app.integrations.github import GitHubError
 from app.integrations.github_app import GitHubApp
 from app.models import (
     Evidence,
+    GitHubCheck,
     GitHubHandover,
     GitHubHandoverRead,
     Integration,
@@ -246,8 +247,32 @@ def _transferred(session: Session, app: GitHubApp, m: Milestone, row: GitHubHand
         row.transferred_to = name
         row.target_repo = row.target_repo or name
         row.tree_sha = dst.commit(name, row.pinned_sha)["commit"]["tree"]["sha"]
+        _follow(session, row, name, inst.installation_id)
         return True
     return False
+
+
+def _follow(session: Session, row: GitHubHandover, name: str, installation_id: int) -> None:
+    """The repo now lives under the client: point its integrations (and their check runs) at the new name and the
+    client's installation, so releases and tags for later tranches still count. Nothing is withheld from then on:
+    the client can read the whole repo."""
+    moved = session.exec(
+        select(Integration).where(Integration.repo_id == row.repo_id, Integration.kind == "github")
+    ).all()
+    for integration in moved:
+        if integration.target == name and integration.installation_id == installation_id:
+            continue
+        old = integration.target
+        integration.target, integration.installation_id = name, installation_id
+        for check in session.exec(select(GitHubCheck).where(GitHubCheck.repo == old)).all():
+            check.repo, check.installation_id = name, installation_id
+        record_audit(
+            session,
+            integration.agreement_id,
+            ACTOR,
+            "github_repo_moved",
+            detail={"from": old, "to": name, "installation_id": installation_id},
+        )
 
 
 def _open_pr(
