@@ -1,8 +1,10 @@
 import { useState } from "react";
-import type { AuditEventRead, EvidenceRead, HandoverCheck, HandoverResult } from "@/api/types";
+import type { AuditEventRead, EvidenceRead, GitHubHandoverRead, HandoverCheck, HandoverResult } from "@/api/types";
+import { download } from "@/api/client";
 import { errorMessage } from "@/api/errors";
+import type { StampSpec } from "@/domain/status";
 import { dateTime, shortHash } from "@/domain/format";
-import { Button, Callout, Dialog, layout, RadioGroup, Select, Stamp, TextField } from "@/design/components";
+import { Button, Callout, Dialog, layout, RadioGroup, Select, Stamp, TextField, toast } from "@/design/components";
 import s from "./Tranche.module.css";
 
 const SHA = /^[0-9a-f]{40}$/i;
@@ -159,5 +161,67 @@ export function HandoverButton({ evidence, check, repos = [] }: { evidence: Evid
         </div>
       </Dialog>
     </>
+  );
+}
+
+const DELIVERY: Record<string, StampSpec> = {
+  delivered: { label: "Handed over", tone: "settled", glyph: "check", meaning: "The code was checked against the verified commit's files and handed over." },
+  pending: { label: "Handover waiting", tone: "held", glyph: "clock", meaning: "Paid for; the handover is retried until it gets through." },
+  failed: { label: "Handover failed", tone: "alert", glyph: "cross", meaning: "Nothing was handed over. Either side can retry once the cause is fixed." },
+};
+
+type Retry = { mutateAsync: (id: string) => Promise<GitHubHandoverRead>; isPending: boolean };
+
+async function fetchArchive(h: GitHubHandoverRead, orgId: string) {
+  try {
+    const { matches } = await download(`/handovers/${h.id}/archive`, `${h.source_repo.split("/")[1]}-${h.pinned_sha.slice(0, 12)}.tar.gz`, orgId);
+    if (matches === true) toast("Archive downloaded", { body: "It hashes to the archive that was checked against the verified commit.", tone: "success" });
+    else if (matches === false) toast("This archive doesn't match what was handed over", { body: "Don't rely on it; download it again or contact support.", tone: "error" });
+  } catch (err) {
+    toast("Download failed", { body: errorMessage(err), tone: "error" });
+  }
+}
+
+/**
+ * Code handed over from the contractor's private repo once the tranche was paid: a PR into the client's repo, or a
+ * source archive. Each was checked against the git tree of the commit the verifier read before it was handed over.
+ */
+export function HandedOver({ handovers, orgId, retry }: { handovers: GitHubHandoverRead[]; orgId: string; retry: Retry }) {
+  async function again(h: GitHubHandoverRead) {
+    try {
+      await retry.mutateAsync(h.id);
+      toast("Retrying the handover", { body: "This page updates when it gets through." });
+    } catch (err) {
+      toast("Couldn't retry", { body: errorMessage(err), tone: "error" });
+    }
+  }
+  return (
+    <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "var(--space-3)" }} aria-label="Handovers">
+      {handovers.map((h) => (
+        <li key={h.id} className={layout.stack} style={{ gap: "var(--space-2)" }}>
+          <span className={layout.row}>
+            <Stamp flat spec={DELIVERY[h.status] ?? DELIVERY.pending!} />
+            <strong>{h.method === "pull_request" ? `Pull request into ${h.target_repo}` : "Source archive"}</strong>
+          </span>
+          <p className={s.evMeta}>
+            From {h.source_repo} at <code title={h.pinned_sha}>{shortHash(h.pinned_sha, 10, 4)}</code>
+            {h.tree_sha && <> · files match tree <code title={h.tree_sha}>{shortHash(h.tree_sha, 10, 4)}</code></>}
+            {h.delivered_at && <> · {dateTime(h.delivered_at)}</>}
+          </p>
+          {h.error && h.status !== "delivered" && <p className={s.evMeta} style={{ color: "var(--text-secondary)" }}>{h.error}</p>}
+          <span className={layout.row}>
+            {h.pr_url && (
+              <a href={h.pr_url} target="_blank" rel="noreferrer noopener">Open the pull request<span className="sr-only"> (opens in a new tab)</span></a>
+            )}
+            {h.method === "archive" && h.status === "delivered" && (
+              <Button size="sm" icon="download" onPress={() => fetchArchive(h, orgId)}>Download archive</Button>
+            )}
+            {h.status !== "delivered" && (
+              <Button size="sm" onPress={() => again(h)} isPending={retry.isPending}>Retry now</Button>
+            )}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }

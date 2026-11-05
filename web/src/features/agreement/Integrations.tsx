@@ -8,7 +8,7 @@ import { paths, useAgreementCtx, useOrgCtx } from "@/app/context";
 import { useTitle } from "@/app/RouteAnnouncer";
 import { date } from "@/domain/format";
 import { can } from "@/domain/permissions";
-import { Button, Callout, ConfirmDialog, CopyButton, DataGrid, Facts, layout, PermissionNote, Select, Sheet, TextField, toast } from "@/design/components";
+import { Button, Callout, ConfirmDialog, CopyButton, DataGrid, Facts, layout, PermissionNote, RadioGroup, Select, Sheet, TextField, toast } from "@/design/components";
 
 const OTHER = "__other__";
 
@@ -37,24 +37,52 @@ function GitHub() {
   const chosen = typed ? repo.trim() : picked;
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GitHubIntegration | null>(null);
+  const [handover, setHandover] = useState<"pull_request" | "archive">("pull_request");
+  const [clientRepo, setClientRepo] = useState("");
+  const [clientError, setClientError] = useState<string | null>(null);
   const allowed = can(seat, "connect_github");
+  // Work withheld until capture can't be merged into the client's repo first: it stays in the payee's private repo.
+  const contractor = a.deliverable_release === "on_capture";
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!/^[\w.-]+\/[\w.-]+$/.test(chosen)) return setError(typed ? "Enter the repository as owner/name" : "Choose a repository");
     setError(null);
+    if (contractor && handover === "pull_request" && !/^[\w.-]+\/[\w.-]+$/.test(clientRepo.trim())) {
+      return setClientError("Enter the client's repository as owner/name");
+    }
+    setClientError(null);
     try {
-      setResult((await connect.mutateAsync(chosen)) as GitHubIntegration);
+      const body = contractor
+        ? { repo: chosen, mode: "contractor_repo" as const, handover, client_repo: handover === "pull_request" ? clientRepo.trim() : null }
+        : chosen;
+      setResult((await connect.mutateAsync(body)) as GitHubIntegration);
       toast("GitHub connected", { body: chosen });
     } catch (err) {
       setError(errorMessage(err));
     }
   }
   return (
-    <Sheet title="GitHub: merged pull requests as evidence">
+    <Sheet title={contractor ? "GitHub: your private repo, handed over once paid" : "GitHub: merged pull requests as evidence"}>
       <div className={layout.stack}>
-        <p>A merged PR carrying a tranche's label becomes evidence for it, pinned to the merge commit, with CI results read from GitHub. It's the only way to satisfy a <code>ci_green</code> check.</p>
+        {contractor ? (
+          <p>
+            This agreement keeps the work from the payer until the tranche is paid, so the code stays in your private repo. A release or tag named for a tranche, or a merged PR with its label, pins the commit that's verified, with CI results read from GitHub. The payer sees the commit, CI and any preview link, not the source. Once the tranche is paid, the code is handed over and checked against that commit first.
+          </p>
+        ) : (
+          <p>A merged PR carrying a tranche's label becomes evidence for it, pinned to the merge commit, with CI results read from GitHub. It's the only way to satisfy a <code>ci_green</code> check.</p>
+        )}
         {!allowed.ok ? (
           <PermissionNote>{allowed.reason}</PermissionNote>
+        ) : contractor && !installed ? (
+          <Callout tone="note" title="Install the GitHub App first">
+            {app.data?.app_available ? (
+              <p style={{ margin: 0 }}>
+                A private repo is read through the app. <Link to={`${paths.settings(org.orgId)}#github`}>Install the GitHub App</Link> for {org.orgName} on the repo with the work, then come back to connect it.
+              </p>
+            ) : (
+              <p style={{ margin: 0 }}>This server has no GitHub App, which a repo kept private until payment needs.</p>
+            )}
+          </Callout>
         ) : (
           <>
             {app.data?.app_available && !installed && seat.role === "payee" && (
@@ -68,17 +96,55 @@ function GitHub() {
                   label="Repository"
                   description="Repos your GitHub App installations can read"
                   value={picked}
-                  options={[...choices.map((r) => ({ id: r.repo, label: r.repo })), { id: OTHER, label: "Another repo (set up a webhook)" }]}
+                  options={[...choices.map((r) => ({ id: r.repo, label: r.repo })), ...(contractor ? [] : [{ id: OTHER, label: "Another repo (set up a webhook)" }])]}
                   onChange={(v) => setPicked(v)}
                   error={!typed ? error : undefined}
                 />
               )}
               {typed && <TextField label={choices.length ? "Other repository" : "Repository"} placeholder="owner/name" value={repo} onChange={setRepo} error={error} figures />}
-              <Button type="submit" variant="primary" icon="github" isPending={connect.isPending}>Connect</Button>
+              {!contractor && <Button type="submit" variant="primary" icon="github" isPending={connect.isPending}>Connect</Button>}
             </form>
+            {contractor && (
+              <form onSubmit={submit} noValidate className={layout.stack}>
+                <RadioGroup
+                  label="Once a tranche is paid, hand the code over as"
+                  value={handover}
+                  onChange={(v) => setHandover(v as "pull_request" | "archive")}
+                  options={[
+                    { id: "pull_request", label: "A pull request into the client's repo", description: "The client installs the GitHub App on their repo. The PR has exactly the files that were verified." },
+                    { id: "archive", label: "A source archive", description: "Kept here for the client to download, checked against the verified commit." },
+                  ]}
+                />
+                {handover === "pull_request" && (
+                  <TextField label="Client's repository" placeholder="owner/name" value={clientRepo} onChange={setClientRepo} error={clientError} figures description="Where the handover PR is opened." />
+                )}
+                <div><Button type="submit" variant="primary" icon="github" isPending={connect.isPending}>Connect</Button></div>
+              </form>
+            )}
           </>
         )}
-        {result?.via_app && (
+        {result?.mode === "contractor_repo" && (
+          <Callout tone="success" title={`${result.repo} is connected; the code stays there until paid`} live>
+            <p>Publish a release, or push a tag, named with a tranche's label (a suffix like <code>-v2</code> is fine), or merge a PR carrying the label. Its commit becomes that tranche's evidence. Add a line <code>Preview: https://…</code> to the release notes to give the payer something to try.</p>
+            {result.handover === "pull_request" ? (
+              <p>Once paid, a PR with exactly the verified files is opened into <strong>{result.client_repo}</strong>.</p>
+            ) : (
+              <p>Once paid, a source archive of the verified commit is kept here for the client to download.</p>
+            )}
+            {result.handover_ready === false && (
+              <p><strong>{result.client_repo} isn't reachable yet.</strong> The client's organization needs the GitHub App installed on it; until then the handover waits and is retried.</p>
+            )}
+            <h3 style={{ fontSize: "var(--text-lg)", marginTop: "var(--space-4)" }}>Labels</h3>
+            <ul style={{ margin: 0 }}>
+              {result.labels.map((l) => (
+                <li key={l.milestone_id}>
+                  <code>{l.label}</code> → {l.title} <CopyButton value={l.label} label={`Copy label for ${l.title}`} />
+                </li>
+              ))}
+            </ul>
+          </Callout>
+        )}
+        {result?.via_app && result.mode !== "contractor_repo" && (
           <Callout tone="success" title={`${result.repo} is connected through the GitHub App`} live>
             <p>Nothing to set up on GitHub. Add a tranche's label to a pull request; when it's merged, it becomes that tranche's evidence and the PR shows its progress as a check.</p>
             <h3 style={{ fontSize: "var(--text-lg)", marginTop: "var(--space-4)" }}>Labels</h3>

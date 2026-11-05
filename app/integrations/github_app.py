@@ -7,10 +7,14 @@
   forged `installation_id` can't claim someone else's installation.
 - Mock mode without app credentials uses MockGitHubApp: an install page on this server and canned repos.
 
-The app's permissions (set in the manifest, scripts/github_app_setup.py): contents, metadata and pull requests
-read; checks write. Events: installation, pull_request.
+The app's permissions (set in the manifest, scripts/github_app_setup.py): metadata read; contents, pull requests and
+checks write. Write access to contents and pull requests is only used to hand work over: a branch and a PR into the
+client's repo once a tranche is paid. Events: installation, pull_request, release, push.
 """
 
+import hashlib
+import io
+import tarfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -21,7 +25,8 @@ from urllib.parse import quote, urlencode
 import httpx
 import jwt
 
-from app.integrations.github import GitHubAPI, GitHubClient, GitHubError
+from app.integrations import gittree
+from app.integrations.github import GitHubClient, GitHubError, GitHubWriter
 
 CHECK_NAME = "Milestone Ledger"
 
@@ -42,7 +47,7 @@ class GitHubApp(Protocol):
     def user_installation_ids(self, user_token: str) -> set[int]: ...
     def installation(self, installation_id: int) -> Installation: ...
     def repos(self, installation_id: int) -> list[str]: ...
-    def client(self, installation_id: int) -> GitHubAPI: ...
+    def client(self, installation_id: int) -> GitHubWriter: ...
     def upsert_check_run(self, installation_id: int, repo: str, check_run_id: int | None, body: dict) -> int: ...
 
 
@@ -153,7 +158,7 @@ class RealGitHubApp:
                 break
         return sorted(names)
 
-    def client(self, installation_id: int) -> GitHubAPI:
+    def client(self, installation_id: int) -> GitHubWriter:
         return GitHubClient(
             token=self.installation_token(installation_id), base_url=self._api_url, transport=self._transport
         )
@@ -170,11 +175,15 @@ class RealGitHubApp:
 # --- mock --------------------------------------------------------------------------------
 
 
-@dataclass
 class MockGitHubClient:
-    """What an installation token can read, in mock mode."""
+    """What an installation token can read and write, in mock mode. State lives on the MockGitHubApp."""
 
-    commits: dict[tuple[str, str], tuple[str, str]]
+    def __init__(self, app: "MockGitHubApp", installation_id: int):
+        self._app, self._iid = app, installation_id
+
+    def _visible(self, repo: str) -> None:
+        if repo not in self._app.repo_lists.get(self._iid, []):
+            raise GitHubError(f"GitHub 404 for /repos/{repo}")
 
     def check_runs(self, repo: str, sha: str) -> list[dict]:
         return [{"name": "tests", "status": "completed", "conclusion": "success"}]
@@ -183,10 +192,51 @@ class MockGitHubClient:
         return [{"filename": "README.md", "additions": 1, "deletions": 0}]
 
     def commit(self, repo: str, ref: str) -> dict:
-        if (repo, ref) not in self.commits:
+        default = self._app.repo_meta.get(repo, {}).get("default_branch", "main")
+        if (repo, ref) not in self._app.commits and ref == default and repo in self._app.repo_lists.get(self._iid, []):
+            self._app.commits[(repo, ref)] = (hashlib.sha1(repo.encode()).hexdigest(), gittree.tree_id([]))
+        if (repo, ref) not in self._app.commits:
             raise GitHubError(f"GitHub 404 for /repos/{repo}/commits/{ref}")
-        sha, tree = self.commits[(repo, ref)]
-        return {"sha": sha, "commit": {"tree": {"sha": tree}}}
+        sha, tree = self._app.commits[(repo, ref)]
+        return {"sha": sha, "commit": {"tree": {"sha": tree}, "message": f"Work for {ref}"}}
+
+    def repo(self, repo: str) -> dict:
+        self._visible(repo)
+        return {"full_name": repo, "private": True, "default_branch": "main", **self._app.repo_meta.get(repo, {})}
+
+    def tarball(self, repo: str, sha: str) -> bytes:
+        self._visible(repo)
+        if (repo, sha) not in self._app.tarballs:
+            raise GitHubError(f"GitHub 404 for the archive of {repo}@{sha[:12]}")
+        return self._app.tarballs[(repo, sha)]
+
+    def create_blob(self, repo: str, data: bytes) -> str:
+        self._visible(repo)
+        oid = gittree.blob_id(data)
+        self._app.blobs[oid] = data
+        return oid
+
+    def create_tree(self, repo: str, entries: list[dict]) -> str:
+        self._visible(repo)
+        files = [gittree.Entry(e["path"], e["mode"], self._app.blobs[e["sha"]]) for e in entries]
+        return gittree.tree_id(files)
+
+    def create_commit(self, repo: str, message: str, tree: str, parents: list[str]) -> str:
+        self._visible(repo)
+        sha = hashlib.sha1(f"{tree}{parents}{message}".encode()).hexdigest()  # stand-in id
+        self._app.commits[(repo, sha)] = (sha, tree)
+        return sha
+
+    def create_ref(self, repo: str, ref: str, sha: str) -> None:
+        self._visible(repo)
+        if (repo, ref) in self._app.refs:
+            raise GitHubError("GitHub 422 for POST /git/refs: Reference already exists")
+        self._app.refs[(repo, ref)] = sha
+
+    def open_pull(self, repo: str, title: str, head: str, base: str, body: str) -> str:
+        self._visible(repo)
+        self._app.pulls.append({"repo": repo, "title": title, "head": head, "base": base, "body": body})
+        return f"https://github.com/{repo}/pull/{len(self._app.pulls)}"
 
 
 @dataclass
@@ -199,8 +249,13 @@ class MockGitHubApp:
     installs: dict[int, Installation] = field(default_factory=dict)
     repo_lists: dict[int, list[str]] = field(default_factory=dict)
     codes: dict[str, int] = field(default_factory=dict)  # OAuth code -> installation the user can access
-    commits: dict[tuple[str, str], tuple[str, str]] = field(default_factory=dict)
+    commits: dict[tuple[str, str], tuple[str, str]] = field(default_factory=dict)  # (repo, ref) -> (sha, tree)
     check_runs: dict[int, dict] = field(default_factory=dict)
+    repo_meta: dict[str, dict] = field(default_factory=dict)  # e.g. {"private": False}
+    tarballs: dict[tuple[str, str], bytes] = field(default_factory=dict)
+    blobs: dict[str, bytes] = field(default_factory=dict)
+    refs: dict[tuple[str, str], str] = field(default_factory=dict)
+    pulls: list[dict] = field(default_factory=list)
     _ids: count = field(default_factory=lambda: count(1001))
 
     def install(self, account: str, repos: list[str]) -> tuple[int, str]:
@@ -211,6 +266,24 @@ class MockGitHubApp:
         code = f"mock-code-{iid}"
         self.codes[code] = iid
         return iid, code
+
+    def push(self, repo: str, files: dict[str, bytes], tag: str | None = None) -> tuple[str, str]:
+        """Commit `files` to `repo` (and tag it): what a contractor pushing work would leave. Returns (sha, tree)."""
+        entries = [gittree.Entry(path, "100644", data) for path, data in files.items()]
+        tree = gittree.tree_id(entries)
+        sha = hashlib.sha1(f"{repo}{tree}{tag}".encode()).hexdigest()
+        self.commits[(repo, sha)] = (sha, tree)
+        if tag:
+            self.commits[(repo, tag)] = (sha, tree)
+        buf = io.BytesIO()
+        prefix = f"{repo.replace('/', '-')}-{sha[:7]}/"
+        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+            for e in entries:
+                info = tarfile.TarInfo(prefix + e.path)
+                info.size, info.mode = len(e.data), 0o644
+                tar.addfile(info, io.BytesIO(e.data))
+        self.tarballs[(repo, sha)] = buf.getvalue()
+        return sha, tree
 
     def install_url(self, state: str) -> str:
         return f"{self.base_url}/mock/github/install?{urlencode({'state': state})}"
@@ -231,8 +304,8 @@ class MockGitHubApp:
     def repos(self, installation_id: int) -> list[str]:
         return list(self.repo_lists.get(installation_id, []))
 
-    def client(self, installation_id: int) -> GitHubAPI:
-        return MockGitHubClient(self.commits)
+    def client(self, installation_id: int) -> GitHubWriter:
+        return MockGitHubClient(self, installation_id)
 
     def upsert_check_run(self, installation_id: int, repo: str, check_run_id: int | None, body: dict) -> int:
         rid = check_run_id or len(self.check_runs) + 1

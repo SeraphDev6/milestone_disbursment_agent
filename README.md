@@ -76,6 +76,7 @@ Two scheduled jobs and a few settings turn the mock demo into a deployment (all 
   - Orgs install it from **Organization > GitHub** in the web app. The callback checks with the installer's own GitHub token that they can access the installation, and the admin who started it confirms it for their org.
   - Payees then pick a repo instead of configuring a webhook, and merged, labelled PRs arrive at `/webhooks/github/app`.
   - Reads use each installation's short-lived token, so the handover check can read a client's private repo.
+  - Contractor-owned repos (agreements that withhold work until capture): the work stays in the payee's private repo, a release or tag named for a tranche pins the commit, and once the tranche is paid the code goes to the client as a PR into their repo (they install the app on it) or a source archive, each checked against the verified commit's git tree first. Handovers are worked by an in-process loop, or by the `deliver-webhooks` job.
   - Each PR's merge commit gets a "Milestone Ledger" check run that follows the tranche. It's posted by an in-process loop, or by the `deliver-webhooks` job when that loop is off.
   - The per-repo webhook still works without the app. Mock mode has a stand-in app with a mock install page.
 - **Live mode:** `MODE=live` uses PayPal's production API, pays connected payees only (never the platform route), and requires an https `PUBLIC_BASE_URL` and `PAYPAL_WEBHOOK_ID`. It also needs PayPal's partner approval and a BN code.
@@ -167,7 +168,7 @@ Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
 | Anthropic | Agreement extraction and evidence verification (Claude) | Agreement documents, criteria and evidence content | US |
 | Resend (or the operator's SMTP server) | Email: sign-in links, invitations, notifications | Recipient emails, names, tranche titles and status | US |
 
-GitHub: the engine reads the repos an org chose when it installed the GitHub App, using that installation's short-lived token, and writes only check runs (permissions: contents, metadata and pull requests read; checks write). Without the app it reads with the operator's optional `GITHUB_TOKEN`. Org SSO talks to
+GitHub: the engine reads the repos an org chose when it installed the GitHub App, using that installation's short-lived token (permissions: metadata read; contents, pull requests and checks write). It writes check runs, and, only for a paid tranche from a contractor-owned repo, one branch and one PR into the client's repo the client chose; it never writes to a contractor's repo. Without the app it reads with the operator's optional `GITHUB_TOKEN`. Org SSO talks to
 each customer's own identity provider. We don't publish vendors' audit reports; see each vendor's trust center.
 
 **Policies and roadmap.** Generic policy templates will live in `docs/policy-templates/`

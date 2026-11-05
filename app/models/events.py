@@ -61,6 +61,56 @@ class Integration(SQLModel, table=True):
     # Set when the repo is connected through the GitHub App (no repo webhook; deliveries come to the app's
     # endpoint and GitHub reads use this installation's token). None: the hand-configured repo webhook.
     installation_id: int | None = Field(default=None, sa_type=BigInteger, index=True)
+    # merged_pr: merged, labelled PRs in `target` are the evidence (the client usually owns it).
+    # contractor_repo: `target` is the contractor's private repo; evidence is a pinned commit (labelled PR, release
+    # or tag) and the code is handed over only once the tranche is captured, as `handover` says.
+    mode: str = Field(default="merged_pr", max_length=16)
+    handover: str | None = Field(default=None, max_length=16)  # pull_request or archive (contractor_repo only)
+    handover_repo: str | None = Field(default=None, max_length=200)  # the client's repo, for pull_request
+
+
+class GitHubHandover(SQLModel, table=True):
+    """Handing a captured tranche's code from the contractor's repo to the client: a PR into the client's repo, or
+    a source archive kept here. Worked by a retrying loop, so payment never waits on GitHub. The code is checked
+    against the verified commit's tree before anything is handed over."""
+
+    __tablename__ = "github_handovers"
+    __table_args__ = (UniqueConstraint("milestone_id", "evidence_id"),)
+
+    id: str = id_field()
+    milestone_id: str | None = fk("milestones.id")
+    evidence_id: str | None = fk("evidence.id")
+    integration_id: str | None = fk("integrations.id")
+    method: str = Field(max_length=16)  # pull_request or archive
+    source_repo: str = Field(max_length=200)
+    pinned_sha: str = Field(max_length=40)
+    target_repo: str | None = Field(default=None, max_length=200)
+    status: str = Field(default="pending", max_length=16, index=True)  # pending, delivered, failed
+    attempts: int = 0
+    next_attempt_at: datetime = timestamp()
+    tree_sha: str | None = Field(default=None, max_length=40)  # the verified tree the handover reproduced
+    pr_url: str | None = Field(default=None, max_length=500)
+    file_id: str | None = fk("files.id", optional=True)  # the archive, for method=archive
+    error: str | None = Field(default=None, max_length=500)
+    created_at: datetime = timestamp()
+    delivered_at: datetime | None = timestamp(optional=True)
+
+
+class GitHubHandoverRead(SQLModel):
+    id: str
+    milestone_id: str
+    evidence_id: str
+    method: str = Field(description="pull_request: a PR into the client's repo. archive: a source archive to download.")
+    source_repo: str = Field(description="The contractor's repo the work was verified in.")
+    pinned_sha: str = Field(description="The verified commit.")
+    target_repo: str | None = None
+    status: str = Field(description="pending (retried), delivered or failed.")
+    attempts: int
+    tree_sha: str | None = Field(default=None, description="Verified tree the handed-over code was checked against.")
+    pr_url: str | None = None
+    archive_sha256: str | None = Field(default=None, description="SHA-256 of the archive; a download hashes to this.")
+    error: str | None = None
+    delivered_at: datetime | None = None
 
 
 class GitHubInstallation(SQLModel, table=True):

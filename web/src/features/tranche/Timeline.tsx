@@ -12,10 +12,15 @@ export function Timeline({ events, names }: { events: AuditEventRead[]; names: A
     <ol className={s.timeline} aria-label="Tranche history">
       {events.map((e, i) => {
         const to = e.to_status && e.to_status in MILESTONE_STAMPS ? MILESTONE_STAMPS[e.to_status as keyof typeof MILESTONE_STAMPS] : null;
-        const why = (e.detail?.reason ?? e.detail?.note ?? e.detail?.error) as string | undefined;
+        const why = (e.detail?.reason ?? e.detail?.note ?? e.detail?.error ?? e.detail?.why) as string | undefined;
         const doubted = e.detail?.skeptic_disagrees_on as string[] | undefined;
         const skepticFailed = e.detail?.skeptic_error as string | undefined;
-        const handover = e.action === "handover_checked" ? (e.detail?.matches ? "Matches what was verified" : "Doesn't match what was verified") : null;
+        const handover =
+          e.action === "handover_checked"
+            ? e.detail?.matches ? "Matches what was verified" : "Doesn't match what was verified"
+            : e.action === "deliverable_handed_over"
+              ? `Checked against the verified files; ${e.detail?.pr_url ? `PR into ${String(e.detail?.target_repo)}` : "source archive kept"}`
+              : null;
         return (
           <li key={i} className={s.tlItem}>
             <time className={s.tlWhen} dateTime={e.at}>{dateTime(e.at)}</time>

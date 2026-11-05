@@ -8,8 +8,10 @@ After you click "Create GitHub App", GitHub sends the browser back to this scrip
 one-time code for the app's credentials and writes them to `github-app.env` (mode 600, gitignored). Copy those
 variables into the deployment's environment (Render: Environment > Add from .env) and restart.
 
-The app asks for: contents, metadata and pull requests read; checks write. Events: pull_request (installation
-events are always sent). User authorization during installation is on, which the install flow relies on.
+The app asks for: metadata read; contents, pull requests and checks write. Write access to contents and pull requests
+is only used to hand paid work over as a branch and PR into the client's repo (contractor-owned repos); everything
+else is read. Events: pull_request, release, push (installation events are always sent). User authorization during
+installation is on, which the install flow relies on.
 """
 
 import argparse
@@ -41,8 +43,8 @@ def manifest(public_url: str, redirect_url: str, name: str, public: bool) -> dic
         "request_oauth_on_install": True,
         "setup_on_update": False,
         "public": public,
-        "default_permissions": {"contents": "read", "metadata": "read", "pull_requests": "read", "checks": "write"},
-        "default_events": ["pull_request"],
+        "default_permissions": {"contents": "write", "metadata": "read", "pull_requests": "write", "checks": "write"},
+        "default_events": ["pull_request", "release", "push"],
     }
 
 

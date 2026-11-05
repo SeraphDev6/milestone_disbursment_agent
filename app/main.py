@@ -20,6 +20,7 @@ from app.integrations.oidc import OIDCClient, lookup_txt
 from app.integrations.paypal import make_gateway
 from app.services import ServiceError
 from app.services.github_app import publish_checks
+from app.services.handover import run as run_handovers
 from app.services.notifications import NOTIFIER, Notifier
 from app.services.outbound import resolve_host, run_every, start_delivery_loop
 from app.services.ratelimit import RateLimited, RateLimiter
@@ -98,7 +99,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     app.state.sessionmaker, settings.outbound_interval_seconds, allow_http=settings.is_mock
                 )
             )
-        if settings.outbound_interval_seconds > 0 and app.state.github_app is not None:  # PR check runs
+        if settings.outbound_interval_seconds > 0 and app.state.github_app is not None:  # check runs, handovers
             stops.append(
                 run_every(
                     "github-checks",
@@ -107,6 +108,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     lambda session, now: publish_checks(
                         session, app.state.github_app, app.state.notifier.tranche_link, now
                     ),
+                )
+            )
+            stops.append(
+                run_every(
+                    "github-handovers",
+                    app.state.sessionmaker,
+                    max(settings.outbound_interval_seconds, 30.0),
+                    lambda session, now: run_handovers(session, app.state.github_app, now),
                 )
             )
         if settings.payouts_interval_seconds > 0:  # pay tranches whose dispute window closed; follow Payouts

@@ -10,7 +10,7 @@ from app.ai.agents import AIRuntime
 from app.db import get_session
 from app.integrations.email import Mailer
 from app.integrations.paypal import PayPalGateway
-from app.models import Agreement, Evidence, Milestone
+from app.models import Agreement, Evidence, GitHubHandover, Milestone
 from app.services.access import Access, Principal, access_for, principal_from_token
 
 SessionDep = Annotated[Session, Depends(get_session)]
@@ -60,9 +60,20 @@ def evidence_access(
     return access_for(principal, m.agreement, x_org_id), ev
 
 
+def handover_access(
+    handover_id: str, session: SessionDep, principal: PrincipalDep, x_org_id: OrgHeader = None
+) -> tuple[Access, GitHubHandover, Milestone]:
+    row = session.get(GitHubHandover, handover_id)
+    m = session.get(Milestone, row.milestone_id) if row else None
+    if row is None or m is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "handover not found")
+    return access_for(principal, m.agreement, x_org_id), row, m
+
+
 AgreementAccessDep = Annotated[Access, Depends(agreement_access)]
 MilestoneAccessDep = Annotated[tuple[Access, Milestone], Depends(milestone_access)]
 EvidenceAccessDep = Annotated[tuple[Access, Evidence], Depends(evidence_access)]
+HandoverAccessDep = Annotated[tuple[Access, GitHubHandover, Milestone], Depends(handover_access)]
 
 
 def require_org_key(

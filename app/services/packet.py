@@ -30,6 +30,23 @@ def _skeptic(v) -> dict | None:
     return SkepticPass.model_validate(v.skeptic).model_dump(mode="json")
 
 
+def _delivery_result(d: dict) -> str:
+    if d["action"] == "deliverable_mismatch" or d.get("matches") is False:
+        return "DOES NOT MATCH what was verified"
+    if d["action"] == "deliverable_handed_over":
+        where = d.get("pr_url") or "source archive"
+        return f"tree {str(d.get('tree_sha'))[:12]} matches; {where}"
+    if d["action"] == "handover_queued":
+        return f"{d.get('method')} from {d.get('source_repo')}@{str(d.get('pinned_sha'))[:12]}"
+    if d["action"] == "handover_failed":
+        return f"failed: {d.get('why')}"
+    if d.get("matches"):
+        return "matches what was verified"
+    if d["action"] == "deliverable_released":
+        return f"{len(d.get('evidence') or [])} item(s) committed"
+    return ""
+
+
 def milestone_section(session: Session, m: Milestone, role: Role | str | None = None) -> dict:
     """`role`: the side asking. The payer side gets the filtered view while the tranche's evidence is withheld
     (deliverable_release=on_capture, not yet captured); None or another side gets everything."""
@@ -85,7 +102,16 @@ def milestone_section(session: Session, m: Milestone, role: Role | str | None = 
             {"at": _iso(e.at), "actor": e.actor, "action": e.action, **(e.detail or {})}
             for e in events
             if e.action
-            in ("deliverable_released", "deliverable_downloaded", "deliverable_mismatch", "handover_checked")
+            in (
+                "deliverable_released",
+                "deliverable_downloaded",
+                "deliverable_mismatch",
+                "handover_checked",
+                "handover_queued",
+                "handover_retried",
+                "handover_failed",
+                "deliverable_handed_over",
+            )
         ],
         "reviews": [
             {"at": _iso(e.at), "actor": e.actor, "action": e.action, "note": (e.detail or {}).get("note")}
@@ -310,13 +336,7 @@ def render_pdf(packet: dict) -> bytes:
                             d["at"],
                             d["actor"],
                             d["action"],
-                            "matches what was verified"
-                            if d.get("matches")
-                            else (
-                                "DOES NOT MATCH"
-                                if d.get("matches") is False
-                                else f"{len(d.get('evidence') or [])} item(s) committed"
-                            ),
+                            _delivery_result(d),
                         ]
                         for d in m["delivery"]
                     ],
