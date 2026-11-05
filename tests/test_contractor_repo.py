@@ -205,6 +205,9 @@ def test_release_pins_the_commit_and_the_payer_sees_no_source(client, deal):
     assert ev["pinned_ref"] == sha and ev["check_results"] == {"ci_green": True}
     assert tree in ev["excerpt"] and "https://preview.devco.dev/checkout" in ev["artifact_uris"]
     assert status(client, m1) == "needs_review"  # the payer approves before anything is captured
+    [shown] = client.get(f"/milestones/{m1}/evidence", headers=h(keys["payer"])).json()
+    assert shown["withheld"] and shown["excerpt"] is None and shown["artifact_uris"] == []
+    assert shown["preview_url"] == "https://preview.devco.dev/checkout"  # the link the payee chose to share
 
     # A tag push for the same commit (GitHub sends both for a new release) adds nothing.
     push = tag_push("devco/shop-work", f"mde-{m1}") | {"installation": {"id": keys["payee_iid"]}}
