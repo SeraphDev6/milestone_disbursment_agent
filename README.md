@@ -68,10 +68,10 @@ A complete example draft is in [`tests/conftest.py`](tests/conftest.py), and [`t
 Two scheduled jobs and a few settings turn the mock demo into a deployment (all in `.env.example`):
 
 - `python -m app.jobs daily` once a day: clears expired PayPal holds (29 days), cancels invoices left unpaid for 30 days, and marks tranches whose due date passed with no evidence `overdue` (both sides are emailed; evidence and funding are still accepted).
-- `python -m app.jobs payouts` hourly: asks PayPal about captures, pay-now payments and invoices still in flight (so a missed webhook never strands a tranche), pays tranches whose dispute window closed, follows Payouts still in flight, and ends contests nobody resolved within 28 days of capture the way PayPal does (paid to the payee). The app also runs this in-process every `PAYOUTS_INTERVAL_SECONDS`; with more than one instance set that to 0 and schedule the job once.
+- `python -m app.jobs payouts` hourly: asks PayPal about captures, pay-now payments and invoices still in flight (so a missed webhook never strands a tranche), pays tranches whose dispute window closed, follows Payouts still in flight, polls the PayPal Disputes API for disputes no webhook announced (before paying anything), and ends contests nobody resolved within 28 days of capture the way PayPal does (paid to the payee). The app also runs this in-process every `PAYOUTS_INTERVAL_SECONDS`; with more than one instance set that to 0 and schedule the job once.
 - **Email:** `EMAIL_PROVIDER=resend` (with `RESEND_API_KEY`) or `smtp` (with `SMTP_*`), plus `EMAIL_FROM`. Sign-in links, invitations, review requests, rejections with what's missing, pay links, overdue notices and unclaimed or failed payouts go to the tranche's assignee on that side, or to every member of the party's org. `console` (the default) only logs them.
 - **Rate limits:** sign-in links per IP and per address, extraction and pre-check per caller, pay-link visits per IP (`RATE_LIMIT_*_PER_HOUR`); `TRUST_PROXY_HEADERS` says whether `X-Forwarded-For` names the client.
-- **PayPal disputes:** `CUSTOMER.DISPUTE.*` webhooks are recorded on the tranche; a dispute against a tranche still in its window pauses the payout as a contest for a reviewer to resolve.
+- **PayPal disputes:** `CUSTOMER.DISPUTE.*` webhooks are recorded on the tranche; a dispute against a tranche still in its window pauses the payout as a contest for a reviewer to resolve. The hourly `payouts` job also polls the Disputes API (the platform account and each payee with a capture in the last 180 days) as a backstop. Reading a connected payee's disputes needs the `READ_SELLER_DISPUTE` onboarding feature, which payees who connected before Nov 5 don't have; those accounts are skipped and counted.
 - **Live mode:** `MODE=live` uses PayPal's production API, pays connected payees only (never the platform route), and requires an https `PUBLIC_BASE_URL` and `PAYPAL_WEBHOOK_ID`. It also needs PayPal's partner approval and a BN code.
 - `uv run python scripts/paypal_sandbox_check.py` checks the PayPal credentials, the platform merchant id and the webhook subscription from `.env` without running the app (`--order` also creates a $1 hold link).
 - `uv run python scripts/sandbox_walkthrough.py` walks the whole wallet flow through a running sandbox-mode app (escrow, pay-now and Payouts), pausing wherever you act in PayPal: see [`docs/SANDBOX.md`](docs/SANDBOX.md).
@@ -105,7 +105,12 @@ web/               React app (Vite, React Aria, AG Grid); served at / from web/d
 ```sh
 uv run pytest
 uv run ruff check . && uv run ruff format .
+uv run python -m app.sdk_spec   # after changing a core operation: rewrites sdk/openapi-core.json
 ```
+
+### SDK core spec
+
+Operations tagged `x-sdk-core` (in `openapi_extra`) make up the SDK's API: drafting and confirming an agreement, funding, evidence, verdicts, review, release, the ledger and subscriptions. `python -m app.sdk_spec` writes just those, with the schemas they use, to `sdk/openapi-core.json`. CI (and `tests/test_sdk_spec.py`) fails when the committed file is stale, so SDK-facing changes are always deliberate. The core spec has its own semver (`CORE_VERSION` in `app/sdk_spec.py`); a breaking change to a core operation bumps the major version.
 
 ### Database migrations
 
@@ -126,6 +131,44 @@ uv run alembic upgrade head && uv run alembic check
 ## Deploy
 
 `render.yaml` is a Render Blueprint: the web service, a Postgres database and two cron jobs (`payouts` hourly, `daily` each morning), sharing one environment group. After the first deploy set the secrets marked `sync: false` in the dashboard (`PUBLIC_BASE_URL`, the PayPal keys, `PAYPAL_WEBHOOK_ID`, `PAYPAL_PARTNER_MERCHANT_ID`, `ANTHROPIC_API_KEY`, an email provider) and switch `MODE` to `sandbox`. Point the PayPal app's webhook at `<PUBLIC_BASE_URL>/api/webhooks/paypal` and subscribe it to the authorization, capture, payouts, referenced-payout, invoicing, merchant and customer-dispute events (`scripts/paypal_sandbox_check.py` lists any missing). The database is on the smallest paid plan because Render deletes free databases after 30 days.
+
+## Security and compliance
+
+Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
+
+- **No card data touches the engine.** Payers pay on PayPal's own pages; we only see order, authorization and
+  capture ids. That keeps the engine out of PCI DSS cardholder-data scope.
+- **Money transmission.** `MODE=live` pays connected payees directly (PayPal partner onboarding with delayed
+  disbursement, so the payer's money goes to the payee's account) and refuses the platform route, which would hold
+  money in transit. The platform route exists for sandbox and demos only. A legal review comes before going live
+  ([#28](https://github.com/SeraphDev6/milestone_disbursment_agent/issues/28)).
+- **Human-only actions.** Confirming criteria, funding, reviewing, releasing and disputing are never available to
+  agents: MCP access tokens are limited to the tools shown at consent, even on REST, and can't mint API keys.
+- **Audit trail.** Every state change is an audit event with its actor. Verdicts are append-only and store the
+  model, prompt version and criteria hash needed to replay them. `GET /agreements/{id}/compliance-packet` exports an
+  agreement's compliance packet (criteria, evidence hashes, verdicts, reviews, money movements).
+- **Secrets.** Org SSO client secrets are encrypted at rest; API keys and magic-link tokens are stored hashed.
+- **Licensing.** The engine is AGPL-3.0. The SDK
+  ([#12](https://github.com/SeraphDev6/milestone_disbursment_agent/issues/12)) will be permissively licensed so
+  integrators can embed it.
+
+**Subprocessors** (for the hosted service at https://app.milestone-ledger.com):
+
+| Vendor | Purpose | Data it receives | Region |
+| --- | --- | --- | --- |
+| Render | Hosting and Postgres | All service data, including evidence files | US (Oregon) |
+| PayPal | Payments, holds, payouts, invoices, payee onboarding | Payer and payee PayPal emails, amounts, tranche titles, invoice notes | US |
+| Anthropic | Agreement extraction and evidence verification (Claude) | Agreement documents, criteria and evidence content | US |
+| Resend (or the operator's SMTP server) | Email: sign-in links, invitations, notifications | Recipient emails, names, tranche titles and status | US |
+
+GitHub is only read from: when a payee submits a repository as evidence, the engine fetches it (with the operator's optional `GITHUB_TOKEN`). Org SSO talks to
+each customer's own identity provider. We don't publish vendors' audit reports; see each vendor's trust center.
+
+**Policies and roadmap.** Generic policy templates will live in `docs/policy-templates/`
+([#23](https://github.com/SeraphDev6/milestone_disbursment_agent/issues/23)). The operative policies are kept in
+a private repository and are available on request under NDA. The roadmap (SOC 2, then SOC 1, reconciliation,
+privacy and AI governance) is tracked in
+[#21](https://github.com/SeraphDev6/milestone_disbursment_agent/issues/21).
 
 ## License
 

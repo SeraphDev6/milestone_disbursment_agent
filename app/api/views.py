@@ -12,6 +12,7 @@ from app.models import (
     Agreement,
     AgreementRead,
     FundingSummary,
+    InvitationKind,
     LedgerEntry,
     MilestoneRead,
     MilestoneStatus,
@@ -94,8 +95,16 @@ def _pending(row: Agreement) -> list[str]:
     return [i.email for i in pending_agreement_invitations(session, row.id)] if session else []
 
 
+def _reviewer_invited(row: Agreement) -> bool:
+    from app.services.identity import pending_agreement_invitations
+
+    session = object_session(row)
+    pending = pending_agreement_invitations(session, row.id) if session else []
+    return any(i.kind == InvitationKind.reviewer for i in pending)
+
+
 def agreement_read(row: Agreement) -> AgreementRead:
-    current = criteria_hash(row.milestones)
+    current = criteria_hash(row.milestones, row.deliverable_release)
     return AgreementRead.model_validate(
         row,
         update={
@@ -123,7 +132,7 @@ def agreement_read(row: Agreement) -> AgreementRead:
                 for m in row.milestones
             ],
             "funding": funding_summary(row),
-            "lint": lint_agreement(row),
+            "lint": lint_agreement(row, reviewer_invited=_reviewer_invited(row)),
             "pending_invitations": _pending(row),
         },
     )

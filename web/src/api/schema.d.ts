@@ -1041,6 +1041,11 @@ export interface components {
              */
             dispute_window_days?: number;
             /**
+             * @description When the payer can open the payee's full evidence: on_submit (as it arrives; usual for grants) or on_capture (only once the tranche is captured, so the payer pays on the verdict; suggested for SOWs). Part of the criteria hash both parties sign; set when the agreement is created.
+             * @default on_submit
+             */
+            deliverable_release?: components["schemas"]["DeliverableRelease"];
+            /**
              * Counterparty Email
              * @description Email of the person invited to accept for the payee organization.
              */
@@ -1112,6 +1117,11 @@ export interface components {
              * @default 0
              */
             dispute_window_days?: number;
+            /**
+             * @description When the payer can open the payee's full evidence: on_submit (as it arrives; usual for grants) or on_capture (only once the tranche is captured, so the payer pays on the verdict; suggested for SOWs). Part of the criteria hash both parties sign; set when the agreement is created.
+             * @default on_submit
+             */
+            deliverable_release?: components["schemas"]["DeliverableRelease"];
             /** Id */
             id: string;
             status: components["schemas"]["AgreementStatus"];
@@ -1463,6 +1473,12 @@ export interface components {
              */
             missing?: string | null;
         };
+        /**
+         * DeliverableRelease
+         * @description When the payer can open the payee's full evidence.
+         * @enum {string}
+         */
+        DeliverableRelease: "on_submit" | "on_capture";
         /** DisbursementAttempt */
         DisbursementAttempt: {
             /** Id */

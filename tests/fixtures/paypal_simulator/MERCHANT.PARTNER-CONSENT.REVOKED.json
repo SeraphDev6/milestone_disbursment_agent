@@ -1,0 +1,10 @@
+{
+  "create_time": "2016-08-02T21:41:28Z",
+  "event_type": "MERCHANT.PARTNER-CONSENT.REVOKED",
+  "id": "WH-2WR32451HC0233532-67976317FL4543714",
+  "links": [],
+  "resource": {
+    "merchant_id": "ELAMYJUN78D6G"
+  },
+  "resource_type": "partner-consent"
+}

@@ -6,7 +6,7 @@ import { errorMessage, isApiError } from "@/api/errors";
 import { paths, useOrgCtx } from "@/app/context";
 import { useTitle } from "@/app/RouteAnnouncer";
 import { atLeast } from "@/domain/permissions";
-import { MODE_LABEL, money, percent } from "@/domain/format";
+import { MODE_LABEL, money, percent, RELEASE_LABEL } from "@/domain/format";
 import { fieldId } from "@/domain/lint-paths";
 import {
   Button,
@@ -185,6 +185,20 @@ export function NewAgreement() {
                   description="Days a released payment waits before it reaches the payee, during which you or a reviewer can contest it. 0 pays at once."
                   isDisabled={draft.settlement_mode !== "escrow_release"}
                 />
+                <RadioGroup
+                  label="When you see the work"
+                  value={draft.deliverable_release}
+                  onChange={(v) => set({ deliverable_release: v })}
+                  options={[
+                    { id: "on_submit", label: RELEASE_LABEL.on_submit, description: "You can open the payee's evidence as it arrives. Usual for grants." },
+                    { id: "on_capture", label: RELEASE_LABEL.on_capture, description: "Full evidence opens once the tranche is paid, so you pay on the verdict. Usual for SOWs, where the work is the product." },
+                  ]}
+                />
+                {draft.deliverable_release === "on_capture" && draft.reviewer_emails.filter(Boolean).length === 0 && (
+                  <Callout tone="warning" title="Consider a reviewer">
+                    <p>If you also turn on auto-release when signing, you'd pay on the model's verdict alone. A reviewer can see the evidence for you.</p>
+                  </Callout>
+                )}
                 <Switch isSelected={draft.require_reviewer_approval} onChange={(v) => set({ require_reviewer_approval: v })} hint="Only an invited reviewer's approval can release a tranche in review. You can still reject.">
                   Require a reviewer's approval
                 </Switch>
@@ -242,6 +256,7 @@ export function NewAgreement() {
                 ["Tranches", `${draft.milestones.length} with ${draft.milestones.reduce((n, m) => n + m.criteria.length, 0)} criteria`],
                 ["Auto-release", `Off until you sign; threshold ${percent(draft.auto_release_threshold)}`],
                 ["Dispute window", draft.settlement_mode === "escrow_release" && draft.dispute_window_days ? `${draft.dispute_window_days} day${draft.dispute_window_days === 1 ? "" : "s"} after each release` : "None: released payments go straight to the payee"],
+                ["Seeing the work", draft.deliverable_release === "on_capture" ? "Once each tranche is paid: you pay on the verdict" : "As the payee submits it"],
                 ["Payee invite", draft.counterparty_email],
                 ["Reviewers", draft.reviewer_emails.filter(Boolean).join(", ") || "None"],
               ]}

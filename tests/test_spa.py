@@ -81,7 +81,10 @@ def test_site_routes_api_mcp_and_app(tmp_path):
         assert page.status_code == 200 and "action='/api/mock/paypal/invoices/" in page.text
 
 
-def test_create_site_serves_the_build_when_configured():
+def test_create_site_serves_the_build_when_configured(tmp_path, monkeypatch):
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "index.html").write_text("<!doctype html><title>app</title>")  # web/dist is gitignored; CI has none
+    monkeypatch.setattr("app.main.make_spa", lambda dist=tmp_path: make_spa(dist))
     site = create_site(hermetic_settings(web_app_built=True))
     with TestClient(site) as c:
         assert c.get("/api/health").status_code == 200

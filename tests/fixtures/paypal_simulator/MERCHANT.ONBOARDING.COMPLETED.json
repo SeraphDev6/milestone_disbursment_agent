@@ -1,0 +1,19 @@
+{
+  "create_time": "2016-08-01T21:41:28Z",
+  "event_type": "MERCHANT.ONBOARDING.COMPLETED",
+  "id": "WH-2WR32451HC0233532-67976317FL4543714",
+  "links": [],
+  "resource": {
+    "links": [
+      {
+        "description": "Get the merchant status information of merchants onboarded by this partner",
+        "href": "https://uri.paypal.com/v1/customer/partners/QX4A9KG89BHLN/merchant-integrations/Y7MGFXVS8VHYU",
+        "method": "GET",
+        "rel": "self"
+      }
+    ],
+    "merchant_id": "ELAMYJUN78D6G",
+    "partner_client_id": "AdZ3f8z-zIFM6t6Yilxvk3q4Iwx4ITRBjGR07q9wPJWms0z3G4ohajp7LdvpaLCeVLBmp5aVQ717YIw0"
+  },
+  "resource_type": "merchant-onboarding"
+}

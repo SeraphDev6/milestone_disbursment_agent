@@ -16,7 +16,7 @@ from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.columns import PydanticJSON, enum_type, fk, id_field, timestamp
 from app.models.criteria import Criterion, LintReport
-from app.models.enums import AgreementStatus, MilestoneStatus, PayoutRoute, Role, SettlementMode
+from app.models.enums import AgreementStatus, DeliverableRelease, MilestoneStatus, PayoutRoute, Role, SettlementMode
 from app.models.identity import EMAIL_PATTERN
 
 if TYPE_CHECKING:
@@ -186,6 +186,13 @@ class AgreementBase(SQLModel):
         le=14,
         description="Escrow: days between capturing a verified tranche and paying the payee, during which the "
         "payer or a reviewer can contest it. 0 pays at once.",
+    )
+    deliverable_release: DeliverableRelease = Field(
+        default=DeliverableRelease.on_submit,
+        sa_type=enum_type(DeliverableRelease, 16),
+        description="When the payer can open the payee's full evidence: on_submit (as it arrives; usual for grants) "
+        "or on_capture (only once the tranche is captured, so the payer pays on the verdict; suggested for SOWs). "
+        "Part of the criteria hash both parties sign; set when the agreement is created.",
     )
 
 

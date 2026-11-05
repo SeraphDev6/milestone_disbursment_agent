@@ -1,0 +1,97 @@
+{
+  "create_time": "2022-12-13T19:13:07.251Z",
+  "event_type": "PAYMENT.CAPTURE.DECLINED",
+  "event_version": "1.0",
+  "id": "WH-6HE329230C693231F-5WV60586YA659351G",
+  "links": [
+    {
+      "encType": "application/json",
+      "href": "https://api.sandbox.paypal.com/v1/notifications/webhooks-events/WH-6HE329230C693231F-5WV60586YA659351G",
+      "method": "GET",
+      "rel": "self"
+    },
+    {
+      "encType": "application/json",
+      "href": "https://api.sandbox.paypal.com/v1/notifications/webhooks-events/WH-6HE329230C693231F-5WV60586YA659351G/resend",
+      "method": "POST",
+      "rel": "resend"
+    }
+  ],
+  "resource": {
+    "amount": {
+      "currency_code": "USD",
+      "value": "185.10"
+    },
+    "create_time": "2022-12-13T19:13:00Z",
+    "custom_id": "CUSTOMID-1001",
+    "disbursement_mode": "INSTANT",
+    "final_capture": false,
+    "id": "7U133281TB3277326",
+    "invoice_id": "ARG0-2022-12-08T21:00:21.564Z-435",
+    "links": [
+      {
+        "href": "https://api.sandbox.paypal.com/v2/payments/captures/7U133281TB3277326",
+        "method": "GET",
+        "rel": "self"
+      },
+      {
+        "href": "https://api.sandbox.paypal.com/v2/payments/captures/7U133281TB3277326/refund",
+        "method": "POST",
+        "rel": "refund"
+      },
+      {
+        "href": "https://api.sandbox.paypal.com/v2/payments/authorizations/24B76447NN600461P",
+        "method": "GET",
+        "rel": "up"
+      }
+    ],
+    "seller_protection": {
+      "dispute_categories": [
+        "ITEM_NOT_RECEIVED",
+        "UNAUTHORIZED_TRANSACTION"
+      ],
+      "status": "ELIGIBLE"
+    },
+    "seller_receivable_breakdown": {
+      "exchange_rate": {
+        "source_currency": "USD",
+        "target_currency": "EUR",
+        "value": "0.628281035098039"
+      },
+      "gross_amount": {
+        "currency_code": "USD",
+        "value": "185.10"
+      },
+      "net_amount": {
+        "currency_code": "USD",
+        "value": "184.60"
+      },
+      "platform_fees": [
+        {
+          "amount": {
+            "currency_code": "USD",
+            "value": "0.50"
+          },
+          "payee": {
+            "merchant_id": "QG3ECYYLJ2A48"
+          }
+        }
+      ],
+      "receivable_amount": {
+        "currency_code": "EUR",
+        "value": "115.98"
+      }
+    },
+    "status": "DECLINED",
+    "supplementary_data": {
+      "related_ids": {
+        "authorization_id": "24B76447NN600461P",
+        "order_id": "48R416400V564864N"
+      }
+    },
+    "update_time": "2022-12-13T19:13:00Z"
+  },
+  "resource_type": "capture",
+  "resource_version": "2.0",
+  "summary": "A payment capture for $ 185.1 USD was declined."
+}

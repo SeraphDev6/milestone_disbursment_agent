@@ -57,6 +57,7 @@ class LedgerView(SQLModel):
 
 @router.get(
     "/agreements/{agreement_id}/ledger",
+    openapi_extra={"x-sdk-core": True},
     summary="Every PayPal money movement and settlement attempt on an agreement",
 )
 def ledger(agreement_id: str, access: AgreementAccessDep, session: SessionDep) -> LedgerView:

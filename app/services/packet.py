@@ -125,6 +125,7 @@ def build_packet(session: Session, a: Agreement) -> dict:
             "auto_release_enabled": a.auto_release_enabled,
             "auto_release_threshold": a.auto_release_threshold,
             "dispute_window_days": a.dispute_window_days,
+            "deliverable_release": a.deliverable_release,
             "released": str(released.quantize(Decimal("0.01"))),
         },
         "parties": [

@@ -1,0 +1,68 @@
+{
+  "create_time": "2019-02-14T22:20:08.370Z",
+  "event_type": "PAYMENT.CAPTURE.DENIED",
+  "event_version": "1.0",
+  "id": "WH-4SW78779LY2325805-07E03580SX1414828",
+  "links": [
+    {
+      "encType": "application/json",
+      "href": "https://api.sandbox.paypal.com/v1/notifications/webhooks-events/WH-4SW78779LY2325805-07E03580SX1414828",
+      "method": "GET",
+      "rel": "self"
+    },
+    {
+      "encType": "application/json",
+      "href": "https://api.sandbox.paypal.com/v1/notifications/webhooks-events/WH-4SW78779LY2325805-07E03580SX1414828/resend",
+      "method": "POST",
+      "rel": "resend"
+    }
+  ],
+  "resource": {
+    "amount": {
+      "currency_code": "AUD",
+      "value": "2.51"
+    },
+    "create_time": "2019-02-14T22:18:14Z",
+    "final_capture": true,
+    "id": "7NW873794T343360M",
+    "links": [
+      {
+        "href": "https://api.sandbox.paypal.com/v2/payments/captures/7NW873794T343360M",
+        "method": "GET",
+        "rel": "self"
+      },
+      {
+        "href": "https://api.sandbox.paypal.com/v2/payments/captures/7NW873794T343360M/refund",
+        "method": "POST",
+        "rel": "refund"
+      },
+      {
+        "href": "https://api.sandbox.paypal.com/v2/payments/authorizations/2W543679LP5841156",
+        "method": "GET",
+        "rel": "up"
+      }
+    ],
+    "seller_protection": {
+      "dispute_categories": [
+        "ITEM_NOT_RECEIVED",
+        "UNAUTHORIZED_TRANSACTION"
+      ],
+      "status": "ELIGIBLE"
+    },
+    "seller_receivable_breakdown": {
+      "gross_amount": {
+        "currency_code": "AUD",
+        "value": "2.51"
+      },
+      "net_amount": {
+        "currency_code": "AUD",
+        "value": "2.51"
+      }
+    },
+    "status": "DECLINED",
+    "update_time": "2019-02-14T22:20:01Z"
+  },
+  "resource_type": "capture",
+  "resource_version": "2.0",
+  "summary": "A AUD 2.51 AUD capture payment was denied"
+}

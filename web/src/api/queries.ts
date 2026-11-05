@@ -345,7 +345,7 @@ export function usePacket(agreementId: string, orgId: string, enabled: boolean) 
 export type PacketResult = { criterion_id: string; met: boolean; decided_by: string; observed?: string | null; evidence_ids: string[]; quote?: string | null; missing?: string | null };
 export type CompliancePacket = {
   generated_at: string;
-  agreement: { id: string; title: string; total_amount: string; currency: string; settlement_mode: string; status: string; criteria_hash: string | null; auto_release_enabled: boolean; auto_release_threshold: number; released: string; dispute_window_days?: number };
+  agreement: { id: string; title: string; total_amount: string; currency: string; settlement_mode: string; status: string; criteria_hash: string | null; auto_release_enabled: boolean; auto_release_threshold: number; released: string; dispute_window_days?: number; deliverable_release?: string };
   parties: { role: string; name: string; paypal_email: string | null; confirmed_criteria_hash: string | null; confirmed_at: string | null }[];
   milestones: {
     id: string;

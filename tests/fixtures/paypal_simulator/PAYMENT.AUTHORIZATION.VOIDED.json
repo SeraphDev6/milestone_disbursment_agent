@@ -1,0 +1,68 @@
+{
+  "create_time": "2018-08-15T19:21:36.256Z",
+  "event_type": "PAYMENT.AUTHORIZATION.VOIDED",
+  "event_version": "1.0",
+  "id": "WH-5J139929H24960831-61917983AY1263720",
+  "links": [
+    {
+      "encType": "application/json",
+      "href": "https://api.sandbox.paypal.com/v1/notifications/webhooks-events/WH-5J139929H24960831-61917983AY1263720",
+      "method": "GET",
+      "rel": "self"
+    },
+    {
+      "encType": "application/json",
+      "href": "https://api.sandbox.paypal.com/v1/notifications/webhooks-events/WH-5J139929H24960831-61917983AY1263720/resend",
+      "method": "POST",
+      "rel": "resend"
+    }
+  ],
+  "resource": {
+    "amount": {
+      "currency_code": "USD",
+      "value": "2.51"
+    },
+    "create_time": "2018-08-15T19:21:11Z",
+    "expiration_time": "2018-09-13T19:21:11Z",
+    "id": "8PP38301D7923932J",
+    "links": [
+      {
+        "href": "https://api.sandbox.paypal.com/v2/payments/authorizations/8PP38301D7923932J",
+        "method": "GET",
+        "rel": "self"
+      },
+      {
+        "href": "https://api.sandbox.paypal.com/v2/payments/authorizations/8PP38301D7923932J/capture",
+        "method": "POST",
+        "rel": "capture"
+      },
+      {
+        "href": "https://api.sandbox.paypal.com/v2/payments/authorizations/8PP38301D7923932J/void",
+        "method": "POST",
+        "rel": "void"
+      },
+      {
+        "href": "https://api.sandbox.paypal.com/v2/payments/authorizations/8PP38301D7923932J/reauthorize",
+        "method": "POST",
+        "rel": "reauthorize"
+      },
+      {
+        "href": "https://api.sandbox.paypal.com/v2/checkout/orders/9RC99380MW614700D",
+        "method": "GET",
+        "rel": "up"
+      }
+    ],
+    "seller_protection": {
+      "dispute_categories": [
+        "ITEM_NOT_RECEIVED",
+        "UNAUTHORIZED_TRANSACTION"
+      ],
+      "status": "ELIGIBLE"
+    },
+    "status": "VOIDED",
+    "update_time": "2018-08-15T19:21:18Z"
+  },
+  "resource_type": "authorization",
+  "resource_version": "2.0",
+  "summary": "A payment authorization was voided for $ 2.51 USD"
+}

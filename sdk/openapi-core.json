@@ -1,0 +1,3826 @@
+{
+  "components": {
+    "schemas": {
+      "AgreementCreate": {
+        "description": "Created by the payer org. The payee and any reviewers are invited by email and join with their own org.",
+        "properties": {
+          "auto_release_threshold": {
+            "default": 0.85,
+            "description": "Minimum gate score to settle without human approval.",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Auto Release Threshold",
+            "type": "number"
+          },
+          "counterparty_email": {
+            "description": "Email of the person invited to accept for the payee organization.",
+            "maxLength": 320,
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "title": "Counterparty Email",
+            "type": "string"
+          },
+          "currency": {
+            "default": "USD",
+            "description": "ISO 4217 currency.",
+            "maxLength": 3,
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "deliverable_release": {
+            "$ref": "#/components/schemas/DeliverableRelease",
+            "default": "on_submit",
+            "description": "When the payer can open the payee's full evidence: on_submit (as it arrives; usual for grants) or on_capture (only once the tranche is captured, so the payer pays on the verdict; suggested for SOWs). Part of the criteria hash both parties sign; set when the agreement is created."
+          },
+          "dispute_window_days": {
+            "default": 0,
+            "description": "Escrow: days between capturing a verified tranche and paying the payee, during which the payer or a reviewer can contest it. 0 pays at once.",
+            "maximum": 14.0,
+            "minimum": 0.0,
+            "title": "Dispute Window Days",
+            "type": "integer"
+          },
+          "milestones": {
+            "description": "Tranches in payment order.",
+            "items": {
+              "$ref": "#/components/schemas/MilestoneCreate-Input"
+            },
+            "minItems": 1,
+            "title": "Milestones",
+            "type": "array"
+          },
+          "require_reviewer_approval": {
+            "default": false,
+            "description": "When on, only a reviewer's approval releases a tranche in review.",
+            "title": "Require Reviewer Approval",
+            "type": "boolean"
+          },
+          "reviewer_emails": {
+            "description": "Optional third-party reviewers to invite (criteria and evidence).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Reviewer Emails",
+            "type": "array"
+          },
+          "settlement_mode": {
+            "$ref": "#/components/schemas/SettlementMode",
+            "description": "escrow_release holds funds per milestone and releases on verify; invoice_on_verify sends a PayPal invoice when a milestone verifies."
+          },
+          "source_document_uri": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Original agreement file the milestones came from.",
+            "title": "Source Document Uri"
+          },
+          "title": {
+            "description": "Human-readable name of the grant or SOW.",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "total_amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "Agreement total; milestones must sum to it.",
+            "title": "Total Amount"
+          }
+        },
+        "required": [
+          "title",
+          "total_amount",
+          "settlement_mode",
+          "counterparty_email",
+          "milestones"
+        ],
+        "title": "AgreementCreate",
+        "type": "object"
+      },
+      "AgreementCreated": {
+        "properties": {
+          "agreement": {
+            "$ref": "#/components/schemas/AgreementRead"
+          },
+          "dev_links": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Mock mode only: invitee email -> the link that would have been emailed.",
+            "title": "Dev Links",
+            "type": "object"
+          },
+          "invitations": {
+            "items": {
+              "$ref": "#/components/schemas/InvitationRead"
+            },
+            "title": "Invitations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "agreement",
+          "invitations"
+        ],
+        "title": "AgreementCreated",
+        "type": "object"
+      },
+      "AgreementRead": {
+        "properties": {
+          "auto_release_enabled": {
+            "title": "Auto Release Enabled",
+            "type": "boolean"
+          },
+          "auto_release_threshold": {
+            "default": 0.85,
+            "description": "Minimum gate score to settle without human approval.",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Auto Release Threshold",
+            "type": "number"
+          },
+          "criteria_hash": {
+            "description": "Hash of the current tranches and criteria; sign this to confirm.",
+            "title": "Criteria Hash",
+            "type": "string"
+          },
+          "currency": {
+            "default": "USD",
+            "description": "ISO 4217 currency.",
+            "maxLength": 3,
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "deliverable_release": {
+            "$ref": "#/components/schemas/DeliverableRelease",
+            "default": "on_submit",
+            "description": "When the payer can open the payee's full evidence: on_submit (as it arrives; usual for grants) or on_capture (only once the tranche is captured, so the payer pays on the verdict; suggested for SOWs). Part of the criteria hash both parties sign; set when the agreement is created."
+          },
+          "dispute_window_days": {
+            "default": 0,
+            "description": "Escrow: days between capturing a verified tranche and paying the payee, during which the payer or a reviewer can contest it. 0 pays at once.",
+            "maximum": 14.0,
+            "minimum": 0.0,
+            "title": "Dispute Window Days",
+            "type": "integer"
+          },
+          "funding": {
+            "$ref": "#/components/schemas/FundingSummary"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "lint": {
+            "$ref": "#/components/schemas/LintReport"
+          },
+          "locked": {
+            "description": "True once every party signed and criteria can no longer change.",
+            "title": "Locked",
+            "type": "boolean"
+          },
+          "milestones": {
+            "items": {
+              "$ref": "#/components/schemas/MilestoneRead"
+            },
+            "title": "Milestones",
+            "type": "array"
+          },
+          "parties": {
+            "items": {
+              "$ref": "#/components/schemas/PartyRead"
+            },
+            "title": "Parties",
+            "type": "array"
+          },
+          "pending_invitations": {
+            "description": "Emails invited (as counterparty or reviewer) who haven't joined yet.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Pending Invitations",
+            "type": "array"
+          },
+          "require_reviewer_approval": {
+            "default": false,
+            "description": "When on, only a reviewer's approval releases a tranche in review.",
+            "title": "Require Reviewer Approval",
+            "type": "boolean"
+          },
+          "settlement_mode": {
+            "$ref": "#/components/schemas/SettlementMode",
+            "description": "escrow_release holds funds per milestone and releases on verify; invoice_on_verify sends a PayPal invoice when a milestone verifies."
+          },
+          "source_document_uri": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Original agreement file the milestones came from.",
+            "title": "Source Document Uri"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgreementStatus"
+          },
+          "title": {
+            "description": "Human-readable name of the grant or SOW.",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "total_amount": {
+            "description": "Agreement total; milestones must sum to it.",
+            "title": "Total Amount",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "total_amount",
+          "settlement_mode",
+          "id",
+          "status",
+          "auto_release_enabled",
+          "criteria_hash",
+          "locked",
+          "parties",
+          "milestones",
+          "funding",
+          "lint"
+        ],
+        "title": "AgreementRead",
+        "type": "object"
+      },
+      "AgreementStatus": {
+        "enum": [
+          "draft",
+          "awaiting_confirmation",
+          "active",
+          "completed",
+          "cancelled"
+        ],
+        "title": "AgreementStatus",
+        "type": "string"
+      },
+      "AgreementText": {
+        "properties": {
+          "text": {
+            "description": "Full text of the grant agreement or SOW.",
+            "maxLength": 200000,
+            "minLength": 20,
+            "title": "Text",
+            "type": "string"
+          },
+          "title": {
+            "default": "agreement",
+            "description": "File name or title, for provenance.",
+            "maxLength": 200,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "AgreementText",
+        "type": "object"
+      },
+      "Body_extract_agreement_agreements_extract_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_extract_agreement_agreements_extract_post",
+        "type": "object"
+      },
+      "Body_upload_evidence_milestones__milestone_id__uploads_post": {
+        "properties": {
+          "dated": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The evidence's own date, if the files don't carry one.",
+            "title": "Dated"
+          },
+          "files": {
+            "description": "Up to 10 files, 20 MB each, 25 MB total.",
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional context, shown as a payee note.",
+            "title": "Note"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "Body_upload_evidence_milestones__milestone_id__uploads_post",
+        "type": "object"
+      },
+      "Comparator": {
+        "enum": [
+          "at_least",
+          "at_most",
+          "equals",
+          "exists",
+          "on_or_before"
+        ],
+        "title": "Comparator",
+        "type": "string"
+      },
+      "ConfirmRequest": {
+        "properties": {
+          "auto_release_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Payer only: allow confident verdicts to release without a human.",
+            "title": "Auto Release Enabled"
+          },
+          "criteria_hash": {
+            "description": "The criteria_hash this party reviewed and agrees to.",
+            "title": "Criteria Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "criteria_hash"
+        ],
+        "title": "ConfirmRequest",
+        "type": "object"
+      },
+      "Criterion-Input": {
+        "description": "One checkable condition of a tranche. A tranche releases only when every criterion is met.",
+        "properties": {
+          "check_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Registry check that decides it; required when verification is 'check'.",
+            "title": "Check Id"
+          },
+          "due_by": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Date this must be met by, if earlier than the milestone.",
+            "title": "Due By"
+          },
+          "evidence_description": {
+            "description": "The specific artifact that proves it, e.g. 'signed sign-in sheets for each session'.",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Evidence Description",
+            "type": "string"
+          },
+          "evidence_required": {
+            "description": "Kinds of evidence that can prove this criterion.",
+            "items": {
+              "$ref": "#/components/schemas/EvidenceType"
+            },
+            "minItems": 1,
+            "title": "Evidence Required",
+            "type": "array"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z0-9_-]{1,32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stable id within the milestone, e.g. 'c1'. Assigned by the server when omitted.",
+            "title": "Id"
+          },
+          "measure": {
+            "$ref": "#/components/schemas/Measure-Input",
+            "description": "What is counted or checked and the target it must reach."
+          },
+          "statement": {
+            "description": "One condition, worded so a reviewer could answer yes or no from the evidence alone.",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Statement",
+            "type": "string"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/VerificationMethod",
+            "default": "model",
+            "description": "Who or what decides this criterion."
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "default": "1",
+            "description": "Relative weight for future partial release; unused while release is all-or-nothing.",
+            "title": "Weight"
+          }
+        },
+        "required": [
+          "statement",
+          "measure",
+          "evidence_required",
+          "evidence_description"
+        ],
+        "title": "Criterion",
+        "type": "object"
+      },
+      "Criterion-Output": {
+        "description": "One checkable condition of a tranche. A tranche releases only when every criterion is met.",
+        "properties": {
+          "check_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Registry check that decides it; required when verification is 'check'.",
+            "title": "Check Id"
+          },
+          "due_by": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Date this must be met by, if earlier than the milestone.",
+            "title": "Due By"
+          },
+          "evidence_description": {
+            "description": "The specific artifact that proves it, e.g. 'signed sign-in sheets for each session'.",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Evidence Description",
+            "type": "string"
+          },
+          "evidence_required": {
+            "description": "Kinds of evidence that can prove this criterion.",
+            "items": {
+              "$ref": "#/components/schemas/EvidenceType"
+            },
+            "minItems": 1,
+            "title": "Evidence Required",
+            "type": "array"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z0-9_-]{1,32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stable id within the milestone, e.g. 'c1'. Assigned by the server when omitted.",
+            "title": "Id"
+          },
+          "measure": {
+            "$ref": "#/components/schemas/Measure-Output",
+            "description": "What is counted or checked and the target it must reach."
+          },
+          "statement": {
+            "description": "One condition, worded so a reviewer could answer yes or no from the evidence alone.",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Statement",
+            "type": "string"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/VerificationMethod",
+            "default": "model",
+            "description": "Who or what decides this criterion."
+          },
+          "weight": {
+            "default": "1",
+            "description": "Relative weight for future partial release; unused while release is all-or-nothing.",
+            "title": "Weight",
+            "type": "string"
+          }
+        },
+        "required": [
+          "statement",
+          "measure",
+          "evidence_required",
+          "evidence_description"
+        ],
+        "title": "Criterion",
+        "type": "object"
+      },
+      "CriterionResult": {
+        "properties": {
+          "criterion_id": {
+            "description": "Id of the criterion judged.",
+            "title": "Criterion Id",
+            "type": "string"
+          },
+          "decided_by": {
+            "description": "'check:<id>', 'model' or 'human:<party id>'.",
+            "title": "Decided By",
+            "type": "string"
+          },
+          "evidence_ids": {
+            "description": "Evidence cited; empty means not met regardless of 'met'.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "met": {
+            "description": "Whether this criterion is satisfied.",
+            "title": "Met",
+            "type": "boolean"
+          },
+          "missing": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When not met: what evidence would satisfy it. Sent to the payee.",
+            "title": "Missing"
+          },
+          "observed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Value found for the measure, e.g. '214 people'.",
+            "title": "Observed"
+          },
+          "quote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Short excerpt from the cited evidence supporting the result.",
+            "title": "Quote"
+          }
+        },
+        "required": [
+          "criterion_id",
+          "met",
+          "decided_by",
+          "evidence_ids"
+        ],
+        "title": "CriterionResult",
+        "type": "object"
+      },
+      "DeliverableRelease": {
+        "description": "When the payer can open the payee's full evidence.",
+        "enum": [
+          "on_submit",
+          "on_capture"
+        ],
+        "title": "DeliverableRelease",
+        "type": "string"
+      },
+      "DisbursementAttempt": {
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DisbursementKind",
+            "description": "referenced_payout or payout (to the payee), refund (to the payer)."
+          },
+          "milestone_id": {
+            "title": "Milestone Id",
+            "type": "string"
+          },
+          "paypal_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paypal Ref"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SettlementStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "milestone_id",
+          "kind",
+          "attempt",
+          "idempotency_key",
+          "paypal_ref",
+          "status",
+          "error",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "DisbursementAttempt",
+        "type": "object"
+      },
+      "DisbursementKind": {
+        "enum": [
+          "referenced_payout",
+          "payout",
+          "refund"
+        ],
+        "title": "DisbursementKind",
+        "type": "string"
+      },
+      "DisbursementRead": {
+        "properties": {
+          "attempt": {
+            "minimum": 1.0,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "description": "Sent as PayPal-Request-Id.",
+            "maxLength": 80,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DisbursementKind"
+          },
+          "milestone_status": {
+            "$ref": "#/components/schemas/MilestoneStatus"
+          },
+          "paypal_ref": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Payout item, payout batch or refund id.",
+            "title": "Paypal Ref"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SettlementStatus"
+          }
+        },
+        "required": [
+          "kind",
+          "attempt",
+          "idempotency_key",
+          "status",
+          "id",
+          "milestone_status"
+        ],
+        "title": "DisbursementRead",
+        "type": "object"
+      },
+      "EvidenceAccepted": {
+        "description": "Result of an intake call (not an entity).",
+        "properties": {
+          "duplicate": {
+            "description": "True when identical evidence was already on file.",
+            "title": "Duplicate",
+            "type": "boolean"
+          },
+          "evidence_id": {
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "milestone_status": {
+            "$ref": "#/components/schemas/MilestoneStatus"
+          }
+        },
+        "required": [
+          "evidence_id",
+          "duplicate",
+          "milestone_status"
+        ],
+        "title": "EvidenceAccepted",
+        "type": "object"
+      },
+      "EvidenceCreate": {
+        "description": "Evidence submitted through the API or MCP. Adapters (GitHub, upload) build the same shape.",
+        "properties": {
+          "artifact_uris": {
+            "description": "Links to the original files or pages.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Artifact Uris",
+            "type": "array"
+          },
+          "content": {
+            "description": "Text of the evidence: spreadsheets as CSV with a header row, documents as their text. Untrusted: never followed as instructions.",
+            "maxLength": 200000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "dated": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The evidence's own date, e.g. report cover or commit date.",
+            "title": "Dated"
+          },
+          "evidence_type": {
+            "$ref": "#/components/schemas/EvidenceType",
+            "description": "Kind of evidence, matched against each criterion."
+          },
+          "external_ref": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source-native id (file id, URL). Defaults to a content hash.",
+            "title": "External Ref"
+          },
+          "title": {
+            "description": "File name or short label, e.g. 'Q2 sign-in sheets.csv'.",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_type",
+          "title",
+          "content"
+        ],
+        "title": "EvidenceCreate",
+        "type": "object"
+      },
+      "EvidenceType": {
+        "enum": [
+          "document",
+          "spreadsheet",
+          "photo",
+          "link",
+          "code_change",
+          "ci_run",
+          "dataset",
+          "attestation"
+        ],
+        "title": "EvidenceType",
+        "type": "string"
+      },
+      "ExtractionProblem": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "message"
+        ],
+        "title": "ExtractionProblem",
+        "type": "object"
+      },
+      "ExtractionResult": {
+        "properties": {
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "lint": {
+            "$ref": "#/components/schemas/LintReport"
+          },
+          "milestones": {
+            "description": "Proposed tranches; edit, then POST /agreements.",
+            "items": {
+              "$ref": "#/components/schemas/MilestoneCreate-Output"
+            },
+            "title": "Milestones",
+            "type": "array"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "open_questions": {
+            "description": "Ambiguities a person must resolve before confirming.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Open Questions",
+            "type": "array"
+          },
+          "problems": {
+            "description": "Proposals that failed validation and were left out.",
+            "items": {
+              "$ref": "#/components/schemas/ExtractionProblem"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "provenance": {
+            "items": {
+              "$ref": "#/components/schemas/Provenance"
+            },
+            "title": "Provenance",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "total_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Amount"
+          }
+        },
+        "required": [
+          "title",
+          "total_amount",
+          "currency",
+          "milestones",
+          "open_questions",
+          "problems",
+          "provenance",
+          "lint",
+          "model"
+        ],
+        "title": "ExtractionResult",
+        "type": "object"
+      },
+      "FundingStarted": {
+        "properties": {
+          "approve_url": {
+            "description": "Send the payer here to approve the hold in PayPal.",
+            "title": "Approve Url",
+            "type": "string"
+          },
+          "order_id": {
+            "title": "Order Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order_id",
+          "approve_url"
+        ],
+        "title": "FundingStarted",
+        "type": "object"
+      },
+      "FundingSummary": {
+        "properties": {
+          "held": {
+            "description": "Escrow: authorized on the payer's PayPal account, not yet captured.",
+            "title": "Held",
+            "type": "string"
+          },
+          "in_dispute_window": {
+            "default": "0.00",
+            "description": "Escrow: captured from the payer, not yet paid to the payee.",
+            "title": "In Dispute Window",
+            "type": "string"
+          },
+          "invoiced": {
+            "description": "Invoice mode: invoices sent and not yet paid.",
+            "title": "Invoiced",
+            "type": "string"
+          },
+          "refunded": {
+            "default": "0.00",
+            "description": "Captured, then returned to the payer.",
+            "title": "Refunded",
+            "type": "string"
+          },
+          "released": {
+            "description": "Paid to the payee: disbursed captures plus paid invoices.",
+            "title": "Released",
+            "type": "string"
+          },
+          "unfunded": {
+            "description": "Total minus held, in the dispute window, invoiced and released.",
+            "title": "Unfunded",
+            "type": "string"
+          }
+        },
+        "required": [
+          "held",
+          "invoiced",
+          "released",
+          "unfunded"
+        ],
+        "title": "FundingSummary",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "InvitationKind": {
+        "enum": [
+          "counterparty",
+          "reviewer",
+          "member"
+        ],
+        "title": "InvitationKind",
+        "type": "string"
+      },
+      "InvitationRead": {
+        "properties": {
+          "accepted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted At"
+          },
+          "agreement_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agreement Id"
+          },
+          "agreement_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agreement Title"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/InvitationKind"
+          },
+          "org_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Org Id"
+          },
+          "org_role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrgRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "email",
+          "agreement_id",
+          "org_id",
+          "org_role",
+          "expires_at",
+          "accepted_at",
+          "revoked_at"
+        ],
+        "title": "InvitationRead",
+        "type": "object"
+      },
+      "InviteToAgreement": {
+        "properties": {
+          "email": {
+            "maxLength": 320,
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "title": "Email",
+            "type": "string"
+          },
+          "kind": {
+            "default": "reviewer",
+            "enum": [
+              "counterparty",
+              "reviewer"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "InviteToAgreement",
+        "type": "object"
+      },
+      "LedgerEntryRead": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "authorized, captured, voided, expired, invoiced, paid or invoice_cancelled.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "milestone_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Milestone Id"
+          },
+          "paypal_ref": {
+            "title": "Paypal Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "milestone_id",
+          "kind",
+          "amount",
+          "paypal_ref",
+          "at"
+        ],
+        "title": "LedgerEntryRead",
+        "type": "object"
+      },
+      "LedgerView": {
+        "properties": {
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "disbursements": {
+            "description": "Payouts to the payee and refunds to the payer.",
+            "items": {
+              "$ref": "#/components/schemas/DisbursementAttempt"
+            },
+            "title": "Disbursements",
+            "type": "array"
+          },
+          "entries": {
+            "description": "PayPal money movements, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/LedgerEntryRead"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "settlements": {
+            "description": "Every capture or invoice attempt, per tranche.",
+            "items": {
+              "$ref": "#/components/schemas/SettlementAttempt"
+            },
+            "title": "Settlements",
+            "type": "array"
+          }
+        },
+        "required": [
+          "currency",
+          "entries",
+          "settlements",
+          "disbursements"
+        ],
+        "title": "LedgerView",
+        "type": "object"
+      },
+      "LintIssue": {
+        "properties": {
+          "code": {
+            "description": "Stable machine-readable rule id, e.g. 'vague_term'.",
+            "title": "Code",
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/LintLevel",
+            "description": "error blocks confirmation; warning does not."
+          },
+          "message": {
+            "description": "What is wrong.",
+            "title": "Message",
+            "type": "string"
+          },
+          "path": {
+            "description": "Where the issue is, e.g. 'milestones[0].criteria[1].statement'.",
+            "title": "Path",
+            "type": "string"
+          },
+          "suggestion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How to fix it.",
+            "title": "Suggestion"
+          }
+        },
+        "required": [
+          "level",
+          "code",
+          "path",
+          "message"
+        ],
+        "title": "LintIssue",
+        "type": "object"
+      },
+      "LintLevel": {
+        "enum": [
+          "error",
+          "warning"
+        ],
+        "title": "LintLevel",
+        "type": "string"
+      },
+      "LintReport": {
+        "properties": {
+          "issues": {
+            "description": "All findings, errors first.",
+            "items": {
+              "$ref": "#/components/schemas/LintIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "ok": {
+            "description": "True when there are no errors; warnings allowed.",
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "LintReport",
+        "type": "object"
+      },
+      "Measure-Input": {
+        "description": "The thing a reviewer counts or checks. Makes a criterion pass/fail instead of a judgment call.",
+        "properties": {
+          "comparator": {
+            "$ref": "#/components/schemas/Comparator",
+            "description": "How the observed value is compared with the target."
+          },
+          "metric": {
+            "description": "What is counted or checked, e.g. 'workshop attendees', 'final report', 'unit test pass rate'.",
+            "maxLength": 120,
+            "minLength": 2,
+            "title": "Metric",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Number for at_least/at_most, date for on_or_before, value for equals, omitted for exists.",
+            "title": "Target"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Unit of a numeric target, e.g. 'people', '%'.",
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "metric",
+          "comparator"
+        ],
+        "title": "Measure",
+        "type": "object"
+      },
+      "Measure-Output": {
+        "description": "The thing a reviewer counts or checks. Makes a criterion pass/fail instead of a judgment call.",
+        "properties": {
+          "comparator": {
+            "$ref": "#/components/schemas/Comparator",
+            "description": "How the observed value is compared with the target."
+          },
+          "metric": {
+            "description": "What is counted or checked, e.g. 'workshop attendees', 'final report', 'unit test pass rate'.",
+            "maxLength": 120,
+            "minLength": 2,
+            "title": "Metric",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Number for at_least/at_most, date for on_or_before, value for equals, omitted for exists.",
+            "title": "Target"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Unit of a numeric target, e.g. 'people', '%'.",
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "metric",
+          "comparator"
+        ],
+        "title": "Measure",
+        "type": "object"
+      },
+      "MilestoneCreate-Input": {
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "Amount released or invoiced when it verifies.",
+            "title": "Amount"
+          },
+          "criteria": {
+            "description": "Checkable conditions; all must be met to release this tranche.",
+            "items": {
+              "$ref": "#/components/schemas/Criterion-Input"
+            },
+            "minItems": 1,
+            "title": "Criteria",
+            "type": "array"
+          },
+          "due_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Target date; passing it without evidence marks the milestone overdue.",
+            "title": "Due Date"
+          },
+          "title": {
+            "description": "Short name of the tranche or deliverable.",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "amount",
+          "criteria"
+        ],
+        "title": "MilestoneCreate",
+        "type": "object"
+      },
+      "MilestoneCreate-Output": {
+        "properties": {
+          "amount": {
+            "description": "Amount released or invoiced when it verifies.",
+            "title": "Amount",
+            "type": "string"
+          },
+          "criteria": {
+            "description": "Checkable conditions; all must be met to release this tranche.",
+            "items": {
+              "$ref": "#/components/schemas/Criterion-Output"
+            },
+            "minItems": 1,
+            "title": "Criteria",
+            "type": "array"
+          },
+          "due_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Target date; passing it without evidence marks the milestone overdue.",
+            "title": "Due Date"
+          },
+          "title": {
+            "description": "Short name of the tranche or deliverable.",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "amount",
+          "criteria"
+        ],
+        "title": "MilestoneCreate",
+        "type": "object"
+      },
+      "MilestoneRead": {
+        "properties": {
+          "amount": {
+            "description": "Amount released or invoiced when it verifies.",
+            "title": "Amount",
+            "type": "string"
+          },
+          "awaiting_approval": {
+            "default": false,
+            "description": "Funding was started and PayPal is waiting for the payer to approve the hold; clients poll while this is set. Cleared when the hold is placed, the payer cancels, or funding is started again.",
+            "title": "Awaiting Approval",
+            "type": "boolean"
+          },
+          "captured_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the payer's money was captured.",
+            "title": "Captured At"
+          },
+          "criteria": {
+            "description": "Checkable conditions; all must be met to release this tranche.",
+            "items": {
+              "$ref": "#/components/schemas/Criterion-Output"
+            },
+            "minItems": 1,
+            "title": "Criteria",
+            "type": "array"
+          },
+          "due_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Target date; passing it without evidence marks the milestone overdue.",
+            "title": "Due Date"
+          },
+          "funded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the original hold was placed.",
+            "title": "Funded At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "pay_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Invoice mode: where the payer pays this tranche (relative to the API), while open.",
+            "title": "Pay Path"
+          },
+          "payee_assignee_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payee Assignee Id"
+          },
+          "payer_assignee_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payer Assignee Id"
+          },
+          "payout_route": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PayoutRoute"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "direct: paid into the payee's connected PayPal; platform: via PayPal Payouts."
+          },
+          "paypal_authorization_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Live PayPal hold for this tranche.",
+            "title": "Paypal Authorization Id"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "refund_failed": {
+            "default": false,
+            "description": "A contest was resolved for the payer but PayPal refused the refund; the tranche stays contested and resolving it again with decision=refund retries.",
+            "title": "Refund Failed",
+            "type": "boolean"
+          },
+          "release_due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the dispute window closes and the payee is paid, unless contested.",
+            "title": "Release Due At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MilestoneStatus"
+          },
+          "title": {
+            "description": "Short name of the tranche or deliverable.",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "amount",
+          "criteria",
+          "id",
+          "position",
+          "status"
+        ],
+        "title": "MilestoneRead",
+        "type": "object"
+      },
+      "MilestoneStatus": {
+        "enum": [
+          "pending",
+          "funded",
+          "evidence_received",
+          "verifying",
+          "needs_review",
+          "verified",
+          "settling",
+          "held",
+          "contested",
+          "settled",
+          "refunded",
+          "settlement_failed",
+          "payout_failed",
+          "disputed",
+          "overdue"
+        ],
+        "title": "MilestoneStatus",
+        "type": "string"
+      },
+      "OrgRole": {
+        "enum": [
+          "owner",
+          "admin",
+          "member",
+          "viewer"
+        ],
+        "title": "OrgRole",
+        "type": "string"
+      },
+      "PartyRead": {
+        "properties": {
+          "confirmed_current": {
+            "description": "Whether this party has signed the current criteria hash.",
+            "title": "Confirmed Current",
+            "type": "boolean"
+          },
+          "display_name": {
+            "description": "Org name at joining; shown in the record.",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "paypal_connected": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Payee only: PayPal account connected and able to receive. False means tranches are paid through the platform with PayPal Payouts.",
+            "title": "Paypal Connected"
+          },
+          "paypal_email": {
+            "anyOf": [
+              {
+                "maxLength": 320,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "PayPal account used on this agreement (snapshot of the org's at joining). None for reviewers.",
+            "title": "Paypal Email"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role",
+            "description": "payer, payee or reviewer on this agreement."
+          }
+        },
+        "required": [
+          "role",
+          "display_name",
+          "id",
+          "org_id",
+          "confirmed_current"
+        ],
+        "title": "PartyRead",
+        "type": "object"
+      },
+      "PayoutRoute": {
+        "description": "How a tranche's money reaches the payee.",
+        "enum": [
+          "direct",
+          "platform"
+        ],
+        "title": "PayoutRoute",
+        "type": "string"
+      },
+      "PrecheckRequest": {
+        "properties": {
+          "evidence": {
+            "description": "Draft evidence; nothing is stored.",
+            "items": {
+              "$ref": "#/components/schemas/EvidenceCreate"
+            },
+            "minItems": 1,
+            "title": "Evidence",
+            "type": "array"
+          }
+        },
+        "required": [
+          "evidence"
+        ],
+        "title": "PrecheckRequest",
+        "type": "object"
+      },
+      "Provenance": {
+        "properties": {
+          "path": {
+            "description": "Where the criterion landed, e.g. 'milestones[0].criteria[1]'.",
+            "title": "Path",
+            "type": "string"
+          },
+          "source_quote": {
+            "description": "Agreement text it was drawn from.",
+            "title": "Source Quote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "source_quote"
+        ],
+        "title": "Provenance",
+        "type": "object"
+      },
+      "ReviewOutcome": {
+        "properties": {
+          "milestone_status": {
+            "$ref": "#/components/schemas/MilestoneStatus"
+          },
+          "missing": {
+            "description": "On rejection: the unmet criteria and what to send.",
+            "items": {
+              "$ref": "#/components/schemas/CriterionResult"
+            },
+            "title": "Missing",
+            "type": "array"
+          }
+        },
+        "required": [
+          "milestone_status",
+          "missing"
+        ],
+        "title": "ReviewOutcome",
+        "type": "object"
+      },
+      "ReviewRequest": {
+        "properties": {
+          "decision": {
+            "enum": [
+              "approve",
+              "reject"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Shown to the payee and kept in the audit log.",
+            "title": "Note"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ReviewRequest",
+        "type": "object"
+      },
+      "Role": {
+        "description": "An organization's role on one agreement. The same org can be payer on one agreement and payee on another.",
+        "enum": [
+          "payer",
+          "payee",
+          "reviewer"
+        ],
+        "title": "Role",
+        "type": "string"
+      },
+      "SettlementAttempt": {
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "milestone_id": {
+            "title": "Milestone Id",
+            "type": "string"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/SettlementMode"
+          },
+          "paypal_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paypal Ref"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SettlementStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "milestone_id",
+          "attempt",
+          "mode",
+          "idempotency_key",
+          "paypal_ref",
+          "status",
+          "error",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "SettlementAttempt",
+        "type": "object"
+      },
+      "SettlementMode": {
+        "enum": [
+          "escrow_release",
+          "invoice_on_verify"
+        ],
+        "title": "SettlementMode",
+        "type": "string"
+      },
+      "SettlementRead": {
+        "properties": {
+          "attempt": {
+            "description": "Attempt number; part of the PayPal idempotency key.",
+            "minimum": 1.0,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "description": "'{milestone_id}-{attempt}'; sent as PayPal-Request-Id.",
+            "maxLength": 80,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "milestone_status": {
+            "$ref": "#/components/schemas/MilestoneStatus"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/SettlementMode",
+            "description": "Capture of a hold, or an invoice."
+          },
+          "pay_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Invoice mode: send the payer here to pay this tranche (while it's open).",
+            "title": "Pay Url"
+          },
+          "paypal_ref": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Capture id, invoice id, or pay-now order id.",
+            "title": "Paypal Ref"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SettlementStatus",
+            "description": "Mirrored from PayPal responses and webhooks."
+          }
+        },
+        "required": [
+          "attempt",
+          "mode",
+          "idempotency_key",
+          "status",
+          "id",
+          "milestone_status"
+        ],
+        "title": "SettlementRead",
+        "type": "object"
+      },
+      "SettlementStatus": {
+        "enum": [
+          "submitted",
+          "succeeded",
+          "failed",
+          "unclaimed",
+          "expired"
+        ],
+        "title": "SettlementStatus",
+        "type": "string"
+      },
+      "SubscriptionCreate": {
+        "properties": {
+          "events": {
+            "description": "Event types (milestone.status_changed), prefixes ending in '.' (milestone.), or '*'.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "url": {
+            "description": "HTTPS endpoint that receives signed JSON events.",
+            "maxLength": 1000,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "SubscriptionCreate",
+        "type": "object"
+      },
+      "SubscriptionCreated": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "events": {
+            "description": "Event types (milestone.status_changed), prefixes ending in '.' (milestone.), or '*'.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "secret": {
+            "description": "Shown once. Verify X-MDE-Signature with HMAC-SHA256(secret, ts + '.' + body).",
+            "title": "Secret",
+            "type": "string"
+          },
+          "url": {
+            "description": "HTTPS endpoint that receives signed JSON events.",
+            "maxLength": 1000,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "id",
+          "active",
+          "created_at",
+          "secret"
+        ],
+        "title": "SubscriptionCreated",
+        "type": "object"
+      },
+      "SubscriptionRead": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "events": {
+            "description": "Event types (milestone.status_changed), prefixes ending in '.' (milestone.), or '*'.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "url": {
+            "description": "HTTPS endpoint that receives signed JSON events.",
+            "maxLength": 1000,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "id",
+          "active",
+          "created_at"
+        ],
+        "title": "SubscriptionRead",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "VerdictRead": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "criteria_results": {
+            "description": "One result per criterion, with citations.",
+            "items": {
+              "$ref": "#/components/schemas/CriterionResult"
+            },
+            "title": "Criteria Results",
+            "type": "array"
+          },
+          "gate": {
+            "description": "auto_release, needs_review or precheck.",
+            "maxLength": 32,
+            "title": "Gate",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_precheck": {
+            "default": false,
+            "description": "True for payee pre-checks; never moves state.",
+            "title": "Is Precheck",
+            "type": "boolean"
+          },
+          "met": {
+            "description": "Every criterion met and cited. Computed by the server, not the model.",
+            "title": "Met",
+            "type": "boolean"
+          },
+          "model": {
+            "description": "Model id used ('checks' when no model was needed).",
+            "maxLength": 64,
+            "title": "Model",
+            "type": "string"
+          },
+          "model_confidence": {
+            "description": "Model-reported confidence; one gate input, never the gate.",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Model Confidence",
+            "type": "number"
+          },
+          "prompt_version": {
+            "description": "Verifier prompt version, for replay.",
+            "maxLength": 32,
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "rationale": {
+            "description": "One-paragraph explanation shown to the approver.",
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "met",
+          "model_confidence",
+          "rationale",
+          "criteria_results",
+          "model",
+          "prompt_version",
+          "gate",
+          "id",
+          "created_at"
+        ],
+        "title": "VerdictRead",
+        "type": "object"
+      },
+      "VerificationMethod": {
+        "enum": [
+          "check",
+          "model",
+          "human"
+        ],
+        "title": "VerificationMethod",
+        "type": "string"
+      },
+      "app__api__agreements__InvitationSent": {
+        "properties": {
+          "dev_link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dev Link"
+          },
+          "invitation": {
+            "$ref": "#/components/schemas/InvitationRead"
+          }
+        },
+        "required": [
+          "invitation"
+        ],
+        "title": "InvitationSent",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "The core flow an SDK covers: draft and confirm an agreement, fund a tranche, submit evidence, read the verdict, review and release. Turns an agreement into checkable acceptance criteria, verifies evidence against them, and settles each tranche through PayPal.",
+    "license": {
+      "identifier": "AGPL-3.0-only",
+      "name": "AGPL-3.0-only"
+    },
+    "title": "Milestone Disbursement Engine (core)",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/agreements/extract": {
+      "post": {
+        "operationId": "extract_agreement_agreements_extract_post",
+        "parameters": [
+          {
+            "description": "Deployment key, required when the server sets one.",
+            "in": "header",
+            "name": "x-org-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Deployment key, required when the server sets one.",
+              "title": "X-Org-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_extract_agreement_agreements_extract_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractionResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Propose tranches and checkable criteria from an agreement document (PDF or text upload)",
+        "tags": [
+          "agreements"
+        ],
+        "x-sdk-core": true
+      }
+    },
+    "/agreements/extract-text": {
+      "post": {
+        "operationId": "extract_agreement_text_agreements_extract_text_post",
+        "parameters": [
+          {
+            "description": "Deployment key, required when the server sets one.",
+            "in": "header",
+            "name": "x-org-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Deployment key, required when the server sets one.",
+              "title": "X-Org-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgreementText"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractionResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Propose tranches and checkable criteria from an agreement's text",
+        "tags": [
+          "agreements"
+        ],
+        "x-mcp-tool": "draft_agreement_from_text",
+        "x-sdk-core": true
+      }
+    },
+    "/agreements/{agreement_id}": {
+      "get": {
+        "operationId": "get_agreement_agreements__agreement_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agreement_id",
+            "required": true,
+            "schema": {
+              "title": "Agreement Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgreementRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Agreement, tranches, criteria, lint and confirmation status",
+        "tags": [
+          "agreements"
+        ],
+        "x-mcp-tool": "get_agreement_status",
+        "x-sdk-core": true
+      }
+    },
+    "/agreements/{agreement_id}/confirm": {
+      "post": {
+        "operationId": "confirm_agreements__agreement_id__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agreement_id",
+            "required": true,
+            "schema": {
+              "title": "Agreement Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgreementRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sign the current criteria hash for your org; activates when every party has signed",
+        "tags": [
+          "agreements"
+        ],
+        "x-sdk-core": true
+      }
+    },
+    "/agreements/{agreement_id}/invitations": {
+      "post": {
+        "operationId": "invite_to_agreement_agreements__agreement_id__invitations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agreement_id",
+            "required": true,
+            "schema": {
+              "title": "Agreement Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteToAgreement"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/app__api__agreements__InvitationSent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Invite a reviewer (or the payee, if none has joined) to this agreement (payer admin)",
+        "tags": [
+          "agreements"
+        ],
+        "x-sdk-core": true
+      }
+    },
+    "/agreements/{agreement_id}/ledger": {
+      "get": {
+        "operationId": "ledger_agreements__agreement_id__ledger_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agreement_id",
+            "required": true,
+            "schema": {
+              "title": "Agreement Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Every PayPal money movement and settlement attempt on an agreement",
+        "tags": [
+          "settlement"
+        ],
+        "x-sdk-core": true
+      }
+    },
+    "/agreements/{agreement_id}/subscriptions": {
+      "get": {
+        "operationId": "list_subscriptions_agreements__agreement_id__subscriptions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agreement_id",
+            "required": true,
+            "schema": {
+              "title": "Agreement Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SubscriptionRead"
+                  },
+                  "title": "Response List Subscriptions Agreements  Agreement Id  Subscriptions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Subscriptions on this agreement",
+        "tags": [
+          "events"
+        ],
+        "x-sdk-core": true
+      },
+      "post": {
+        "operationId": "subscribe_agreements__agreement_id__subscriptions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agreement_id",
+            "required": true,
+            "schema": {
+              "title": "Agreement Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscriptionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Subscribe a URL to this agreement's events",
+        "tags": [
+          "events"
+        ],
+        "x-sdk-core": true
+      }
+    },
+    "/agreements/{agreement_id}/subscriptions/{subscription_id}": {
+      "delete": {
+        "operationId": "unsubscribe_agreements__agreement_id__subscriptions__subscription_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agreement_id",
+            "required": true,
+            "schema": {
+              "title": "Agreement Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "subscription_id",
+            "required": true,
+            "schema": {
+              "title": "Subscription Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unsubscribe",
+        "tags": [
+          "events"
+        ],
+        "x-sdk-core": true
+      }
+    },
+    "/milestones/{milestone_id}/evidence": {
+      "post": {
+        "operationId": "submit_evidence_milestones__milestone_id__evidence_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "milestone_id",
+            "required": true,
+            "schema": {
+              "title": "Milestone Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvidenceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Payee submits evidence for a tranche; verification runs in the background",
+        "tags": [
+          "evidence"
+        ],
+        "x-mcp-tool": "submit_evidence",
+        "x-sdk-core": true
+      }
+    },
+    "/milestones/{milestone_id}/fund": {
+      "post": {
+        "operationId": "fund_milestones__milestone_id__fund_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "milestone_id",
+            "required": true,
+            "schema": {
+              "title": "Milestone Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundingStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Payer starts a PayPal hold for one tranche",
+        "tags": [
+          "settlement"
+        ],
+        "x-sdk-core": true
+      }
+    },
+    "/milestones/{milestone_id}/payout": {
+      "post": {
+        "operationId": "payout_milestones__milestone_id__payout_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "milestone_id",
+            "required": true,
+            "schema": {
+              "title": "Milestone Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisbursementRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pay a captured tranche to the payee now (waives the rest of the dispute window; retries a failed payout)",
+        "tags": [
+          "settlement"
+        ],
+        "x-sdk-core": true
+      }
+    },
+    "/milestones/{milestone_id}/precheck": {
+      "post": {
+        "operationId": "precheck_milestones__milestone_id__precheck_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "milestone_id",
+            "required": true,
+            "schema": {
+              "title": "Milestone Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrecheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerdictRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Payee checks draft evidence against the criteria without submitting it",
+        "tags": [
+          "evidence"
+        ],
+        "x-mcp-tool": "precheck_evidence",
+        "x-sdk-core": true
+      }
+    },
+    "/milestones/{milestone_id}/release": {
+      "post": {
+        "operationId": "release_milestones__milestone_id__release_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "milestone_id",
+            "required": true,
+            "schema": {
+              "title": "Milestone Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Settle a verified tranche: capture its hold or send its invoice (also resumes a failed release)",
+        "tags": [
+          "settlement"
+        ],
+        "x-sdk-core": true
+      }
+    },
+    "/milestones/{milestone_id}/review": {
+      "post": {
+        "operationId": "review_milestones__milestone_id__review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "milestone_id",
+            "required": true,
+            "schema": {
+              "title": "Milestone Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewOutcome"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Payer (admin) or reviewer approves or rejects a verdict in review",
+        "tags": [
+          "evidence"
+        ],
+        "x-sdk-core": true
+      }
+    },
+    "/milestones/{milestone_id}/uploads": {
+      "post": {
+        "operationId": "upload_evidence_milestones__milestone_id__uploads_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "milestone_id",
+            "required": true,
+            "schema": {
+              "title": "Milestone Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_evidence_milestones__milestone_id__uploads_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EvidenceAccepted"
+                  },
+                  "title": "Response Upload Evidence Milestones  Milestone Id  Uploads Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Payee uploads evidence files (PDF, CSV, XLSX, TXT, MD, images); verification runs in the background",
+        "tags": [
+          "evidence"
+        ],
+        "x-sdk-core": true
+      }
+    },
+    "/milestones/{milestone_id}/verdict": {
+      "get": {
+        "operationId": "get_verdict_milestones__milestone_id__verdict_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "milestone_id",
+            "required": true,
+            "schema": {
+              "title": "Milestone Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerdictRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Latest verdict for a tranche, with per-criterion results and citations",
+        "tags": [
+          "evidence"
+        ],
+        "x-mcp-tool": "get_verdict",
+        "x-sdk-core": true
+      }
+    },
+    "/orgs/{org_id}/agreements": {
+      "post": {
+        "operationId": "create_agreement_orgs__org_id__agreements_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgreementCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgreementCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create a draft agreement as this org (the payer) and invite the payee and any reviewers",
+        "tags": [
+          "agreements"
+        ],
+        "x-mcp-tool": "create_agreement",
+        "x-sdk-core": true
+      }
+    }
+  }
+}

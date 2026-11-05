@@ -1,0 +1,68 @@
+{
+  "create_time": "2019-02-14T08:06:33.135Z",
+  "event_type": "PAYMENT.AUTHORIZATION.CREATED",
+  "event_version": "1.0",
+  "id": "WH-1R4898529P235423R-4DP99720Y04588453",
+  "links": [
+    {
+      "encType": "application/json",
+      "href": "https://api.sandbox.paypal.com/v1/notifications/webhooks-events/WH-1R4898529P235423R-4DP99720Y04588453",
+      "method": "GET",
+      "rel": "self"
+    },
+    {
+      "encType": "application/json",
+      "href": "https://api.sandbox.paypal.com/v1/notifications/webhooks-events/WH-1R4898529P235423R-4DP99720Y04588453/resend",
+      "method": "POST",
+      "rel": "resend"
+    }
+  ],
+  "resource": {
+    "amount": {
+      "currency_code": "USD",
+      "value": "2.51"
+    },
+    "create_time": "2019-02-14T08:06:03Z",
+    "expiration_time": "2019-03-15T08:06:03Z",
+    "id": "30S64539YV2718350",
+    "links": [
+      {
+        "href": "https://api.sandbox.paypal.com/v2/payments/authorizations/30S64539YV2718350",
+        "method": "GET",
+        "rel": "self"
+      },
+      {
+        "href": "https://api.sandbox.paypal.com/v2/payments/authorizations/30S64539YV2718350/capture",
+        "method": "POST",
+        "rel": "capture"
+      },
+      {
+        "href": "https://api.sandbox.paypal.com/v2/payments/authorizations/30S64539YV2718350/void",
+        "method": "POST",
+        "rel": "void"
+      },
+      {
+        "href": "https://api.sandbox.paypal.com/v2/payments/authorizations/30S64539YV2718350/reauthorize",
+        "method": "POST",
+        "rel": "reauthorize"
+      },
+      {
+        "href": "https://api.sandbox.paypal.com/v2/checkout/orders/08X604183X066183S",
+        "method": "GET",
+        "rel": "up"
+      }
+    ],
+    "seller_protection": {
+      "dispute_categories": [
+        "ITEM_NOT_RECEIVED",
+        "UNAUTHORIZED_TRANSACTION"
+      ],
+      "status": "ELIGIBLE"
+    },
+    "status": "CREATED",
+    "update_time": "2019-02-14T08:06:03Z"
+  },
+  "resource_type": "authorization",
+  "resource_version": "2.0",
+  "summary": "A successful payment authorization was created for $ 2.51 USD"
+}

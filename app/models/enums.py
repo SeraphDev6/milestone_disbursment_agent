@@ -6,6 +6,13 @@ class SettlementMode(StrEnum):
     invoice_on_verify = "invoice_on_verify"
 
 
+class DeliverableRelease(StrEnum):
+    """When the payer can open the payee's full evidence."""
+
+    on_submit = "on_submit"  # as it arrives (grants)
+    on_capture = "on_capture"  # only once the tranche is captured: the payer pays on the verdict (SOWs)
+
+
 class PayoutRoute(StrEnum):
     """How a tranche's money reaches the payee."""
 

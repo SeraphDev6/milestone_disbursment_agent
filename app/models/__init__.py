@@ -22,6 +22,7 @@ from app.models.criteria import Criterion, CriterionResult, LintIssue, LintRepor
 from app.models.enums import (
     AgreementStatus,
     Comparator,
+    DeliverableRelease,
     DisbursementKind,
     EvidenceType,
     InvitationKind,
@@ -83,6 +84,7 @@ __all__ = [
     "Comparator",
     "Criterion",
     "CriterionResult",
+    "DeliverableRelease",
     "Disbursement",
     "DisbursementKind",
     "DisbursementRead",

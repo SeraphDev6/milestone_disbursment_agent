@@ -73,7 +73,17 @@ Note on #33 what ran, the PayPal debug ids for anything that failed, and any sta
 | PayPal says | Means |
 | --- | --- |
 | `PAYEE_NOT_CONSENTED` (403) on funding | The grantee hasn't finished onboarding, or the REST app isn't a Platform app |
-| `FEATURES_UNAUTHORIZED` on onboarding | The app asked for a partner feature it doesn't have. The app requests `PAYMENT`, `REFUND` and `DELAY_FUNDS_DISBURSEMENT` only |
+| `FEATURES_UNAUTHORIZED` on onboarding | The app asked for a partner feature it doesn't have. The app requests `PAYMENT`, `REFUND`, `DELAY_FUNDS_DISBURSEMENT` and `READ_SELLER_DISPUTE` (sandbox accepted all four on Nov 5) |
 | `REAUTHORIZATION_TOO_SOON` | Expected before day 4. Sandbox holds don't expire, so the run never needs to reauthorize |
 | `PERMISSION_DENIED` on void, capture or refund (direct route) | The `PayPal-Auth-Assertion` for the grantee's merchant id is missing or wrong |
 | Onboarding returns but the account isn't ready | Its email isn't confirmed or it can't receive payments yet. The script shows what PayPal reports as missing |
+
+## Webhook payload samples
+
+`tests/fixtures/paypal_simulator/` holds PayPal's sample payload for every event the app handles, from the sandbox webhook simulator (`POST /v1/notifications/simulate-event`, `resource_version` 2.0 for authorization and capture events), and `tests/test_paypal_samples.py` runs each one through the handler. They are PayPal's canned samples, not events from a real flow; those are still #34. What the samples showed (Nov 5):
+
+- Disputes, Payouts items, referenced payouts, refunds and `PAYMENT.CAPTURE.COMPLETED`/`DECLINED` carry every field the handler matches on.
+- `MERCHANT.ONBOARDING.COMPLETED` has no `tracking_id` (only `merchant_id` and `partner_client_id`). The handler now matches the merchant id, or asks PayPal's merchant-integrations endpoint for the tracking id.
+- The v2 `PAYMENT.AUTHORIZATION.CREATED` sample has no `supplementary_data.related_ids`. The handler now also matches on the authorization id.
+- The v2 `PAYMENT.CAPTURE.PENDING`/`DENIED` samples have no `supplementary_data` either. Captures are matched by capture id first, and the payouts job follows pending captures by asking PayPal, so nothing depends on it; a real event will tell us whether PayPal sends it.
+- The simulator's invoicing samples are the v1 shape (it refuses `resource_version` 2.0); only the invoice `id` is used.
