@@ -8,7 +8,7 @@ from decimal import Decimal
 import httpx
 import pytest
 
-from app.integrations.paypal import PayPalError, SandboxPayPal
+from app.integrations.paypal import Capture, PayPalError, SandboxPayPal
 
 TOKEN = {"access_token": "tok", "token_type": "Bearer", "expires_in": 3600}
 
@@ -192,3 +192,33 @@ def test_sdk_environment_follows_the_api_host():
     assert gw._sdk.config.environment is Environment.PRODUCTION  # "https://paypal.test" has no "sandbox"
     live = SandboxPayPal(client_id="i", client_secret="s", base_url="https://api-m.sandbox.paypal.com", webhook_id=None)
     assert live._sdk.config.environment is Environment.SANDBOX
+
+
+def test_status_lookups_read_captures_orders_and_invoices():
+    """The follow-up job's lookups: GET a capture and an order through the SDK, an invoice over REST."""
+    responses = {
+        "/v2/payments/captures/CAP-1": {"id": "CAP-1", "status": "COMPLETED"},
+        "/v2/checkout/orders/ORDER-1": {
+            "id": "ORDER-1",
+            "status": "COMPLETED",
+            "purchase_units": [{"payments": {"captures": [{"id": "CAP-2", "status": "PENDING"}]}}],
+        },
+        "/v2/checkout/orders/ORDER-2": {"id": "ORDER-2", "status": "APPROVED", "purchase_units": [{}]},
+        "/v2/invoicing/invoices/INV-1": {"id": "INV-1", "status": "MARKED_AS_PAID"},
+        "/v2/invoicing/invoices/INV-2": {"id": "INV-2", "status": "SENT"},
+    }
+    gw, seen = gateway(lambda r: httpx.Response(200, json=responses[r.url.path]))
+
+    assert gw.capture_status("CAP-1") == Capture("CAP-1", "COMPLETED")
+    assert gw.order_capture("ORDER-1") == Capture("CAP-2", "PENDING")
+    assert gw.order_capture("ORDER-2") is None  # approved but not captured yet
+    assert gw.invoice_status("INV-1") == "PAID"
+    assert gw.invoice_status("INV-2") == "OPEN"
+    assert all(r.method == "GET" for r in seen if r.url.path != "/v1/oauth2/token")
+
+
+def test_status_lookup_errors_map_to_paypal_error():
+    gw, _ = gateway(lambda r: httpx.Response(404, json={"name": "RESOURCE_NOT_FOUND", "message": "no capture"}))
+    with pytest.raises(PayPalError) as e:
+        gw.capture_status("CAP-404")
+    assert e.value.status == 404 and not e.value.ambiguous

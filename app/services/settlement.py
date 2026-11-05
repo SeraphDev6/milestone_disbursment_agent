@@ -339,7 +339,7 @@ def release(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: 
     last = m.settlements[-1] if m.settlements else None
     if m.status == MilestoneStatus.settling and last and last.status == SettlementStatus.submitted:
         if last.paypal_ref:
-            raise ServiceError("capture is pending at PayPal; the webhook will settle it", 409)
+            raise ServiceError("capture is pending at PayPal; its webhook or the hourly follow-up settles it", 409)
         s = last  # previous attempt's outcome unknown: resume with the same idempotency key
     elif m.status in RELEASABLE:
         _ensure_live_hold(session, gw, m, actor, now)
@@ -613,10 +613,53 @@ def resolve(
     return pay_out(session, gw, m, actor, now)
 
 
+def follow_pending(session: Session, gw: PayPalGateway, now: datetime, actor: str = "system:payouts") -> dict[str, int]:
+    """Catch up on what PayPal finishes asynchronously, by asking PayPal instead of waiting for a webhook:
+    escrow captures left PENDING, pay-now payments left PENDING, and platform invoices paid or cancelled in
+    PayPal. Webhooks normally get there first; this keeps a missed or late webhook from stranding a tranche.
+    Applies the same state changes as the webhook handlers, so the two can't disagree."""
+    counts = {"captures_followed": 0, "payments_followed": 0, "invoices_followed": 0}
+    waiting = session.exec(
+        select(Settlement).where(
+            Settlement.status == SettlementStatus.submitted, col(Settlement.paypal_ref).is_not(None)
+        )
+    ).all()
+    for s in waiting:
+        m = s.milestone
+        try:
+            if s.mode == SettlementMode.escrow_release:
+                if m.status != MilestoneStatus.settling:
+                    continue
+                capture = gw.capture_status(s.paypal_ref)
+                if capture.status == "PENDING":
+                    continue
+                _apply_capture_status(session, s, capture.status, actor, now)
+                counts["captures_followed"] += 1
+            elif m.payout_route == PayoutRoute.direct:  # pay-now link: paypal_ref is the latest order
+                capture = gw.order_capture(s.paypal_ref)
+                if capture is None or capture.status != "COMPLETED":
+                    continue  # not paid yet; after a decline the payer pays again from the link
+                _apply_payment_status(session, s, capture.capture_id, capture.status, actor, now)
+                counts["payments_followed"] += 1
+            else:  # platform invoice
+                status = gw.invoice_status(s.paypal_ref)
+                if status == "OPEN":
+                    continue
+                _close_invoice(session, s, paid=status == "PAID", actor=actor, now=now)
+                counts["invoices_followed"] += 1
+            session.commit()
+        except PayPalError:
+            session.rollback()  # PayPal unreachable or the object is gone: try again next run
+    session.info.pop("payout_due", None)  # a paid platform invoice leaves the tranche held and due now; paid below
+    return counts
+
+
 def disburse_due(session: Session, gw: PayPalGateway, now: datetime, actor: str = "system:payouts") -> dict[str, int]:
-    """Pay tranches whose dispute window closed, follow Payouts still in flight, and mirror PayPal's own 28-day
+    """Catch up on captures, payments and invoices PayPal finished without a webhook reaching us (follow_pending),
+    then pay tranches whose dispute window closed, follow Payouts still in flight, and mirror PayPal's own 28-day
     release of contested direct captures. Run from the scheduler (hourly is plenty)."""
     counts = {"paid_out": 0, "checked": 0, "auto_released": 0, "errors": 0}
+    counts.update(follow_pending(session, gw, now, actor))
     for m in session.exec(
         select(Milestone).where(col(Milestone.status).in_((MilestoneStatus.held, MilestoneStatus.contested)))
     ).all():
@@ -893,6 +936,15 @@ def expire_stale_invoices(
         if s.milestone.payout_route != PayoutRoute.direct:
             if not s.paypal_ref:
                 continue  # invoice send outcome unknown; release resumes it
+            try:
+                paid = gw.invoice_status(s.paypal_ref) == "PAID"
+            except PayPalError as e:
+                if e.ambiguous:
+                    continue  # can't tell whether it was paid; don't cancel blind, try again next run
+                paid = False  # PayPal has no such invoice: nothing to settle, so close it as below
+            if paid:  # paid in PayPal but the webhook never reached us: settle it rather than cancel it
+                _close_invoice(session, s, paid=True, actor=actor, now=now)
+                continue
             try:
                 gw.cancel_invoice(s.paypal_ref, request_id=f"{s.paypal_ref}-cancel")
             except PayPalError as e:

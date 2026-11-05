@@ -2,7 +2,8 @@
 
 migrate           apply pending migrations and exit (run before starting several app instances)
 daily             drop expired PayPal holds, close invoices unpaid past the timeout, mark tranches overdue
-payouts           pay tranches whose dispute window closed and follow payouts in flight (hourly)
+payouts           catch up on captures, payments and invoices PayPal finished without a webhook reaching us, pay
+                  tranches whose dispute window closed and follow payouts in flight (hourly)
 deliver-webhooks  send due outbound webhooks once (when the in-process loop is turned off)
 """
 

@@ -130,6 +130,12 @@ PAYOUT_ITEM_STATUS = {  # Payouts item transaction_status -> ours
     "PROCESSING": "PENDING",
 }  # FAILED, RETURNED, BLOCKED, REFUNDED, REVERSED, DENIED -> FAILED
 
+INVOICE_STATUS = {  # Invoicing v2 status -> ours: PAID, CANCELLED, or OPEN (still waiting on the payer)
+    "PAID": "PAID",
+    "MARKED_AS_PAID": "PAID",
+    "CANCELLED": "CANCELLED",
+}  # DRAFT, SENT, SCHEDULED, UNPAID, PAYMENT_PENDING, PARTIALLY_PAID, ... -> OPEN
+
 # What a connected payee must grant us (onboarding features PAYMENT, REFUND, DELAY_FUNDS_DISBURSEMENT).
 REQUIRED_SCOPES = ("payments/refund", "payments/delay-funds-disbursement")
 
@@ -171,6 +177,8 @@ class PayPalGateway(Protocol):
 
     def capture_order(self, order_id: str, *, request_id: str) -> Capture: ...
 
+    def order_capture(self, order_id: str) -> Capture | None: ...  # the order's capture so far, None if not captured
+
     def reauthorize(
         self, authorization_id: str, *, amount: Decimal, currency: str, payee_merchant_id: str | None, request_id: str
     ) -> Authorization: ...
@@ -185,6 +193,8 @@ class PayPalGateway(Protocol):
         delayed: bool,
         request_id: str,
     ) -> Capture: ...
+
+    def capture_status(self, capture_id: str) -> Capture: ...  # where a capture stands now (follows PENDING)
 
     def void_authorization(self, authorization_id: str, *, payee_merchant_id: str | None, request_id: str) -> None: ...
 
@@ -219,6 +229,8 @@ class PayPalGateway(Protocol):
     ) -> Invoice: ...
 
     def cancel_invoice(self, invoice_id: str, *, request_id: str) -> None: ...
+
+    def invoice_status(self, invoice_id: str) -> str: ...  # PAID, CANCELLED or OPEN (see INVOICE_STATUS)
 
     def verify_webhook(self, headers: dict[str, str], event: dict) -> bool: ...
 
@@ -362,6 +374,7 @@ class MockPayPal:
                     "delayed": False,
                     "disbursed": True,
                     "refunded": False,
+                    "status": status,
                 }
             return Capture(cid, status)
 
@@ -396,6 +409,13 @@ class MockPayPal:
 
         return self._idempotent(request_id, reauth)
 
+    def order_capture(self, order_id) -> Capture | None:
+        self._maybe_fail()
+        if order_id not in self.orders:
+            raise PayPalError("RESOURCE_NOT_FOUND: order", status=404)
+        cid = next((cid for cid, c in self.captures.items() if c.get("order_id") == order_id), None)
+        return Capture(cid, self.captures[cid]["status"]) if cid else None
+
     def capture_authorization(
         self, authorization_id, *, amount, currency, payee_merchant_id, delayed, request_id
     ) -> Capture:
@@ -420,10 +440,22 @@ class MockPayPal:
                     "delayed": delayed,
                     "disbursed": auth["payee"] is not None and not delayed,
                     "refunded": False,
+                    "status": status,
                 }
             return Capture(cid, status)
 
         return self._idempotent(request_id, capture)
+
+    def capture_status(self, capture_id) -> Capture:
+        self._maybe_fail()
+        c = self.captures.get(capture_id)
+        if c is None:
+            raise PayPalError("RESOURCE_NOT_FOUND: capture", status=404)
+        return Capture(capture_id, c["status"])
+
+    def finish_capture(self, capture_id: str, status: str = "COMPLETED") -> None:
+        """Tests: PayPal finishes a PENDING capture (COMPLETED or DECLINED) without telling us."""
+        self.captures[capture_id]["status"] = status
 
     def void_authorization(self, authorization_id, *, payee_merchant_id, request_id) -> None:
         def void():
@@ -532,6 +564,13 @@ class MockPayPal:
             inv["status"] = "CANCELLED"
 
         self._idempotent(request_id, cancel)
+
+    def invoice_status(self, invoice_id) -> str:
+        self._maybe_fail()
+        inv = self.invoices.get(invoice_id)
+        if inv is None:
+            raise PayPalError("RESOURCE_NOT_FOUND: invoice", status=404)
+        return INVOICE_STATUS.get(inv["status"], "OPEN")
 
     def verify_webhook(self, headers, event) -> bool:
         return headers.get("paypal-transmission-sig") == MOCK_WEBHOOK_SIGNATURE
@@ -744,6 +783,13 @@ class SandboxPayPal:
         capture = order.purchase_units[0].payments.captures[0]
         return Capture(capture.id, capture.status)
 
+    def order_capture(self, order_id) -> Capture | None:
+        order = self._sdk_call(self._sdk.orders.get_order, {"id": order_id})
+        units = getattr(order, "purchase_units", None) or []
+        payments = getattr(units[0], "payments", None) if units else None  # the SDK leaves absent fields unset
+        captures = getattr(payments, "captures", None) or []
+        return Capture(captures[-1].id, captures[-1].status) if captures else None
+
     def _create_order(
         self, intent, reference_id, description, amount, currency, payee_merchant_id, return_url, cancel_url, request_id
     ) -> CreatedOrder:
@@ -810,6 +856,10 @@ class SandboxPayPal:
                 "body": body,
             },
         )
+        return Capture(capture.id, capture.status)
+
+    def capture_status(self, capture_id) -> Capture:
+        capture = self._sdk_call(self._sdk.payments.get_captured_payment, {"capture_id": capture_id})
         return Capture(capture.id, capture.status)
 
     def void_authorization(self, authorization_id, *, payee_merchant_id, request_id) -> None:
@@ -992,6 +1042,10 @@ class SandboxPayPal:
             request_id=request_id,
             json={"send_to_recipient": True, "send_to_invoicer": False},
         )
+
+    def invoice_status(self, invoice_id) -> str:
+        data = self._call("GET", f"/v2/invoicing/invoices/{invoice_id}")
+        return INVOICE_STATUS.get(data.get("status", ""), "OPEN")
 
     def verify_webhook(self, headers, event) -> bool:
         if not self._webhook_id:
