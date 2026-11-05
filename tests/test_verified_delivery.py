@@ -443,3 +443,11 @@ def test_milestone_section_defaults_to_full_view(client, draft):
 
 def test_levels_are_ordered_least_to_most_disclosed():
     assert [v.rank for v in EvidenceVisibility] == [0, 1, 2, 3]
+
+
+def test_review_queue_flags_a_second_opinion_disagreement(client, draft):
+    _, m2, ctx = setup(client, draft, auto_release=True, reviewer=True)
+    fund(client, m2, ctx)
+    upload(client, m2, ctx, content=REPORT + " Scores for section B: TODO.")
+    [item] = client.get(f"/orgs/{ctx['payer_org']}/review-queue", headers=h(ctx["payer"])).json()
+    assert item["milestone_id"] == m2 and item["verdict_met"] and item["second_opinion_disagreed"]

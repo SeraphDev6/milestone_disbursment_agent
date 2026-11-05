@@ -13,12 +13,19 @@ export function Timeline({ events, names }: { events: AuditEventRead[]; names: A
       {events.map((e, i) => {
         const to = e.to_status && e.to_status in MILESTONE_STAMPS ? MILESTONE_STAMPS[e.to_status as keyof typeof MILESTONE_STAMPS] : null;
         const why = (e.detail?.reason ?? e.detail?.note ?? e.detail?.error) as string | undefined;
+        const doubted = e.detail?.skeptic_disagrees_on as string[] | undefined;
+        const skepticFailed = e.detail?.skeptic_error as string | undefined;
         return (
           <li key={i} className={s.tlItem}>
             <time className={s.tlWhen} dateTime={e.at}>{dateTime(e.at)}</time>
             <span className={s.tlWhat}>{actionText(e.action)} {to && <Stamp spec={to} flat explain={false} />}</span>
             <span className={s.tlWho}>{actorText(e.actor, names)}</span>
             {why && <span style={{ fontSize: "var(--text-sm)" }}>“{why}”</span>}
+            {doubted?.length ? (
+              <span style={{ fontSize: "var(--text-sm)" }}>Second opinion disagreed on {doubted.join(", ")}</span>
+            ) : skepticFailed ? (
+              <span style={{ fontSize: "var(--text-sm)" }}>Second opinion couldn't run, so a person decides</span>
+            ) : null}
           </li>
         );
       })}

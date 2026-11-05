@@ -2459,6 +2459,12 @@ export interface components {
             verdict_met: boolean | null;
             /** Verdict Confidence */
             verdict_confidence: number | null;
+            /**
+             * Second Opinion Disagreed
+             * @description The skeptic pass disagreed with the verifier (or couldn't run), which is why it's in review.
+             * @default false
+             */
+            second_opinion_disagreed?: boolean;
         };
         /** ReviewOutcome */
         ReviewOutcome: {

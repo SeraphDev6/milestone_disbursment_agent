@@ -80,12 +80,13 @@ function LoadDemo({ onLoaded, hasRecord }: { onLoaded: (r: DemoRecord) => void; 
   const qc = useQueryClient();
   const [signed, setSigned] = useState<"signed" | "unsigned">("signed");
   const [windowDays, setWindowDays] = useState<number>(0);
+  const [kind, setKind] = useState<"grant" | "withheld">("grant");
   const [step, setStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   async function run() {
     setError(null);
     try {
-      const r = await seedDemo({ signed: signed === "signed", disputeWindowDays: windowDays }, setStep);
+      const r = await seedDemo({ signed: signed === "signed", disputeWindowDays: windowDays, withheld: kind === "withheld" }, setStep);
       qc.clear();
       clearToasts();
       onLoaded(r.record);
@@ -111,9 +112,21 @@ function LoadDemo({ onLoaded, hasRecord }: { onLoaded: (r: DemoRecord) => void; 
               { id: "unsigned", label: "Before signing", description: "Walk through reviewing and signing the criteria." },
             ]}
           />
+          <RadioGroup
+            label="Who sees the work when"
+            value={kind}
+            onChange={(v) => {
+              setKind(v);
+              if (v === "withheld" && windowDays < 3) setWindowDays(3);
+            }}
+            options={[
+              { id: "grant", label: "Grant: funder sees evidence as it arrives", description: "Auto-release off; the funder or reviewer approves." },
+              { id: "withheld", label: "SOW-style: funder sees the work once paid", description: "Auto-release on with the skeptic's second opinion, and at least a 3-day dispute window after the work opens." },
+            ]}
+          />
           <NumberField
             label="Dispute window"
-            minValue={0}
+            minValue={kind === "withheld" ? 3 : 0}
             maxValue={14}
             value={windowDays}
             onChange={(v) => setWindowDays(v ?? 0)}
@@ -299,6 +312,7 @@ function Samples() {
     { key: "signIn", what: "214 attendees: passes the ≥ 200 check" },
     { key: "budget", what: "USD 9,800.50 spent: passes the ≤ 10,000 check" },
     { key: "report", what: "Tranche 2: final report dated before the deadline" },
+    { key: "unfinished", what: "SOW-style demo, tranche 2: fund it, upload with evidence date 2027-09-12; the verifier finds it met, the second opinion spots the TODO and sends it to review" },
     { key: "thin", what: "Thin evidence: lands in review" },
   ];
   function save(key: keyof typeof SAMPLES) {

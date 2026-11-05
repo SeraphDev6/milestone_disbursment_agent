@@ -86,6 +86,10 @@ class ReviewItem(SQLModel):
     side: Role
     verdict_met: bool | None
     verdict_confidence: float | None
+    second_opinion_disagreed: bool = Field(
+        default=False,
+        description="The skeptic pass disagreed with the verifier (or couldn't run), which is why it's in review.",
+    )
 
 
 class Portfolio(SQLModel):
@@ -309,6 +313,7 @@ def review_queue(org_id: str, principal: PrincipalDep, session: SessionDep) -> l
                     side=party.role,
                     verdict_met=v.met if v else None,
                     verdict_confidence=v.model_confidence if v else None,
+                    second_opinion_disagreed=bool(v and v.skeptic and (v.skeptic.disagrees_on or v.skeptic.error)),
                 )
             )
     return items

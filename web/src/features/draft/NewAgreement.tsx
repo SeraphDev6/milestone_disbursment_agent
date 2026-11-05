@@ -209,6 +209,11 @@ export function NewAgreement() {
                     onChange={(v) => set({ min_evidence_visibility: v })}
                   />
                 )}
+                {draft.deliverable_release === "on_capture" && (
+                  <p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", margin: 0 }}>
+                    With auto-release on, anything the model judges gets a second, skeptical check that looks for reasons it isn't met. Both must agree before money moves without a person.
+                  </p>
+                )}
                 {draft.deliverable_release === "on_capture" && draft.reviewer_emails.filter(Boolean).length === 0 && (
                   <Callout tone="warning" title="Consider a reviewer">
                     <p>If you also turn on auto-release when signing, you'd pay on the model's verdict alone. A reviewer can see the evidence for you.</p>
