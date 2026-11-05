@@ -1,6 +1,6 @@
 # Milestone Disbursement Engine
 
-Turns a grant or statement of work into tranches with checkable acceptance criteria, verifies evidence against them, and settles each tranche through PayPal. Built for the PayPal AI Hackathon (Nov 2026). Spec: [`docs/SPEC.md`](docs/SPEC.md).
+Turns a grant or statement of work into tranches with checkable acceptance criteria, verifies evidence against them, and settles each tranche through PayPal. Built for the PayPal AI Hackathon (Nov 2026). Spec: [`docs/SPEC.md`](docs/SPEC.md). Business plan: [`docs/BUSINESS.md`](docs/BUSINESS.md).
 
 **PayPal:** sandbox and live calls go through the APIMatic-generated [PayPal Server SDK](https://pypi.org/project/paypal-server-sdk/) for everything it covers (Orders v2 and Payments v2: create, authorize and capture orders; reauthorize, capture, void, refund) and through plain REST for what it doesn't (Payouts, referenced payouts, Partner Referrals, Invoicing, webhook verification). One httpx client serves both, so tests mock PayPal with a single transport.
 
