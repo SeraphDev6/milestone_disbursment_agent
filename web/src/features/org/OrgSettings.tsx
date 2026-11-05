@@ -9,6 +9,7 @@ import { useTitle } from "@/app/RouteAnnouncer";
 import { date, relative } from "@/domain/format";
 import { atLeast } from "@/domain/permissions";
 import { SSOSettings } from "./SSO";
+import { GitHubApp } from "./GitHubApp";
 import { PayPalAccount } from "./PayPalAccount";
 import { Busy, Button, Callout, ConfirmDialog, CopyButton, DataGrid, layout, PageHeader, PermissionNote, Select, Sheet, TextField, toast } from "@/design/components";
 
@@ -36,6 +37,7 @@ export function OrgSettings() {
       <PageHeader eyebrow={`You're ${org.role}`} title={org.orgName} lede="Your organization's details, the people who act for it, and the API keys integrations and agents use." />
       <Details />
       <PayPalAccount />
+      <GitHubApp />
       <Members />
       <SSOSettings />
       {admin ? <ApiKeys /> : <Sheet title="API keys"><PermissionNote>Managing API keys needs admin or above in {org.orgName}; you're a {org.role}.</PermissionNote></Sheet>}

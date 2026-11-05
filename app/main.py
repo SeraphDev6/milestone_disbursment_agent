@@ -15,9 +15,11 @@ from app.db import make_engine, make_sessionmaker, migrate
 from app.integrations.crypto import SecretBox
 from app.integrations.email import make_mailer
 from app.integrations.github import GitHubClient
+from app.integrations.github_app import make_github_app
 from app.integrations.oidc import OIDCClient, lookup_txt
 from app.integrations.paypal import make_gateway
 from app.services import ServiceError
+from app.services.github_app import publish_checks
 from app.services.notifications import NOTIFIER, Notifier
 from app.services.outbound import resolve_host, run_every, start_delivery_loop
 from app.services.ratelimit import RateLimited, RateLimiter
@@ -96,6 +98,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     app.state.sessionmaker, settings.outbound_interval_seconds, allow_http=settings.is_mock
                 )
             )
+        if settings.outbound_interval_seconds > 0 and app.state.github_app is not None:  # PR check runs
+            stops.append(
+                run_every(
+                    "github-checks",
+                    app.state.sessionmaker,
+                    max(settings.outbound_interval_seconds, 10.0),
+                    lambda session, now: publish_checks(
+                        session, app.state.github_app, app.state.notifier.tranche_link, now
+                    ),
+                )
+            )
         if settings.payouts_interval_seconds > 0:  # pay tranches whose dispute window closed; follow Payouts
             stops.append(
                 run_every(
@@ -140,6 +153,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
     app.state.ai = claude_runtime(key) if use_claude(settings) else mock_runtime()
     app.state.github = GitHubClient(token=settings.github_token)
+    app.state.github_app = make_github_app(settings)
     app.state.resolve = resolve_host
     app.state.mailer = make_mailer(settings)
     # Emailed links open the web app when there is one (or PUBLIC_APP_URL names a separate one), else the API's pages.

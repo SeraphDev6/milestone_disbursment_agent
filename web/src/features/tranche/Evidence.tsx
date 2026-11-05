@@ -40,12 +40,14 @@ async function fetchOriginal(e: EvidenceRead, orgId: string) {
 
 /** Evidence on file, numbered so verdict citations ([e1]) can point at it. */
 export function EvidenceList({
-  evidence, orgId, handovers = {}, checkHandover,
+  evidence, orgId, handovers = {}, checkHandover, repos,
 }: {
   evidence: EvidenceRead[];
   orgId: string;
   handovers?: Record<string, HandoverRecord>;
   checkHandover?: Parameters<typeof HandoverButton>[0]["check"];
+  /** Repos the viewer's GitHub App installations can read, offered in the handover check. */
+  repos?: string[];
 }) {
   if (!evidence.length) return <p style={{ color: "var(--text-secondary)" }}>No evidence on file yet.</p>;
   return (
@@ -85,7 +87,7 @@ export function EvidenceList({
                   Download original<span className="sr-only">: {e.title}</span>
                 </Button>
               )}
-              {checkHandover && isCommitPinned(e) && <HandoverButton evidence={e} check={checkHandover} />}
+              {checkHandover && isCommitPinned(e) && <HandoverButton evidence={e} check={checkHandover} repos={repos} />}
               {e.artifact_uris.map((u) => (
                 <a key={u} href={u} target="_blank" rel="noreferrer noopener">{new URL(u, location.origin).host}<span className="sr-only"> (opens in a new tab)</span></a>
               ))}

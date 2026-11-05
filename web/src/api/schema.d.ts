@@ -418,6 +418,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/orgs/{org_id}/github": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether the GitHub App is available and where it's installed */
+        get: operations["org_status_orgs__org_id__github_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orgs/{org_id}/github/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start installing the GitHub App for this org (admin) */
+        post: operations["start_install_orgs__org_id__github_install_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orgs/{org_id}/github/installations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Link the installation GitHub's callback vouched for to this org (the admin who started it) */
+        post: operations["confirm_install_orgs__org_id__github_installations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orgs/{org_id}/github/installations/{installation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Unlink an installation from this org (admin). Uninstalling the app itself is done on GitHub. */
+        delete: operations["unlink_orgs__org_id__github_installations__installation_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orgs/{org_id}/github/repos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Repos this org's GitHub App installations can read */
+        get: operations["org_repos_orgs__org_id__github_repos_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/github/app": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** GitHub App webhook intake (HMAC-verified) */
+        post: operations["app_webhook_webhooks_github_app_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agreements/extract-text": {
         parameters: {
             query?: never;
@@ -1346,6 +1448,14 @@ export interface components {
             /** @description on_capture agreements: what the payer sees of these files before capture. */
             payer_visibility?: components["schemas"]["EvidenceVisibility"] | null;
         };
+        /** ClaimIn */
+        ClaimIn: {
+            /**
+             * Claim
+             * @description The github_claim GitHub's callback handed back.
+             */
+            claim: string;
+        };
         /**
          * Comparator
          * @enum {string}
@@ -1781,6 +1891,23 @@ export interface components {
              */
             unfunded: string;
         };
+        /** GitHubInstallationRead */
+        GitHubInstallationRead: {
+            /** Installation Id */
+            installation_id: number;
+            /**
+             * Account Login
+             * @description GitHub user or organization the app is installed on.
+             */
+            account_login: string;
+            /** Account Type */
+            account_type: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** GitHubIntegration */
         GitHubIntegration: {
             /** Integration Id */
@@ -1788,15 +1915,21 @@ export interface components {
             /** Repo */
             repo: string;
             /**
-             * Webhook Url
-             * @description Repo Settings > Webhooks > Payload URL.
+             * Via App
+             * @description Connected through the GitHub App: merged PRs arrive with no repo webhook.
+             * @default false
              */
-            webhook_url: string;
+            via_app?: boolean;
+            /**
+             * Webhook Url
+             * @description Repo Settings > Webhooks > Payload URL. None via the app.
+             */
+            webhook_url?: string | null;
             /**
              * Secret
-             * @description Repo Settings > Webhooks > Secret.
+             * @description Repo Settings > Webhooks > Secret. None via the app.
              */
-            secret: string;
+            secret?: string | null;
             /**
              * Content Type
              * @default application/json
@@ -1812,6 +1945,21 @@ export interface components {
             /** Labels */
             labels: components["schemas"]["MilestoneLabel"][];
         };
+        /** GitHubOrgStatus */
+        GitHubOrgStatus: {
+            /**
+             * App Available
+             * @description This deployment has a GitHub App orgs can install.
+             */
+            app_available: boolean;
+            /**
+             * App Slug
+             * @description The app's name on GitHub (github.com/apps/<slug>).
+             */
+            app_slug?: string | null;
+            /** Installations */
+            installations: components["schemas"]["GitHubInstallationRead"][];
+        };
         /** GitHubRegistration */
         GitHubRegistration: {
             /**
@@ -1819,6 +1967,12 @@ export interface components {
              * @description Repository as 'owner/name'.
              */
             repo: string;
+            /**
+             * Use App
+             * @description Connect through the GitHub App when one of your org's installations can read the repo (no webhook to configure). False forces the hand-configured repo webhook.
+             * @default true
+             */
+            use_app?: boolean;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1867,6 +2021,14 @@ export interface components {
              * @description 'same_commit', 'same_tree' or 'different'.
              */
             how: string;
+        };
+        /** InstallStarted */
+        InstallStarted: {
+            /**
+             * Install Url
+             * @description Open in the browser: GitHub's install page for the app.
+             */
+            install_url: string;
         };
         /** InvitationAccepted */
         InvitationAccepted: {
@@ -2426,6 +2588,16 @@ export interface components {
              * @description Agreement text it was drawn from.
              */
             source_quote: string;
+        };
+        /** RepoRead */
+        RepoRead: {
+            /**
+             * Repo
+             * @description owner/name
+             */
+            repo: string;
+            /** Installation Id */
+            installation_id: number;
         };
         /** ResolveIn */
         ResolveIn: {
@@ -3874,6 +4046,209 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PayPalAccountRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    org_status_orgs__org_id__github_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubOrgStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_install_orgs__org_id__github_install_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_install_orgs__org_id__github_installations_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClaimIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubInstallationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unlink_orgs__org_id__github_installations__installation_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                org_id: string;
+                installation_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    org_repos_orgs__org_id__github_repos_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    app_webhook_webhooks_github_app_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-github-event"?: string | null;
+                "x-github-delivery"?: string | null;
+                "x-hub-signature-256"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
                 };
             };
             /** @description Validation Error */

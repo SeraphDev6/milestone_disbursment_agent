@@ -17,6 +17,9 @@ import type {
   AgreementCreate,
   EvidenceCreate,
   EvidenceVisibility,
+  GitHubInstallationRead,
+  GitHubOrgStatus,
+  GitHubRepo,
   HandoverCheck,
   HandoverResult,
   MilestoneDraft,
@@ -528,6 +531,41 @@ export function useLedger(agreementId: string, orgId: string, refreshKey?: unkno
 }
 
 // --- payee PayPal account (partner onboarding) -----------------------------------------------
+
+/** Whether this deployment has a GitHub App, and where this org installed it. */
+export function useGitHubStatus(orgId: string) {
+  return useQuery({
+    queryKey: ["org", orgId, "github"],
+    queryFn: () => call(api.GET("/orgs/{org_id}/github", { params: { path: { org_id: orgId } } })) as Promise<GitHubOrgStatus>,
+  });
+}
+
+/** Repos this org's installations can read (empty when there's no app or no installation). */
+export function useGitHubRepos(orgId: string, enabled = true) {
+  return useQuery({
+    queryKey: ["org", orgId, "github", "repos"],
+    queryFn: () => call(api.GET("/orgs/{org_id}/github/repos", { params: { path: { org_id: orgId } } })) as Promise<GitHubRepo[]>,
+    enabled,
+  });
+}
+
+export function useGitHubActions(orgId: string) {
+  const qc = useQueryClient();
+  const p = { params: { path: { org_id: orgId } } };
+  const done = () => qc.invalidateQueries({ queryKey: ["org", orgId, "github"] });
+  return {
+    install: useMutation({ mutationFn: () => call(api.POST("/orgs/{org_id}/github/install", p)) as Promise<{ install_url: string }> }),
+    confirm: useMutation({
+      mutationFn: (claim: string) => call(api.POST("/orgs/{org_id}/github/installations", { ...p, body: { claim } })) as Promise<GitHubInstallationRead>,
+      onSuccess: done,
+    }),
+    unlink: useMutation({
+      mutationFn: (installationId: number) =>
+        call(api.DELETE("/orgs/{org_id}/github/installations/{installation_id}", { params: { path: { org_id: orgId, installation_id: installationId } } })),
+      onSuccess: done,
+    }),
+  };
+}
 
 /** The org's connected PayPal account, or null when it has never started connecting. */
 export function usePayPalAccount(orgId: string, waiting = false) {

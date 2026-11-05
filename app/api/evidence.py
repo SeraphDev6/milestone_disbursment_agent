@@ -25,7 +25,7 @@ from app.models import (
     StoredFile,
     VerdictRead,
 )
-from app.services import disclosure, verification
+from app.services import disclosure, github_app, verification
 from app.services.access import AccessError, Action
 from app.services.packet import milestone_section
 
@@ -244,10 +244,15 @@ def check_handover(
     pinned = ev.pinned_ref.lower()
     if not re.fullmatch(r"[0-9a-f]{40}", pinned):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "this evidence isn't pinned to a commit")
-    gh = request.app.state.github
+    state = request.app.state
+    orgs = [p.org_id or "" for p in access.party.agreement.parties]
+
+    def reader(repo: str):  # an installation on the agreement that can read it, else the server's token
+        return github_app.client_for_repo(state.github_app, state.github, session, orgs, repo)
+
     try:
         if body.repo and body.ref:
-            delivered = gh.commit(body.repo, body.ref)
+            delivered = reader(body.repo).commit(body.repo, body.ref)
             delivered_sha, delivered_tree = delivered["sha"].lower(), delivered["commit"]["tree"]["sha"]
         elif body.delivered_sha:
             delivered_sha, delivered_tree = body.delivered_sha.lower(), None
@@ -256,7 +261,7 @@ def check_handover(
         how = "same_commit" if delivered_sha == pinned else "different"
         source = _PR_URL.match(ev.external_ref)
         if how == "different" and delivered_tree and source:
-            verified_tree = gh.commit(source.group(1), pinned)["commit"]["tree"]["sha"]
+            verified_tree = reader(source.group(1)).commit(source.group(1), pinned)["commit"]["tree"]["sha"]
             how = "same_tree" if verified_tree == delivered_tree else "different"
     except GitHubError as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"couldn't check on GitHub: {e}") from e

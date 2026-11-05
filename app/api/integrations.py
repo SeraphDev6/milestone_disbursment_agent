@@ -22,7 +22,7 @@ from app.models import (
     SubscriptionRead,
     WebhookEvent,
 )
-from app.services import verification
+from app.services import github_app, verification
 from app.services.access import Action
 from app.services.outbound import DestinationError, check_destination
 
@@ -34,6 +34,11 @@ router = APIRouter()
 
 class GitHubRegistration(SQLModel):
     repo: str = Field(..., description="Repository as 'owner/name'.")
+    use_app: bool = Field(
+        default=True,
+        description="Connect through the GitHub App when one of your org's installations can read the repo (no "
+        "webhook to configure). False forces the hand-configured repo webhook.",
+    )
 
 
 class MilestoneLabel(SQLModel):
@@ -45,8 +50,11 @@ class MilestoneLabel(SQLModel):
 class GitHubIntegration(SQLModel):
     integration_id: str
     repo: str
-    webhook_url: str = Field(..., description="Repo Settings > Webhooks > Payload URL.")
-    secret: str = Field(..., description="Repo Settings > Webhooks > Secret.")
+    via_app: bool = Field(
+        default=False, description="Connected through the GitHub App: merged PRs arrive with no repo webhook."
+    )
+    webhook_url: str | None = Field(None, description="Repo Settings > Webhooks > Payload URL. None via the app.")
+    secret: str | None = Field(None, description="Repo Settings > Webhooks > Secret. None via the app.")
     content_type: str = "application/json"
     events: list[str] = ["pull_request"]
     labels: list[MilestoneLabel]
@@ -66,6 +74,10 @@ def register_github(
         raise HTTPException(status.HTTP_409_CONFLICT, f"agreement is {a.status}")
     if not github.valid_repo(body.repo):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "repo must look like 'owner/name'")
+    installation_id = None
+    if body.use_app:
+        rows = github_app.installations(session, [access.party.org_id or ""])
+        installation_id = github_app.installation_for_repo(request.app.state.github_app, rows, body.repo)
     row = session.exec(
         select(Integration).where(
             Integration.agreement_id == a.id, Integration.kind == "github", Integration.target == body.repo
@@ -78,24 +90,43 @@ def register_github(
             target=body.repo,
             secret=secrets.token_hex(32),
             created_by=access.actor,
+            installation_id=installation_id,
         )
         session.add(row)
         session.flush()
-        record_audit(session, a.id, access.actor, "github_connected", detail={"repo": body.repo})
+        record_audit(
+            session,
+            a.id,
+            access.actor,
+            "github_connected",
+            detail={"repo": body.repo, "via_app": bool(installation_id)},
+        )
+        session.commit()
+    elif installation_id and row.installation_id != installation_id:
+        row.installation_id = installation_id  # switched to the app
+        record_audit(session, a.id, access.actor, "github_connected", detail={"repo": body.repo, "via_app": True})
         session.commit()
     base = request.app.state.settings.api_base_url
+    via_app = row.installation_id is not None
     return GitHubIntegration(
         integration_id=row.id,
         repo=row.target,
-        webhook_url=f"{base}/webhooks/github/{row.id}",
-        secret=row.secret,
+        via_app=via_app,
+        webhook_url=None if via_app else f"{base}/webhooks/github/{row.id}",
+        secret=None if via_app else row.secret,
         labels=[MilestoneLabel(milestone_id=m.id, title=m.title, label=github.label_for(m.id)) for m in a.milestones],
     )
 
 
-def _ingest_pr(state, integration_id: str, pr: github.MergedPR, milestone_ids: list[str]) -> None:
-    """Background: fetch CI and files from GitHub, store evidence per milestone, verify."""
-    evidence, facts = github.build_evidence(pr, state.github)
+def ingest_pr(state, integration_id: str, pr: github.MergedPR, milestone_ids: list[str]) -> None:
+    """Background: fetch CI and files from GitHub, store evidence per milestone, verify. Through the app, reads use
+    the installation's token and a check run on the merge commit follows each tranche."""
+    with state.sessionmaker() as session:
+        integration = session.get(Integration, integration_id)
+        installation_id = integration.installation_id if integration else None
+    app = getattr(state, "github_app", None)
+    api = app.client(installation_id) if app is not None and installation_id else state.github
+    evidence, facts = github.build_evidence(pr, api)
     actor = f"github:{pr.merged_by}"
     to_verify = []
     with state.sessionmaker() as session:
@@ -119,6 +150,9 @@ def _ingest_pr(state, integration_id: str, pr: github.MergedPR, milestone_ids: l
                 )
                 session.commit()
                 continue
+            if installation_id and app is not None:
+                github_app.track(session, m, installation_id, pr.repo, pr.merge_sha)
+                session.commit()
             if created and m.status == MilestoneStatus.evidence_received:
                 to_verify.append(m.id)
     for mid in to_verify:
@@ -176,7 +210,7 @@ async def github_webhook(
             )
         else:
             outcome = f"queued for {len(matched)} milestone(s)"
-            background.add_task(_ingest_pr, request.app.state, integration.id, pr, matched)
+            background.add_task(ingest_pr, request.app.state, integration.id, pr, matched)
     session.add(WebhookEvent(id=delivery_id, event_type=f"github.{x_github_event}", resource_id=None, outcome=outcome))
     session.commit()
     return {"outcome": outcome}

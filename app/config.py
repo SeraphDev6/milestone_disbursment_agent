@@ -39,6 +39,15 @@ class Settings(BaseSettings):
     # `payouts` job instead; with several app instances run that job from one scheduler only).
     payouts_interval_seconds: float = 300.0
     github_token: str | None = None  # optional; raises GitHub API rate limits and reads private repos
+    # GitHub App (register it with `uv run python scripts/github_app_setup.py`). With these set, orgs install the app
+    # instead of configuring repo webhooks, and GitHub reads use each installation's own short-lived token.
+    # Mock mode without them uses a stand-in app with a mock install page.
+    github_app_id: str | None = None
+    github_app_slug: str | None = None
+    github_app_client_id: str | None = None
+    github_app_client_secret: SecretStr | None = None
+    github_app_private_key: SecretStr | None = None  # PEM; literal "\n" sequences are accepted
+    github_app_webhook_secret: SecretStr | None = None
     paypal_client_id: str | None = None
     paypal_client_secret: SecretStr | None = None
     # Unset follows MODE: the sandbox API in sandbox mode, the live API in live mode.
@@ -110,6 +119,19 @@ class Settings(BaseSettings):
         if self.paypal_base_url:
             return self.paypal_base_url
         return "https://api-m.paypal.com" if self.mode is Mode.live else "https://api-m.sandbox.paypal.com"
+
+    @property
+    def github_app_configured(self) -> bool:
+        return all(
+            (
+                self.github_app_id,
+                self.github_app_slug,
+                self.github_app_client_id,
+                self.github_app_client_secret,
+                self.github_app_private_key,
+                self.github_app_webhook_secret,
+            )
+        )
 
     @property
     def is_mock(self) -> bool:

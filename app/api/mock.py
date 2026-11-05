@@ -1,14 +1,17 @@
 """Mock mode only: stand-ins for PayPal's pages, so the whole flow runs without keys."""
 
 import uuid
+from html import escape
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.api.browser import api_path
 from app.api.deps import MilestoneAccessDep, SessionDep
 from app.api.views import agreement_read, html_page
 from app.db import utcnow
+from app.integrations.github_app import MockGitHubApp
 from app.integrations.paypal import MockPayPal
 from app.models import AgreementRead, MilestoneStatus
 from app.services import settlement
@@ -83,3 +86,30 @@ def mark_verified(milestone_id: str, auth: MilestoneAccessDep, session: SessionD
     settlement.transition(session, m, MilestoneStatus.verified, access.actor, "mock_mark_verified")
     session.commit()
     return agreement_read(m.agreement)
+
+
+@router.get("/github/install", include_in_schema=False)
+def github_install_page(state: str) -> HTMLResponse:
+    """GitHub's install page for the app: pick the account and the repos, then GitHub sends you back."""
+    return HTMLResponse(
+        "<!doctype html><meta charset=utf-8><title>Install Milestone Ledger (mock GitHub)</title>"
+        "<body style='font-family:system-ui;max-width:32rem;margin:4rem auto'>"
+        "<h1>Install Milestone Ledger</h1><p>Mock GitHub: choose where to install the app.</p>"
+        "<form method=post style='display:grid;gap:.75rem'>"
+        f"<input type=hidden name=state value='{escape(state, quote=True)}'>"
+        "<label>Account <input name=account value='riverside-reads' required></label>"
+        "<label>Repositories (comma separated) "
+        "<input name=repos value='riverside-reads/literacy-site, riverside-reads/reading-app' size=48 required></label>"
+        "<button>Install &amp; authorize</button></form></body>"
+    )
+
+
+@router.post("/github/install", include_in_schema=False)
+def github_install(
+    request: Request, state: str = Form(...), account: str = Form(...), repos: str = Form(...)
+) -> RedirectResponse:
+    app: MockGitHubApp = request.app.state.github_app
+    names = [r.strip() for r in repos.split(",") if r.strip()]
+    installation_id, code = app.install(account.strip(), names)
+    query = urlencode({"code": code, "installation_id": installation_id, "setup_action": "install", "state": state})
+    return RedirectResponse(f"{api_path(request, '/github/app/callback')}?{query}", status_code=303)
