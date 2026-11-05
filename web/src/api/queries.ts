@@ -514,12 +514,13 @@ export function useTrancheActions(agreementId: string, milestoneId: string, orgI
       onSuccess: done,
     }),
     upload: useMutation({
-      mutationFn: ({ files, note, dated, payer_visibility }: { files: File[]; note?: string; dated?: string; payer_visibility?: EvidenceVisibility }) => {
+      mutationFn: ({ files, note, dated, payer_visibility, preview_pages }: { files: File[]; note?: string; dated?: string; payer_visibility?: EvidenceVisibility; preview_pages?: string }) => {
         const fd = new FormData();
         for (const f of files) fd.append("files", f, f.name);
         if (note) fd.append("note", note);
         if (dated) fd.append("dated", dated);
         if (payer_visibility) fd.append("payer_visibility", payer_visibility);
+        if (preview_pages) fd.append("preview_pages", preview_pages);
         return call(
           api.POST("/milestones/{milestone_id}/uploads", {
             ...m,

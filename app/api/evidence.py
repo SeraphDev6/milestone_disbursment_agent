@@ -34,7 +34,7 @@ from app.models import (
     StoredFile,
     VerdictRead,
 )
-from app.services import disclosure, github_app, handover, verification
+from app.services import disclosure, github_app, handover, previews, verification
 from app.services.access import AccessError, Action
 from app.services.packet import milestone_section
 
@@ -138,9 +138,21 @@ async def upload_evidence(
         EvidenceVisibility | None,
         Form(description="on_capture agreements: what the payer sees of these files before capture."),
     ] = None,
+    preview_pages: Annotated[
+        str | None,
+        Form(
+            max_length=40,
+            description="payer_visibility=preview: the PDF pages the payer's preview shows, e.g. '1-2,5' (at most "
+            "5; default the first two). Images and spreadsheets get their own previews.",
+        ),
+    ] = None,
 ) -> list[EvidenceAccepted]:
     access, m = auth
     access.require(Action.submit_evidence)
+    try:
+        pages = previews.parse_pages(preview_pages)
+    except previews.PreviewError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
     if len(files) > MAX_FILES:
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, f"up to {MAX_FILES} files per upload")
 
@@ -171,6 +183,9 @@ async def upload_evidence(
         row, created = verification.submit_evidence(
             session, m, item.evidence, source="upload", actor=access.actor, file_id=file_row.id
         )
+        if created and m.agreement.deliverable_release == DeliverableRelease.on_capture:
+            previews.make(session, m, row, pages)
+            session.commit()
         results.append(EvidenceAccepted(evidence_id=row.id, duplicate=not created, milestone_status=m.status))
     if any(not r.duplicate for r in results) and m.status == MilestoneStatus.evidence_received:
         _verify_later(background, request, m.id, "system:verifier")
@@ -266,6 +281,49 @@ def download_file(evidence_id: str, auth: EvidenceAccessDep, session: SessionDep
             "Access-Control-Expose-Headers": "X-Content-SHA256, X-Pinned-Ref",
         },
     )
+
+
+@router.get(
+    "/evidence/{evidence_id}/preview",
+    summary="Download the payer-facing preview of an evidence file (payer_visibility=preview)",
+    description="Derived from the original (watermarked PDF pages, a downscaled watermarked image, or a sheet's "
+    "headers and totals), never the original itself. The payer side may open it before capture when the item's "
+    "visibility is preview; the payee and reviewers always can, to see what the payer sees.",
+    response_class=Response,
+)
+def download_preview(evidence_id: str, auth: EvidenceAccessDep, session: SessionDep) -> Response:
+    access, ev = auth
+    access.require(Action.view)
+    m = session.get(Milestone, ev.milestone_id)
+    f = session.get(StoredFile, ev.preview_file_id) if ev.preview_file_id else None
+    if f is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "this evidence has no preview")
+    if disclosure.restricted(access.party.role, m) and ev.payer_visibility != EvidenceVisibility.preview:
+        raise AccessError("the payee didn't share a preview of this item with the payer side", 403)
+    if m.agreement.deliverable_release == DeliverableRelease.on_capture:
+        record_audit(
+            session,
+            m.agreement_id,
+            access.actor,
+            "preview_downloaded",
+            milestone_id=m.id,
+            detail={"evidence_id": ev.id, "side": str(access.party.role), "sha256": f.sha256},
+        )
+        session.commit()
+    return Response(
+        f.data,
+        media_type=f.media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="preview-{ev.id[:8]}{_ext(f.media_type)}"',
+            "X-Content-Type-Options": "nosniff",
+            "X-Content-SHA256": f.sha256,
+            "Access-Control-Expose-Headers": "X-Content-SHA256",
+        },
+    )
+
+
+def _ext(media_type: str) -> str:
+    return {"application/pdf": ".pdf", "image/jpeg": ".jpg", "text/plain": ".txt"}.get(media_type, "")
 
 
 _PR_URL = re.compile(r"^https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/(?:pull/\d+|commit/[0-9a-f]{40})")

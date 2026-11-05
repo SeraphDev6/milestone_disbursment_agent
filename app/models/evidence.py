@@ -1,6 +1,6 @@
 """Evidence, the files behind it, and the verdicts judged from it."""
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import JSON, Text, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
@@ -42,6 +42,15 @@ class EvidenceBase(SQLModel):
     artifact_uris: list[str] = Field(
         default_factory=list, sa_type=JSON, description="Links to the original files or pages."
     )
+    preview_url: str | None = Field(
+        default=None,
+        max_length=500,
+        description="A preview the payee hosts for the payer to try (a deployed build, a demo). Shown to the payer "
+        "side at any visibility, since giving one is the payee's choice to show it; it isn't checked.",
+    )
+    preview_expires_at: datetime | None = Field(
+        default=None, description="When the preview link stops being shown. Defaults to 30 days after submission."
+    )
 
 
 class Evidence(EvidenceBase, table=True):
@@ -58,12 +67,14 @@ class Evidence(EvidenceBase, table=True):
         default_factory=dict, sa_type=JSON, description="Facts an adapter established at intake, e.g. ci_green."
     )
     file_id: str | None = fk("files.id", optional=True)
+    # Derived from the original for payer_visibility=preview (app/services/previews.py); never the original.
+    preview_file_id: str | None = fk("files.id", optional=True)
     payer_visibility: EvidenceVisibility = Field(
         default=EvidenceVisibility.hash_only, sa_type=enum_type(EvidenceVisibility, 16)
     )
     received_at: datetime = timestamp()
 
-    file: StoredFile | None = Relationship()
+    file: StoredFile | None = Relationship(sa_relationship_kwargs={"foreign_keys": "Evidence.file_id"})
 
 
 class EvidenceCreate(EvidenceBase):
@@ -91,6 +102,11 @@ class EvidenceRead(SQLModel):
     check_results: dict[str, bool]
     artifact_uris: list[str] = Field(description="Links to the originals. Empty while withheld.")
     has_file: bool
+    has_preview: bool = Field(
+        default=False, description="A payer-facing preview exists and this caller may open it (/evidence/{id}/preview)."
+    )
+    preview_url: str | None = Field(default=None, description="The payee's preview link, while it hasn't expired.")
+    preview_expires_at: datetime | None = None
     received_at: datetime
     pinned_ref: str = Field(
         description="The commitment: content hash ('sha256:...') or commit SHA of exactly what was verified."
@@ -108,10 +124,14 @@ class EvidenceRead(SQLModel):
     )
 
     @classmethod
-    def from_row(cls, e: Evidence, *, withheld: bool = False) -> "EvidenceRead":
+    def from_row(cls, e: Evidence, *, withheld: bool = False, now: datetime | None = None) -> "EvidenceRead":
+        expires = e.preview_expires_at
+        live = e.preview_url if e.preview_url and (expires is None or now is None or _utc(expires) > now) else None
         return cls.model_validate(
             e,
             update={
+                "has_preview": e.preview_file_id is not None and (not withheld or e.payer_visibility == "preview"),
+                "preview_url": live,
                 "excerpt": None if withheld else e.content[:500],
                 "artifact_uris": [] if withheld else e.artifact_uris,
                 "has_file": e.file_id is not None,
@@ -119,6 +139,10 @@ class EvidenceRead(SQLModel):
                 "withheld": withheld,
             },
         )
+
+
+def _utc(dt: datetime) -> datetime:
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 class SkepticPass(SQLModel):

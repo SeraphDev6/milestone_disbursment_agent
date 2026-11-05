@@ -9,7 +9,7 @@ import { Results } from "./Verdict";
 import s from "./Tranche.module.css";
 
 /** Reads of the tranche's evidence: kept out of the history, listed here. */
-export const ACCESS_ACTIONS = new Set(["evidence_viewed", "evidence_downloaded", "deliverable_downloaded"]);
+export const ACCESS_ACTIONS = new Set(["evidence_viewed", "evidence_downloaded", "deliverable_downloaded", "preview_downloaded"]);
 
 const SIDES: Record<string, string> = { payer: "Payer side", payee: "Payee side", reviewer: "Reviewer" };
 
@@ -19,6 +19,7 @@ export function accessText(e: AuditEventRead): string {
     const n = Array.isArray(d.evidence_ids) ? d.evidence_ids.length : 0;
     return `Viewed ${n} item${n === 1 ? "" : "s"}, ${d.view === "filtered" ? "as withheld (verdict and hashes only)" : "in full"}`;
   }
+  if (e.action === "preview_downloaded") return "Opened the preview";
   return d.handover_id ? "Downloaded the handed-over source archive" : "Downloaded the original file";
 }
 

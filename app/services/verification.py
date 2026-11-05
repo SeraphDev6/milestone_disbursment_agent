@@ -8,7 +8,7 @@ The overall verdict is computed here (every criterion met and cited), never take
 """
 
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
@@ -47,6 +47,7 @@ ACCEPTS_EVIDENCE = {
     MilestoneStatus.verifying,
 }
 MAX_RERUNS = 3
+PREVIEW_LINK_DAYS = timedelta(days=30)  # how long a payee's preview link is shown, unless they set an expiry
 
 
 class VerificationError(ServiceError):
@@ -261,6 +262,8 @@ def submit_evidence(
             f"'{visibility}' is below that",
             422,
         )
+    if ev.preview_url and not ev.preview_url.startswith("https://"):
+        raise VerificationError("preview_url must be an https:// link", 422)
     pinned = pinned_ref or "sha256:" + hashlib.sha256(ev.content.encode()).hexdigest()
     external = ev.external_ref or pinned
     existing = next(
@@ -279,6 +282,7 @@ def submit_evidence(
             "check_results": check_results or {},
             "file_id": file_id,
             "payer_visibility": visibility,
+            "preview_expires_at": ev.preview_expires_at or (utcnow() + PREVIEW_LINK_DAYS if ev.preview_url else None),
         },
     )
     m.evidence.append(row)

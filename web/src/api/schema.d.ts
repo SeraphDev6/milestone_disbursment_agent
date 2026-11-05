@@ -868,6 +868,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/evidence/{evidence_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download the payer-facing preview of an evidence file (payer_visibility=preview)
+         * @description Derived from the original (watermarked PDF pages, a downscaled watermarked image, or a sheet's headers and totals), never the original itself. The payer side may open it before capture when the item's visibility is preview; the payee and reviewers always can, to see what the payer sees.
+         */
+        get: operations["download_preview_evidence__evidence_id__preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/evidence/{evidence_id}/handover": {
         parameters: {
             query?: never;
@@ -1541,6 +1561,11 @@ export interface components {
             dated?: string | null;
             /** @description on_capture agreements: what the payer sees of these files before capture. */
             payer_visibility?: components["schemas"]["EvidenceVisibility"] | null;
+            /**
+             * Preview Pages
+             * @description payer_visibility=preview: the PDF pages the payer's preview shows, e.g. '1-2,5' (at most 5; default the first two). Images and spreadsheets get their own previews.
+             */
+            preview_pages?: string | null;
         };
         /** ClaimIn */
         ClaimIn: {
@@ -1834,6 +1859,16 @@ export interface components {
              */
             artifact_uris?: string[];
             /**
+             * Preview Url
+             * @description A preview the payee hosts for the payer to try (a deployed build, a demo). Shown to the payer side at any visibility, since giving one is the payee's choice to show it; it isn't checked.
+             */
+            preview_url?: string | null;
+            /**
+             * Preview Expires At
+             * @description When the preview link stops being shown. Defaults to 30 days after submission.
+             */
+            preview_expires_at?: string | null;
+            /**
              * External Ref
              * @description Source-native id (file id, URL). Defaults to a content hash.
              */
@@ -1868,6 +1903,19 @@ export interface components {
             artifact_uris: string[];
             /** Has File */
             has_file: boolean;
+            /**
+             * Has Preview
+             * @description A payer-facing preview exists and this caller may open it (/evidence/{id}/preview).
+             * @default false
+             */
+            has_preview?: boolean;
+            /**
+             * Preview Url
+             * @description The payee's preview link, while it hasn't expired.
+             */
+            preview_url?: string | null;
+            /** Preview Expires At */
+            preview_expires_at?: string | null;
             /**
              * Received At
              * Format: date-time
@@ -5244,6 +5292,39 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_preview_evidence__evidence_id__preview_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Which of your orgs you act for, if you belong to several. */
+                "X-Org-Id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                evidence_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

@@ -103,7 +103,7 @@ def missing_for(v: Verdict | None, m: Milestone, role: Role | str | None) -> lis
 
 
 def evidence_read(e: Evidence, m: Milestone, role: Role | str | None) -> EvidenceRead:
-    return EvidenceRead.from_row(e, withheld=restricted(role, m))
+    return EvidenceRead.from_row(e, withheld=restricted(role, m), now=utcnow())
 
 
 def rationale_for_payer(m: Milestone, v: Verdict) -> str:

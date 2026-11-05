@@ -49,7 +49,7 @@ def _delivery_result(d: dict) -> str:
 
 
 # Reads of a tranche's evidence: list views (filtered or full), downloads of originals and handed-over archives.
-ACCESS_ACTIONS = ("evidence_viewed", "evidence_downloaded", "deliverable_downloaded")
+ACCESS_ACTIONS = ("evidence_viewed", "evidence_downloaded", "deliverable_downloaded", "preview_downloaded")
 
 
 def _access(e: AuditEvent) -> dict:
@@ -60,7 +60,7 @@ def _access(e: AuditEvent) -> dict:
         "actor": e.actor,
         "side": side,
         "action": e.action,
-        "view": d.get("view") or "full",
+        "view": d.get("view") or ("preview" if e.action == "preview_downloaded" else "full"),
         "evidence_ids": d.get("evidence_ids") or ([d["evidence_id"]] if d.get("evidence_id") else []),
         "handover_id": d.get("handover_id"),
         "sha256": d.get("sha256"),
@@ -70,6 +70,8 @@ def _access(e: AuditEvent) -> dict:
 def _access_what(x: dict) -> str:
     if x["action"] == "evidence_viewed":
         return f"viewed {len(x['evidence_ids'])} item(s), {x['view']} view"
+    if x["action"] == "preview_downloaded":
+        return f"opened the preview of {', '.join(x['evidence_ids'])}"
     target = f"archive {x['handover_id'][:8]}" if x.get("handover_id") else f"file {', '.join(x['evidence_ids'])}"
     return f"downloaded {target}, sha256 {str(x.get('sha256'))[:16]}"
 

@@ -38,6 +38,14 @@ async function fetchOriginal(e: EvidenceRead, orgId: string) {
   }
 }
 
+async function fetchPreview(e: EvidenceRead, orgId: string) {
+  try {
+    await download(`/evidence/${e.id}/preview`, `preview-${e.title}`, orgId);
+  } catch (err) {
+    toast("Couldn't open the preview", { body: errorMessage(err), tone: "error" });
+  }
+}
+
 /** Evidence on file, numbered so verdict citations ([e1]) can point at it. */
 export function EvidenceList({
   evidence, orgId, handovers = {}, checkHandover, repos,
@@ -80,12 +88,25 @@ export function EvidenceList({
               </div>
             )}
             {isCommitPinned(e) && <HandoverStatus record={handovers[e.id]} />}
+            {e.preview_url && e.preview_expires_at && (
+              <p className={s.evMeta}>Preview link given by the payee, not checked; shown until {dateTime(e.preview_expires_at)}</p>
+            )}
             {e.excerpt && <pre className={s.excerpt} aria-label={`First lines of ${e.title}`}>{e.excerpt}</pre>}
             <div className={layout.row}>
               {e.has_file && !e.withheld && (
                 <Button size="sm" icon="download" onPress={() => fetchOriginal(e, orgId)}>
                   Download original<span className="sr-only">: {e.title}</span>
                 </Button>
+              )}
+              {e.has_preview && (
+                <Button size="sm" icon="download" onPress={() => fetchPreview(e, orgId)}>
+                  Open preview<span className="sr-only">: {e.title}</span>
+                </Button>
+              )}
+              {e.preview_url && !e.artifact_uris.includes(e.preview_url) && (
+                <a href={e.preview_url} target="_blank" rel="noreferrer noopener">
+                  Try the payee's preview<span className="sr-only"> (opens in a new tab)</span>
+                </a>
               )}
               {checkHandover && isCommitPinned(e) && <HandoverButton evidence={e} check={checkHandover} repos={repos} />}
               {e.artifact_uris.map((u) => (
@@ -126,7 +147,7 @@ export function AddEvidence({
   onSubmitted: () => void;
   actions: {
     submit: { mutateAsync: (b: EvidenceCreate) => Promise<unknown>; isPending: boolean };
-    upload: { mutateAsync: (b: { files: File[]; note?: string; dated?: string; payer_visibility?: EvidenceVisibility }) => Promise<unknown>; isPending: boolean };
+    upload: { mutateAsync: (b: { files: File[]; note?: string; dated?: string; payer_visibility?: EvidenceVisibility; preview_pages?: string }) => Promise<unknown>; isPending: boolean };
     precheck: { mutateAsync: (e: EvidenceCreate[]) => Promise<VerdictRead>; isPending: boolean; data?: VerdictRead; reset: () => void };
   };
 }) {
@@ -141,6 +162,8 @@ export function AddEvidence({
   const [busy, setBusy] = useState<"precheck" | "submit" | null>(null);
   const [visibility, setVisibility] = useState<EvidenceVisibility | undefined>(minVisibility);
   const shown = minVisibility ? visibility : undefined;
+  const [previewPages, setPreviewPages] = useState("");
+  const pagesError = previewPages.trim() && !/^\s*\d+(\s*-\s*\d+)?(\s*,\s*\d+(\s*-\s*\d+)?)*\s*$/.test(previewPages) ? "Pages look like 1-2,5" : undefined;
 
   const files = basket.filter((b): b is Extract<Entry, { kind: "file" }> => b.kind === "file");
   const total = files.reduce((n, f) => n + f.file.size, 0);
@@ -212,7 +235,7 @@ export function AddEvidence({
       const written = basket.filter((b) => b.kind === "written");
       for (const w of written) await actions.submit.mutateAsync({ ...w.data, dated: w.data.dated ?? dated ?? undefined, payer_visibility: shown });
       if (files.length || note.trim()) {
-        if (files.length) await actions.upload.mutateAsync({ files: files.map((f) => f.file), note: note.trim() || undefined, dated: dated ?? undefined, payer_visibility: shown });
+        if (files.length) await actions.upload.mutateAsync({ files: files.map((f) => f.file), note: note.trim() || undefined, dated: dated ?? undefined, payer_visibility: shown, preview_pages: shown === "preview" && previewPages.trim() ? previewPages.trim() : undefined });
         else await actions.submit.mutateAsync({ evidence_type: "document", title: "Payee note", content: note.trim(), payer_visibility: shown });
       }
       toast("Evidence submitted", { body: "Checks run first, then the verifier. This page updates on its own." });
@@ -296,6 +319,9 @@ export function AddEvidence({
             onChange={(v) => setVisibility(v as EvidenceVisibility)}
             options={VISIBILITY_ORDER.slice(VISIBILITY_ORDER.indexOf(minVisibility)).map((id) => ({ id, ...VISIBILITY_LABEL[id] }))}
           />
+        )}
+        {shown === "preview" && basket.some((b) => b.kind === "file" && /\.pdf$/i.test(b.file.name)) && (
+          <TextField label="PDF pages in the preview" optional placeholder="1-2" description="Up to 5 pages, like 1-2,5. The first two if left empty. Use the evidence tab to check what the payer will see." value={previewPages} onChange={setPreviewPages} error={pagesError} figures />
         )}
 
         <div className={layout.row}>
