@@ -5,13 +5,15 @@ from datetime import UTC, date, datetime
 from sqlalchemy import JSON, Text, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
+from app.integrations.filecrypt import EncryptedBytes
 from app.models.columns import PydanticJSON, enum_type, fk, id_field, timestamp
 from app.models.criteria import CriterionResult
 from app.models.enums import EvidenceType, EvidenceVisibility
 
 
 class StoredFile(SQLModel, table=True):
-    """Original uploaded bytes. In the database for the hackathon; object storage later."""
+    """Original uploaded bytes, encrypted at rest (app/integrations/filecrypt.py). In the database for now; object
+    storage later. Retention (app/services/custody.py) may purge the bytes, keeping the hash and metadata."""
 
     __tablename__ = "files"
 
@@ -20,8 +22,9 @@ class StoredFile(SQLModel, table=True):
     media_type: str = Field(max_length=100)
     sha256: str = Field(max_length=64, index=True)
     size: int
-    data: bytes
+    data: bytes = Field(sa_type=EncryptedBytes)
     created_at: datetime = timestamp()
+    purged_at: datetime | None = timestamp(optional=True)  # bytes removed by retention; sha256 and size kept
 
 
 class EvidenceBase(SQLModel):
@@ -134,7 +137,7 @@ class EvidenceRead(SQLModel):
                 "preview_url": live,
                 "excerpt": None if withheld else e.content[:500],
                 "artifact_uris": [] if withheld else e.artifact_uris,
-                "has_file": e.file_id is not None,
+                "has_file": e.file is not None and e.file.purged_at is None,
                 "file_sha256": e.file.sha256 if e.file is not None else None,
                 "withheld": withheld,
             },

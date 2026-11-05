@@ -79,6 +79,7 @@ Two scheduled jobs and a few settings turn the mock demo into a deployment (all 
   - Contractor-owned repos (agreements that withhold work until capture): the work stays in the payee's private repo, a release or tag named for a tranche pins the commit, and once the tranche is paid the code goes to the client as a PR into their repo (they install the app on it), a source archive, or the contractor transferring the repo to the client, which the app watches for (by repo id, with the verified commit on the default branch). PRs and archives are checked against the verified commit's git tree first; a transfer completes any of the three. Handovers are worked by an in-process loop, or by the `deliver-webhooks` job.
   - Each PR's merge commit gets a "Milestone Ledger" check run that follows the tranche. It's posted by an in-process loop, or by the `deliver-webhooks` job when that loop is off.
   - The per-repo webhook still works without the app. Mock mode has a stand-in app with a mock install page.
+- **Custody of held work:** uploaded files are encrypted at rest (AES-256-GCM) with `FILE_ENCRYPTION_KEY`, or a key derived from `SECRET_KEY` when that isn't set. To turn on a dedicated key or rotate it, set the new key, list the previous ones in `FILE_ENCRYPTION_OLD_KEYS`, and run `python -m app.jobs encrypt-files` once (it also encrypts files stored before encryption existed). `RETENTION_DAYS` (off by default) has the `daily` job end custody of a closed tranche's originals that many days after its last activity, never within 180 days of capture (PayPal's chargeback window): `RETENTION_ACTION=delete` removes the files and evidence text and keeps their hashes, `payee_only` keeps them for the payee side alone.
 - **Live mode:** `MODE=live` uses PayPal's production API, pays connected payees only (never the platform route), and requires an https `PUBLIC_BASE_URL` and `PAYPAL_WEBHOOK_ID`. It also needs PayPal's partner approval and a BN code.
 - `uv run python scripts/paypal_sandbox_check.py` checks the PayPal credentials, the platform merchant id and the webhook subscription from `.env` without running the app (`--order` also creates a $1 hold link).
 - `uv run python scripts/sandbox_walkthrough.py` walks the whole wallet flow through a running sandbox-mode app (escrow, pay-now and Payouts), pausing wherever you act in PayPal: see [`docs/SANDBOX.md`](docs/SANDBOX.md).
@@ -155,6 +156,18 @@ Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
   model, prompt version and criteria hash needed to replay them. `GET /agreements/{id}/compliance-packet` exports an
   agreement's compliance packet (criteria, evidence hashes, verdicts, reviews, money movements).
 - **Secrets.** Org SSO client secrets are encrypted at rest; API keys and magic-link tokens are stored hashed.
+- **Held deliverables.** The engine holds the payee's evidence files to verify them and, where the agreement
+  withholds the work until payment, to release them at capture. What it does with them:
+  - **Who can open them:** the payee side and reviewers, always; the payer side only what the payee chose to show
+    (hashes, the verdict, quotes or a watermarked preview) until the tranche is captured, then the originals. The
+    verifier model reads them to judge the criteria. Platform operators can read the database; nobody else.
+  - **Every read is recorded:** which side viewed or downloaded which item, and whether it saw the withheld or
+    the full view. That record is the payee's dispute pack.
+  - **Storage:** in the database, encrypted at rest; object storage with short-lived links is planned.
+  - **Retention:** kept until the operator's `RETENTION_DAYS` after a tranche closes (never within 180 days of
+    capture), then deleted or kept for the payee only. Off by default, so files are kept until deleted.
+  - **Not done:** the engine doesn't take ownership of the work, use it for anything but verifying and releasing
+    it, train models on it, or share it beyond the agreement's parties and the verifier.
 - **Licensing.** The engine is AGPL-3.0. The SDK
   ([#12](https://github.com/SeraphDev6/milestone_disbursment_agent/issues/12)) will be permissively licensed so
   integrators can embed it.

@@ -114,6 +114,7 @@ class Milestone(MilestoneBase, table=True):
     captured_at: datetime | None = timestamp(optional=True)
     release_due_at: datetime | None = timestamp(optional=True)  # end of the dispute window
     revealed_at: datetime | None = timestamp(optional=True)  # on_capture: when the payer got the full evidence
+    custody_ended_at: datetime | None = timestamp(optional=True)  # retention ran: originals purged or payee-only
 
     agreement: "Agreement" = Relationship(back_populates="milestones")
     settlements: list["Settlement"] = Relationship(

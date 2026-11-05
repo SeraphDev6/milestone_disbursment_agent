@@ -34,7 +34,7 @@ from app.models import (
     StoredFile,
     VerdictRead,
 )
-from app.services import disclosure, github_app, handover, previews, verification
+from app.services import custody, disclosure, github_app, handover, previews, verification
 from app.services.access import AccessError, Action
 from app.services.packet import milestone_section
 
@@ -243,6 +243,8 @@ def download_file(evidence_id: str, auth: EvidenceAccessDep, session: SessionDep
         raise AccessError("the payee's files open to the payer side once this tranche is captured", 403)
     if ev.file is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "this evidence has no uploaded file")
+    if why := custody.blocked(m, ev.file, access.party.role):
+        raise HTTPException(status.HTTP_410_GONE, why)
     digest = hashlib.sha256(ev.file.data).hexdigest()
     matches = digest == ev.file.sha256
     payer_after_reveal = (
@@ -298,6 +300,8 @@ def download_preview(evidence_id: str, auth: EvidenceAccessDep, session: Session
     f = session.get(StoredFile, ev.preview_file_id) if ev.preview_file_id else None
     if f is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "this evidence has no preview")
+    if why := custody.blocked(m, f, access.party.role):
+        raise HTTPException(status.HTTP_410_GONE, why)
     if disclosure.restricted(access.party.role, m) and ev.payer_visibility != EvidenceVisibility.preview:
         raise AccessError("the payee didn't share a preview of this item with the payer side", 403)
     if m.agreement.deliverable_release == DeliverableRelease.on_capture:
@@ -423,6 +427,8 @@ def download_handover(handover_id: str, auth: HandoverAccessDep, session: Sessio
     f = session.get(StoredFile, row.file_id) if row.file_id else None
     if row.status != "delivered" or f is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no archive has been handed over for this yet")
+    if why := custody.blocked(m, f, access.party.role):
+        raise HTTPException(status.HTTP_410_GONE, why)
     digest = hashlib.sha256(f.data).hexdigest()
     record_audit(
         session,
