@@ -32,6 +32,16 @@ class Settings(BaseSettings):
     # new key and list the old ones (comma-separated) in FILE_ENCRYPTION_OLD_KEYS, then run `app.jobs encrypt-files`.
     file_encryption_key: SecretStr | None = None
     file_encryption_old_keys: SecretStr | None = None
+    # Where stored files' bytes live: the database, or an S3-compatible bucket (Cloudflare R2). With s3, set the
+    # bucket, endpoint (https://<account id>.r2.cloudflarestorage.com for R2) and an access key scoped to the bucket,
+    # then run `app.jobs encrypt-files` once to move files already in the database.
+    file_storage: Literal["database", "s3"] = "database"
+    s3_bucket: str | None = None
+    s3_endpoint_url: str | None = None
+    s3_access_key_id: str | None = None
+    s3_secret_access_key: SecretStr | None = None
+    s3_region: str = "auto"
+    s3_prefix: str = "files/"
     # Custody of held deliverables. Unset keeps originals for good. Set: this many days after a tranche closes
     # (settled, refunded, or its agreement cancelled, with no activity since), and never before PayPal's 180-day
     # chargeback window from capture ends, the `daily` job either deletes the original files and evidence text

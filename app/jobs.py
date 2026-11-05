@@ -5,8 +5,9 @@ daily             drop expired PayPal holds, close invoices unpaid past the time
 payouts           catch up on captures, payments and invoices PayPal finished without a webhook reaching us, pay
                   tranches whose dispute window closed and follow payouts in flight (hourly)
 deliver-webhooks  send due outbound webhooks and GitHub check runs once (when the in-process loops are off)
-encrypt-files     encrypt stored files kept in plain form or under an old key with FILE_ENCRYPTION_KEY (once,
-                  after turning encryption on or rotating the key)
+encrypt-files     encrypt stored files kept in plain form or under an old key with FILE_ENCRYPTION_KEY, and move
+                  files still in the database to the bucket when FILE_STORAGE=s3 (once, after turning encryption
+                  on, rotating the key or switching storage; safe to rerun)
 
 `daily` also ends custody of closed tranches' originals when RETENTION_DAYS is set (app/services/custody.py).
 """
@@ -17,7 +18,7 @@ import sys
 from app.api.spa import has_build
 from app.config import get_settings
 from app.db import make_engine, make_sessionmaker, migrate, utcnow
-from app.integrations import filecrypt
+from app.integrations import filecrypt, filestore
 from app.integrations.email import make_mailer
 from app.integrations.github_app import make_github_app
 from app.integrations.paypal import make_gateway
@@ -41,6 +42,7 @@ def main(argv: list[str]) -> int:
     engine = make_engine(settings.database_url)
     migrate.upgrade(engine)
     filecrypt.configure(filecrypt.FileCipher.from_settings(settings))
+    filestore.configure(filestore.from_settings(settings), settings.s3_prefix)
     if argv[0] == "migrate":
         print("database is at the latest migration")
         return 0
@@ -58,7 +60,7 @@ def main(argv: list[str]) -> int:
             if kept:
                 print(", ".join(f"{k}: {v}" for k, v in kept.items()))
         elif argv[0] == "encrypt-files":
-            print(f"encrypted {custody.encrypt_existing(session)} file(s)")
+            print(f"updated {custody.encrypt_existing(session)} file(s)")
         elif argv[0] == "payouts":
             counts = disburse_due(session, make_gateway(settings), now)
             print(", ".join(f"{k.replace('_', ' ')}: {v}" for k, v in counts.items()))

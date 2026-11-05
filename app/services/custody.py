@@ -10,8 +10,9 @@ PayPal's 180-day chargeback window (so the dispute pack still has the work), end
 - payee_only: nothing is removed, but only the payee side can open the originals, previews and handed-over
   archives from then on.
 
-Either way `custody_ended` is recorded and both sides are told. Files are encrypted at rest throughout
-(app/integrations/filecrypt.py); `encrypt_existing` converts files stored before that, or under an old key.
+Either way `custody_ended` is recorded and both sides are told; deleted files are removed from object storage too.
+Files are encrypted at rest throughout (app/integrations/filecrypt.py); `encrypt_existing` converts files stored
+before that or under an old key, and moves files from the database to the bucket (app/integrations/filestore.py).
 """
 
 from datetime import datetime, timedelta
@@ -20,7 +21,7 @@ from sqlalchemy import bindparam, func, text
 from sqlmodel import Session, select
 
 from app.db import as_utc, record_audit
-from app.integrations import filecrypt
+from app.integrations import filecrypt, filestore
 from app.models import (
     Agreement,
     AgreementStatus,
@@ -32,6 +33,7 @@ from app.models import (
     Role,
     StoredFile,
 )
+from app.services import files
 from app.services.notifications import notify_side, tranche_subject
 
 CHARGEBACK_WINDOW = timedelta(days=180)
@@ -98,7 +100,7 @@ def _end(session: Session, m: Milestone, action: str, now: datetime) -> int:
         for fid in sorted(file_ids):
             f = session.get(StoredFile, fid)
             if f is not None and f.purged_at is None and not _still_held(session, fid):
-                f.data, f.purged_at = b"", now
+                files.purge(f, now)
                 purged.append({"file_id": f.id, "sha256": f.sha256, "size": f.size})
     record_audit(
         session,
@@ -145,23 +147,45 @@ def blocked(m: Milestone, f: StoredFile | None, role: Role | str | None) -> str 
 
 
 def encrypt_existing(session: Session, batch: int = 50) -> int:
-    """Encrypt files stored in plain form, or under an old key, with the current key. Returns how many."""
+    """Bring every live file up to date: encrypted with the current key, and in object storage when FILE_STORAGE=s3.
+    Converts files stored in plain form or under an old key, and moves files still in the database to the bucket
+    (the column is emptied only after the object is written). Safe to rerun. Returns how many files changed."""
     c = filecrypt.cipher()
     if c is None:
         raise RuntimeError("no file encryption key is configured")
+    bucket = filestore.store()
     ids = [r[0] for r in session.connection().execute(text("SELECT id FROM files WHERE purged_at IS NULL"))]
     done = 0
     for start in range(0, len(ids), batch):
-        for fid, raw in session.connection().execute(
-            text("SELECT id, data FROM files WHERE id IN :ids").bindparams(bindparam("ids", expanding=True)),
+        rows = session.connection().execute(
+            text("SELECT id, storage_key, data FROM files WHERE id IN :ids").bindparams(
+                bindparam("ids", expanding=True)
+            ),
             {"ids": ids[start : start + batch]},
-        ):
-            blob = bytes(raw or b"")
-            if not blob or c.current(blob):
-                continue
-            session.connection().execute(
-                text("UPDATE files SET data = :d WHERE id = :id"), {"d": c.encrypt(c.decrypt(blob)), "id": fid}
-            )
+        )
+        for fid, key, raw in rows.all():
+            if key:
+                if bucket is None:
+                    raise RuntimeError("files are in object storage, but FILE_STORAGE isn't s3")
+                blob = bucket.get(key)
+                if c.current(blob):
+                    continue
+                bucket.put(key, c.encrypt(c.decrypt(blob)))
+            else:
+                blob = bytes(raw or b"")
+                if bucket is not None:
+                    key = filestore.key_for(fid)
+                    bucket.put(key, c.encrypt(c.decrypt(blob)))
+                    session.connection().execute(
+                        text("UPDATE files SET data = :d, storage_key = :k WHERE id = :id"),
+                        {"d": b"", "k": key, "id": fid},
+                    )
+                elif not blob or c.current(blob):
+                    continue
+                else:
+                    session.connection().execute(
+                        text("UPDATE files SET data = :d WHERE id = :id"), {"d": c.encrypt(c.decrypt(blob)), "id": fid}
+                    )
             done += 1
         session.commit()
     return done

@@ -15,7 +15,6 @@ each contractor repo. `run` works them, retrying with backoff:
 Money never waits on GitHub: capture only queues the row.
 """
 
-import hashlib
 import re
 from datetime import datetime, timedelta
 
@@ -35,7 +34,7 @@ from app.models import (
     Role,
     StoredFile,
 )
-from app.services import ServiceError
+from app.services import ServiceError, files
 from app.services import github_app as installs
 from app.services.notifications import notify_side, tranche_subject
 
@@ -310,20 +309,10 @@ def _open_pr(
 
 
 def _keep_archive(session: Session, row: GitHubHandover, archive: bytes) -> str:
-    digest = hashlib.sha256(archive).hexdigest()
-    f = session.exec(select(StoredFile).where(StoredFile.sha256 == digest)).first()
-    if f is None:
-        name = row.source_repo.split("/", 1)[1]
-        f = StoredFile(
-            filename=f"{name}-{row.pinned_sha[:12]}.tar.gz",
-            media_type="application/gzip",
-            sha256=digest,
-            size=len(archive),
-            data=archive,
-        )
-        session.add(f)
-        session.flush()
-    return f.id
+    name = row.source_repo.split("/", 1)[1]
+    return files.save(
+        session, archive, filename=f"{name}-{row.pinned_sha[:12]}.tar.gz", media_type="application/gzip"
+    ).id
 
 
 def _mismatch(session: Session, m: Milestone, row: GitHubHandover, expected: str, got: str, stage: str) -> None:

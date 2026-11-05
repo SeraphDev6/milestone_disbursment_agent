@@ -12,7 +12,6 @@ A preview that can't be made is recorded (`preview_failed`) and the evidence is 
 """
 
 import csv
-import hashlib
 import io
 from datetime import UTC, datetime
 
@@ -21,11 +20,12 @@ from pypdf import PdfReader, PdfWriter
 from pypdf.errors import PdfReadError
 from reportlab.lib.colors import Color
 from reportlab.pdfgen import canvas
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.db import record_audit
 from app.domain.checks import _pick_column, _rows
 from app.models import Evidence, EvidenceVisibility, Milestone, StoredFile
+from app.services import files
 
 MAX_PAGES = 5
 DEFAULT_PAGES = (1, 2)
@@ -66,9 +66,9 @@ def make(session: Session, m: Milestone, ev: Evidence, pages: list[int] | None =
         return None
     try:
         if f.media_type == "application/pdf":
-            data, media, name = pdf_preview(f.data, pages, label(m)), "application/pdf", "preview.pdf"
+            data, media, name = pdf_preview(files.read(f), pages, label(m)), "application/pdf", "preview.pdf"
         elif f.media_type.startswith("image/"):
-            data, media, name = image_preview(f.data, label(m)), "image/jpeg", "preview.jpg"
+            data, media, name = image_preview(files.read(f), label(m)), "image/jpeg", "preview.jpg"
         elif f.media_type in _SHEETS:
             data, media, name = sheet_preview(ev, m), "text/plain", "preview.txt"
         else:
@@ -77,12 +77,7 @@ def make(session: Session, m: Milestone, ev: Evidence, pages: list[int] | None =
         detail = {"evidence_id": ev.id, "reason": str(e)}
         record_audit(session, m.agreement_id, ev.submitted_by, "preview_failed", milestone_id=m.id, detail=detail)
         return None
-    digest = hashlib.sha256(data).hexdigest()
-    row = session.exec(select(StoredFile).where(StoredFile.sha256 == digest)).first() or StoredFile(
-        filename=f"{ev.title[:180]} ({name})", media_type=media, sha256=digest, size=len(data), data=data
-    )
-    session.add(row)
-    session.flush()
+    row = files.save(session, data, filename=f"{ev.title[:180]} ({name})", media_type=media)
     ev.preview_file_id = row.id
     return row
 

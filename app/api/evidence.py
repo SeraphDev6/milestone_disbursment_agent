@@ -6,7 +6,7 @@ from datetime import date
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, Response, UploadFile, status
-from sqlmodel import Field, SQLModel, select
+from sqlmodel import Field, SQLModel
 
 from app.api.deps import (
     EvidenceAccessDep,
@@ -35,6 +35,7 @@ from app.models import (
     VerdictRead,
 )
 from app.services import custody, disclosure, github_app, handover, previews, verification
+from app.services import files as stored
 from app.services.access import AccessError, Action
 from app.services.packet import milestone_section
 
@@ -171,15 +172,7 @@ async def upload_evidence(
 
     results = []
     for item in parsed:
-        file_row = session.exec(select(StoredFile).where(StoredFile.sha256 == item.sha256)).first() or StoredFile(
-            filename=item.evidence.title,
-            media_type=item.media_type,
-            sha256=item.sha256,
-            size=len(item.data),
-            data=item.data,
-        )
-        session.add(file_row)
-        session.flush()
+        file_row = stored.save(session, item.data, filename=item.evidence.title, media_type=item.media_type)
         row, created = verification.submit_evidence(
             session, m, item.evidence, source="upload", actor=access.actor, file_id=file_row.id
         )
@@ -245,7 +238,8 @@ def download_file(evidence_id: str, auth: EvidenceAccessDep, session: SessionDep
         raise HTTPException(status.HTTP_404_NOT_FOUND, "this evidence has no uploaded file")
     if why := custody.blocked(m, ev.file, access.party.role):
         raise HTTPException(status.HTTP_410_GONE, why)
-    digest = hashlib.sha256(ev.file.data).hexdigest()
+    data = stored.read(ev.file)
+    digest = hashlib.sha256(data).hexdigest()
     matches = digest == ev.file.sha256
     payer_after_reveal = (
         access.party.role == Role.payer and m.agreement.deliverable_release == DeliverableRelease.on_capture
@@ -273,7 +267,7 @@ def download_file(evidence_id: str, auth: EvidenceAccessDep, session: SessionDep
         raise HTTPException(status.HTTP_409_CONFLICT, "the stored file no longer matches what was verified")
     safe_name = "".join(ch for ch in ev.file.filename if ch.isalnum() or ch in "._- ")[:100] or "evidence"
     return Response(
-        ev.file.data,
+        data,
         media_type=ev.file.media_type,
         headers={
             "Content-Disposition": f'attachment; filename="{safe_name}"',
@@ -315,7 +309,7 @@ def download_preview(evidence_id: str, auth: EvidenceAccessDep, session: Session
         )
         session.commit()
     return Response(
-        f.data,
+        stored.read(f),
         media_type=f.media_type,
         headers={
             "Content-Disposition": f'attachment; filename="preview-{ev.id[:8]}{_ext(f.media_type)}"',
@@ -429,7 +423,8 @@ def download_handover(handover_id: str, auth: HandoverAccessDep, session: Sessio
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no archive has been handed over for this yet")
     if why := custody.blocked(m, f, access.party.role):
         raise HTTPException(status.HTTP_410_GONE, why)
-    digest = hashlib.sha256(f.data).hexdigest()
+    data = stored.read(f)
+    digest = hashlib.sha256(data).hexdigest()
     record_audit(
         session,
         m.agreement_id,
@@ -442,7 +437,7 @@ def download_handover(handover_id: str, auth: HandoverAccessDep, session: Sessio
     if digest != f.sha256:
         raise HTTPException(status.HTTP_409_CONFLICT, "the stored archive no longer matches what was handed over")
     return Response(
-        f.data,
+        data,
         media_type=f.media_type,
         headers={
             "Content-Disposition": f'attachment; filename="{f.filename}"',
