@@ -1,8 +1,9 @@
 # Render Blueprint: the web service (API + web app), Postgres, and the two scheduled jobs.
 #
 # Render prompts for every `sync: false` value when the Blueprint is first created (they can be left blank and
-# filled in later from the dashboard). MODE starts as mock so the demo works without keys; switch it to sandbox
-# (with the PayPal keys, ANTHROPIC_API_KEY and an email provider) when ready. One web instance runs the
+# filled in later from the dashboard). MODE is sandbox (PayPal sandbox, with the PayPal keys, ANTHROPIC_API_KEY and
+# Resend); set it to mock here for a demo without keys. The Blueprint auto-syncs, so a value changed only in the
+# dashboard is put back to what this file says on the next merge. One web instance runs the
 # outbound-webhook loop in-process; payouts and the daily sweep run as cron jobs here so several instances never
 # race on the same tranche (PAYOUTS_INTERVAL_SECONDS=0 on the web). Blueprint environment groups only take
 # literal values, so the secrets and the database link are repeated per service.
@@ -119,16 +120,16 @@ services:
       - key: S3_SECRET_ACCESS_KEY
         sync: false
 
-# Literal values shared by every service. Change MODE and EMAIL_PROVIDER here once the keys are in place.
+# Literal values shared by every service. Change them here, not in the dashboard: each sync resets them to these.
 envVarGroups:
   - name: milestone-engine-env
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.8"
       - key: MODE
-        value: mock
+        value: sandbox
       - key: EMAIL_PROVIDER
-        value: console
+        value: resend
       - key: EMAIL_FROM
         value: "Milestone Ledger <notify@mail.milestone-ledger.com>"
       # s3: files go to the R2 bucket set (S3_*) on the web and daily services; after the first deploy with it, run
