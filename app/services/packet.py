@@ -17,6 +17,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from sqlmodel import Session, select
 
 from app.db.audit import verify_chain
+from app.domain.criteria import weighted_share
 from app.models import Agreement, AuditEvent, LedgerEntry, Milestone, Role, SkepticPass
 from app.services import disclosure
 
@@ -119,6 +120,7 @@ def milestone_section(session: Session, m: Milestone, role: Role | str | None = 
                 "model": v.model,
                 "prompt_version": v.prompt_version,
                 "model_confidence": v.model_confidence,
+                "weighted_share": weighted_share(m.criteria, {r.criterion_id for r in v.criteria_results if r.met}),
                 "criteria_hash": v.criteria_hash,
                 "evidence_ids": v.evidence_ids,
                 "results": [r.model_dump(mode="json") for r in shown[v.id].criteria_results],

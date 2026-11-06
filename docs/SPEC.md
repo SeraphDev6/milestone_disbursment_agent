@@ -385,6 +385,17 @@ The engine and the escrow path are done by Nov 7; everything after that is surfa
 
 **Cut in this order if behind:** Zapier, email adapter, agent-as-payee, skeptic pass, dispute pack (keep the endpoint and state), generated SDKs (keep the PayPal Server SDK), invoice mode (keep it as a 10-second mention), AG Studio dashboard (keep the AG Grid ledger). Never cut: escrow release, server-derived verdict with citations, deterministic checks, review gate with role check, criteria lint, pre-check, audit log and compliance export, AG Grid ledger, the demo, the video.
 
+## Partial release (planned, #46)
+
+Each criterion has a `weight` (default 1), signed into the criteria hash. Every verdict reports `weighted_share`: the
+share of the tranche its met criteria account for by weight. Release is still all-or-nothing; the lint says so when
+weights differ. Paying the share needs the settlement core to track money per capture rather than per tranche:
+capture the share with `final_capture=false` (the hold keeps the remainder, up to 29 days; reauthorize once after
+day 3 as today), record a Settlement per capture with its amount, keep the tranche `funded` with `amount_released`
+until the remaining criteria are met and a final capture settles it, run the dispute window per capture, and show the
+split in the ledger and the compliance packet. Co-funded grants (#47) need the same per-capture model with one hold
+per funder; both wait for that redesign.
+
 ## Open questions
 
 - ~~Does Orders v2 AUTHORIZE with a third-party `payee` capture cleanly without partner onboarding?~~ No (`PAYEE_NOT_CONSENTED`); with partner onboarding, yes. Decided: direct route via partner onboarding, Payouts fallback.

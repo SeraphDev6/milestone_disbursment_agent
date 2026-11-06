@@ -2733,6 +2733,18 @@
               }
             ],
             "description": "Second opinion, run before an auto-release on deliverable_release=on_capture agreements."
+          },
+          "weighted_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The share of the tranche the met criteria account for, by criterion weight (1.0 when all are met). Reported for partial release; the release itself is still all-or-nothing.",
+            "title": "Weighted Share"
           }
         },
         "required": [

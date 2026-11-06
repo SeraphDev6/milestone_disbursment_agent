@@ -328,10 +328,34 @@ def lint_agreement(agreement: AgreementBase, *, reviewer_invited: bool = False) 
     return report
 
 
+def weighted_share(criteria: Sequence[Criterion], met_ids: set[str]) -> float:
+    """The share of a tranche its met criteria account for, by weight (1.0 when every criterion is met). What a
+    partial release would pay; today's release is still all-or-nothing, so this is reported, not paid."""
+    total = sum((Decimal(str(c.weight)) for c in criteria), start=Decimal(0))
+    if total <= 0:
+        return 0.0
+    met = sum((Decimal(str(c.weight)) for c in criteria if c.id in met_ids), start=Decimal(0))
+    return float(round(met / total, 4))
+
+
 def lint_tranches(total_amount: Decimal, milestones: Sequence[MilestoneBase]) -> LintReport:
     """Lint tranches on their own, e.g. extraction output before parties are known."""
     E, W = LintLevel.error, LintLevel.warning
     issues: list[LintIssue] = []
+
+    for mi, m in enumerate(milestones):
+        weights = {Decimal(str(c.weight)) for c in m.criteria}
+        if len(weights) > 1:
+            issues.append(
+                _issue(
+                    W,
+                    "weights_not_yet_paid",
+                    f"milestones[{mi}].criteria",
+                    "Criteria carry different weights, but release is all-or-nothing: a tranche pays in full when "
+                    "every criterion is met, and nothing before. The weights show the met share on the verdict.",
+                    "Keep the weights if the share is useful to see; split the tranche if parts should pay separately.",
+                )
+            )
 
     milestone_sum = sum((m.amount for m in milestones), start=Decimal(0))
     if milestone_sum != total_amount:
@@ -403,6 +427,10 @@ def criteria_hash(
     for m in milestones:
         data = MilestoneBase.model_validate(m).model_dump(mode="json")
         data["amount"] = f"{m.amount:.2f}"  # '10000' and '10000.00' (as read back from the DB) must hash the same
+        for c, raw in zip(m.criteria, data["criteria"], strict=True):
+            # Weights are signed too. Shortest form, so '1', '1.0' and '1.00' hash the same and the default weight
+            # keeps the hash agreements were signed with before weights were normalised.
+            raw["weight"] = str(Decimal(str(c.weight)).normalize())
         payload.append(data)
     if deliverable_release != DeliverableRelease.on_submit:
         # Only when set, so agreements signed before the setting existed keep their hash.

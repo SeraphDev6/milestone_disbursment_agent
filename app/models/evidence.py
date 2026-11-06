@@ -202,3 +202,8 @@ class Verdict(VerdictBase, table=True):
 class VerdictRead(VerdictBase):
     id: str = Field(description="Verdict id; review decisions refer to it in the audit log.")
     created_at: datetime = Field(description="When the verifier finished.")
+    weighted_share: float | None = Field(
+        default=None,
+        description="The share of the tranche the met criteria account for, by criterion weight (1.0 when all are "
+        "met). Reported for partial release; the release itself is still all-or-nothing.",
+    )

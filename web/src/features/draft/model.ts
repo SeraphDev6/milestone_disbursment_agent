@@ -29,6 +29,7 @@ export type CriterionForm = {
   unit: string;
   evidence_required: EvidenceType[];
   evidence_description: string;
+  weight: string;
   verification: VerificationMethod;
   check_id: string | null;
   due_by: string | null;
@@ -66,6 +67,7 @@ export function blankCriterion(): CriterionForm {
     unit: "",
     evidence_required: ["document"],
     evidence_description: "",
+    weight: "1",
     verification: "model",
     check_id: null,
     due_by: null,
@@ -106,6 +108,7 @@ function criterionFrom(c: CriterionDraft): CriterionForm {
     unit: c.measure.unit ?? "",
     evidence_required: c.evidence_required,
     evidence_description: c.evidence_description,
+    weight: c.weight === undefined || c.weight === null ? "1" : String(c.weight),
     verification: c.verification ?? "model",
     check_id: c.check_id ?? null,
     due_by: c.due_by ?? null,
@@ -146,6 +149,7 @@ export function criterionOut(c: CriterionForm): CriterionDraft {
     measure: { metric: c.metric.trim(), comparator: c.comparator, target: targetOut(c), unit: c.unit.trim() || null },
     evidence_required: c.evidence_required,
     evidence_description: c.evidence_description.trim(),
+    ...(c.weight.trim() && Number(c.weight) > 0 && Number(c.weight) !== 1 ? { weight: c.weight.trim() } : {}),
     verification: c.verification,
     check_id: c.verification === "check" ? c.check_id : null,
     due_by: c.due_by || null,
