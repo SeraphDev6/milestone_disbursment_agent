@@ -43,9 +43,15 @@ cd web && npx playwright test -c playwright.site.config.ts
 ## Deploy
 
 [`.github/workflows/pages.yml`](../.github/workflows/pages.yml) builds, runs the check and deploys to GitHub Pages on
-every push to `main` that touches the site (pull requests get the build and the check only). One-time setup in the
-repository: **Settings → Pages → Source: GitHub Actions**. Until a custom domain is set, the site is at
-`https://seraphdev6.github.io/milestone_disbursment_agent/`; all links are relative so it works at either place.
+every push to `main` that touches the site (pull requests get the build and the check only). Pages is enabled with
+**Source: GitHub Actions**. The site is at `https://www.seraphdev.com/milestone_disbursment_agent/` (project sites
+inherit the owner's user-site domain, so the `seraphdev6.github.io` address redirects there); all links are relative
+so it works at any base path.
+
+If a deploy ever sits in `deployment_queued` and times out, or fails at once with "Deployment cancelled": GitHub keys
+Pages deployments by commit, and a freshly created Pages site can refuse its first deployment. What cleared it on
+Nov 6, 2026: push the built `_site/` to a `gh-pages` branch, set the source to that branch, `POST /pages/builds`
+once so the site builds, then set the source back to GitHub Actions and re-run the workflow.
 
 ### Custom domain (milestone-ledger.com)
 
