@@ -39,7 +39,7 @@ CAST: list[tuple[Key, str]] = [("funder", "officer"), ("grantee", "director"), (
 
 
 FILES_DIR = Path(__file__).resolve().parents[2] / "demo"
-FileKey = Literal["agreement", "sign_in_pdf", "sign_in", "budget", "report", "report_draft", "thin"]
+FileKey = Literal["agreement", "sow", "sign_in_pdf", "sign_in", "budget", "report", "report_draft", "thin"]
 MEDIA = {".pdf": "application/pdf", ".csv": "text/csv", ".txt": "text/plain"}
 
 
@@ -61,6 +61,15 @@ FILES: list[DemoFile] = [
         what="The USD 30,000 grant between Harbor Foundation and Riverside Reads: two tranches, sign-in sheets and a "
         "budget report on the first, a final report with pre and post reading scores by September 30, 2027 on the "
         "second, and one clause ('meaningful community impact') nobody can check.",
+        media_type="application/pdf",
+        size=0,
+    ),
+    DemoFile(
+        key="sow",
+        name="Checkout redesign SOW.pdf",
+        role="agreement",
+        what="The 'same engine' beat: a USD 6,000 statement of work paid by invoice, two milestones each accepted when "
+        "a labelled pull request merges with CI green. Evidence arrives from GitHub, not from an upload.",
         media_type="application/pdf",
         size=0,
     ),

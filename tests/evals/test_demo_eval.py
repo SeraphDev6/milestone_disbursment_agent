@@ -190,6 +190,25 @@ class FixturesSatisfyExtractedChecks(Evaluator[Path, ExtractionResult]):
         }
 
 
+@dataclass
+class SowPaysOnMergedPr(Evaluator[Path, ExtractionResult]):
+    """The SOW: two milestones, 3,500 then 2,500 USD, each a ci_green check on a code change, nothing for a person."""
+
+    def evaluate(self, ctx: EvaluatorContext[Path, ExtractionResult]) -> dict[str, bool]:
+        x = ctx.output
+        crits = [c for m in x.milestones for c in m.criteria]
+        return {
+            "two_milestones_6k": [m.amount for m in x.milestones] == [Decimal("3500.00"), Decimal("2500.00")]
+            and x.total_amount == Decimal("6000.00"),
+            "each_milestone_has_ci_green": all(any(c.check_id == "ci_green" for c in m.criteria) for m in x.milestones),
+            "ci_green_on_code_change": all(
+                "code_change" in c.evidence_required for c in crits if c.check_id == "ci_green"
+            ),
+            "lint_ok": x.lint.ok,
+            "no_human_sign_off": all(c.verification != "human" for c in crits),
+        }
+
+
 def extraction_dataset() -> Dataset[Path, ExtractionResult]:
     return Dataset(
         name="demo-extraction",
@@ -204,7 +223,13 @@ def extraction_dataset() -> Dataset[Path, ExtractionResult]:
                     VagueClauseIsFlagged(),
                     FixturesSatisfyExtractedChecks(),
                 ],
-            )
+            ),
+            Case(
+                name="checkout-redesign-sow",
+                inputs=FILE["sow"],
+                metadata={"beat": "2:00-2:30 same engine"},
+                evaluators=[SowPaysOnMergedPr()],
+            ),
         ],
         evaluators=[MaxDuration(seconds=180)],
     )
@@ -214,16 +239,17 @@ def test_the_grant_agreement_extracts_into_the_demo_grant(runtime: AIRuntime):
     def task(path: Path) -> ExtractionResult:
         return extract(runtime, path.read_bytes(), "application/pdf", path.name)
 
-    report = extraction_dataset().evaluate_sync(task, max_concurrency=1)
+    report = extraction_dataset().evaluate_sync(task, max_concurrency=2)
     report.print(include_input=False, include_output=False, include_durations=True)
-    [case] = report.cases
-    x = case.output
-    print("\nopen questions:", *x.open_questions, sep="\n- ")
-    print("\ncriteria:")
-    for m in x.milestones:
-        for c in m.criteria:
-            print(f"- [{m.title}] {c.verification}/{c.check_id or '-'}: {c.statement}")
-    failed = {name: r.reason for name, r in case.assertions.items() if r.value is False}
+    failed = {}
+    for case in report.cases:
+        x = case.output
+        print(f"\n{case.name} open questions:", *x.open_questions, sep="\n- ")
+        print("criteria:")
+        for m in x.milestones:
+            for c in m.criteria:
+                print(f"- [{m.title}] {c.verification}/{c.check_id or '-'}: {c.statement}")
+        failed |= {f"{case.name}:{name}": r.reason for name, r in case.assertions.items() if r.value is False}
     assert not failed, f"the demo's beats that wouldn't work: {failed}"
 
 
