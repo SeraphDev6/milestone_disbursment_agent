@@ -72,6 +72,47 @@ export const DEMO_GRANT: Omit<AgreementCreate, "counterparty_email"> = {
   ],
 };
 
+/** The "same engine" beat: a contractor paid by invoice when a labelled PR merges with CI green. */
+export const DEMO_SOW: Omit<AgreementCreate, "counterparty_email"> = {
+  title: "Checkout redesign SOW",
+  total_amount: "6000.00",
+  currency: "USD",
+  settlement_mode: "invoice_on_verify",
+  auto_release_threshold: 0.85,
+  milestones: [
+    {
+      title: "Milestone 1: payment form",
+      amount: "3500.00",
+      due_date: "2027-03-15",
+      criteria: [
+        {
+          statement: "The payment form pull request is merged into main with every CI check passing",
+          measure: { metric: "CI check runs on the merged commit", comparator: "exists" },
+          evidence_required: ["code_change"],
+          evidence_description: "Merged pull request labelled for this milestone, with passing CI on its merge commit",
+          verification: "check",
+          check_id: "ci_green",
+        },
+      ],
+    },
+    {
+      title: "Milestone 2: order confirmation",
+      amount: "2500.00",
+      due_date: "2027-04-15",
+      criteria: [
+        {
+          statement: "The order confirmation pull request is merged into main with every CI check passing",
+          measure: { metric: "CI check runs on the merged commit", comparator: "exists" },
+          evidence_required: ["code_change"],
+          evidence_description: "Merged pull request labelled for this milestone, with passing CI on its merge commit",
+          verification: "check",
+          check_id: "ci_green",
+        },
+      ],
+    },
+  ],
+};
+
 /** Dates the grantee enters for evidence that carries none of its own (the CSV exports): the last workshop. */
 export const SIGN_IN_DATE = "2027-05-22";
 
@@ -81,7 +122,10 @@ export type DemoProgress = (step: string) => void;
 export type DemoPerson = { key: "funder" | "grantee" | "reviewer"; email: string; userId: string; orgId: string; orgName: string; role: string; does: string };
 /** What the engine made of the agreement document, kept so the demo page can show it. */
 export type DemoExtraction = { file: string; model: string; tranches: number; criteria: number; open_questions: string[]; lint: LintIssue[]; problems: string[] };
-export type DemoRecord = { agreementId: string; title: string; createdAt: string; people: DemoPerson[]; extraction?: DemoExtraction };
+/** The SOW's GitHub connection: what to add on the repo so a merged PR arrives as evidence. */
+export type DemoGitHub = { repo: string; via_app: boolean; webhook_url: string | null; secret: string | null; labels: { milestone_id: string; title: string; label: string }[] };
+export type DemoKind = "grant" | "withheld" | "sow";
+export type DemoRecord = { agreementId: string; title: string; createdAt: string; kind?: DemoKind; people: DemoPerson[]; extraction?: DemoExtraction; github?: DemoGitHub };
 
 const STORE = "mde.demo";
 
@@ -127,7 +171,7 @@ async function demoFiles(): Promise<DemoFile[]> {
 
 /** The grant as the extraction proposed it, ready for POST /agreements: nothing edited, so what the model got
  * wrong shows up as lint and open questions rather than being papered over. */
-export function agreementFromExtraction(x: ExtractionResult, people: { grantee: string; reviewer: string }, extra: Partial<AgreementCreate> = {}): AgreementCreate {
+export function agreementFromExtraction(x: ExtractionResult, people: { grantee: string; reviewer?: string }, extra: Partial<AgreementCreate> = {}): AgreementCreate {
   const milestones = tranchesOut(tranchesFrom(x.milestones));
   const total = x.total_amount ?? milestones.reduce((sum, m) => sum + Number(m.amount), 0).toFixed(2);
   return {
@@ -138,7 +182,7 @@ export function agreementFromExtraction(x: ExtractionResult, people: { grantee: 
     auto_release_threshold: 0.85,
     milestones,
     counterparty_email: people.grantee,
-    reviewer_emails: [people.reviewer],
+    reviewer_emails: people.reviewer ? [people.reviewer] : [],
     ...extra,
   };
 }
@@ -168,13 +212,21 @@ async function acceptWaiting(token: string, newOrg: { name: string; paypal_email
 }
 
 export type SeedOptions = {
-  /** document: extract the grant from the agreement PDF with the real model. ready: the typed-in grant. */
+  /** document: extract the agreement from its PDF with the real model. ready: the typed-in version. */
   source: "document" | "ready";
   signed: boolean;
   disputeWindowDays?: number;
-  /** SOW-style. The funder sees the work once paid, auto-release is on, and model-judged criteria need the
-   * skeptic's second opinion; needs a dispute window, so it's at least 3 days. */
-  withheld?: boolean;
+  /** grant: the literacy grant, funder sees evidence as it arrives. withheld: the same grant SOW-style, the funder
+   * sees the work once paid (auto-release on, skeptic, dispute window of at least 3 days). sow: the checkout
+   * redesign SOW, invoice on verify, evidence from merged pull requests. */
+  kind?: DemoKind;
+  /** sow: a GitHub repo (owner/name) the contractor connects; merged PRs carrying a milestone's label are evidence. */
+  repo?: string;
+};
+
+const PARTIES = {
+  grant: { payer: "Harbor Foundation", payee: "Riverside Reads", reviewer: "Sponsor Audit Partners" as string | null, payerRole: "Payer", payeeRole: "Payee" },
+  sow: { payer: "Acme Retail", payee: "Dev Co", reviewer: null as string | null, payerRole: "Client", payeeRole: "Contractor" },
 };
 
 export async function seedDemo(opts: SeedOptions, progress: DemoProgress) {
@@ -188,69 +240,96 @@ export async function seedDemo(opts: SeedOptions, progress: DemoProgress) {
   const funder = person("funder");
   const grantee = person("grantee");
   const reviewer = person("reviewer");
+  const kind: DemoKind = opts.kind ?? "grant";
+  const sow = kind === "sow";
+  const withheld = kind === "withheld";
+  const names = sow ? PARTIES.sow : PARTIES.grant;
   const emails = { funder: funder.email, grantee: grantee.email, reviewer: reviewer.email };
-  const harbor = await call(api.POST("/orgs", { body: { name: "Harbor Foundation", paypal_email: "funder@example.org" }, ...auth(funder.token) }));
+  const payerOrg = await call(api.POST("/orgs", { body: { name: names.payer, paypal_email: "funder@example.org" }, ...auth(funder.token) }));
 
   const terms: Partial<AgreementCreate> = {
-    dispute_window_days: opts.withheld ? Math.max(3, opts.disputeWindowDays ?? 0) : (opts.disputeWindowDays ?? 0),
-    ...(opts.withheld ? { deliverable_release: "on_capture" as const, min_evidence_visibility: "verdict_only" as const } : {}),
+    dispute_window_days: withheld ? Math.max(3, opts.disputeWindowDays ?? 0) : (opts.disputeWindowDays ?? 0),
+    ...(withheld ? { deliverable_release: "on_capture" as const, min_evidence_visibility: "verdict_only" as const } : {}),
+    ...(sow ? { settlement_mode: "invoice_on_verify" as const } : {}),
   };
+  const invitees = { grantee: emails.grantee, ...(names.reviewer ? { reviewer: emails.reviewer } : {}) };
   let body: AgreementCreate;
   let extraction: DemoExtraction | undefined;
   if (opts.source === "document") {
     const files = await demoFiles();
-    const doc = files.find((f) => f.key === "agreement");
+    const doc = files.find((f) => f.key === (sow ? "sow" : "agreement"));
     if (!doc) throw new Error("This server has no demo agreement document.");
-    progress(`Reading “${doc.name}”: the model proposes tranches and criteria (up to a minute)`);
+    progress(`Reading “${doc.name}”: the model proposes ${sow ? "milestones" : "tranches"} and criteria (up to a minute)`);
     const x = await extractAgreement(await fetchDemoFile(doc));
     extraction = summarizeExtraction(x, doc.name);
     if (!x.lint.ok) {
       const errors = (x.lint.issues ?? []).filter((i) => i.level === "error").map((i) => i.message);
-      throw new Error(`The proposed criteria have lint errors, so the grant can't be signed as proposed: ${errors.join("; ")}. Load the demo again, or draft it from the document yourself under New agreement.`);
+      throw new Error(`The proposed criteria have lint errors, so the agreement can't be signed as proposed: ${errors.join("; ")}. Load the demo again, or draft it from the document yourself under New agreement.`);
     }
     if (!x.milestones.length) throw new Error("The model proposed no tranches from the agreement document.");
-    body = agreementFromExtraction(x, emails, terms);
+    body = agreementFromExtraction(x, invitees, terms);
   } else {
-    body = { ...DEMO_GRANT, ...terms, counterparty_email: emails.grantee, reviewer_emails: [emails.reviewer] };
+    body = { ...(sow ? DEMO_SOW : DEMO_GRANT), ...terms, counterparty_email: emails.grantee, reviewer_emails: names.reviewer ? [emails.reviewer] : [] };
   }
 
-  progress("Drafting the grant and inviting the grantee and a reviewer");
-  const created = await call(api.POST("/orgs/{org_id}/agreements", { params: { path: { org_id: harbor.id } }, body, ...auth(funder.token) }));
+  progress(sow ? "Drafting the SOW and inviting the contractor" : "Drafting the grant and inviting the grantee and a reviewer");
+  const created = await call(api.POST("/orgs/{org_id}/agreements", { params: { path: { org_id: payerOrg.id } }, body, ...auth(funder.token) }));
   const aid = created.agreement.id;
 
-  progress("The grantee accepts for Riverside Reads");
-  const riverside = await acceptWaiting(grantee.token, { name: "Riverside Reads", paypal_email: "grantee@example.org" });
+  progress(`The ${names.payeeRole.toLowerCase()} accepts for ${names.payee}`);
+  const payeeOrg = (await acceptWaiting(grantee.token, { name: names.payee, paypal_email: "grantee@example.org" })).organization;
 
-  progress("The reviewer accepts for Sponsor Audit Partners");
-  const sponsor = await acceptWaiting(reviewer.token, { name: "Sponsor Audit Partners" });
+  let reviewerOrg: { id: string } | null = null;
+  if (names.reviewer) {
+    progress(`The reviewer accepts for ${names.reviewer}`);
+    reviewerOrg = (await acceptWaiting(reviewer.token, { name: names.reviewer })).organization;
+  }
 
   if (opts.signed) {
     progress("Everyone signs the criteria");
-    const a = await call(api.GET("/agreements/{agreement_id}", { params: { path: { agreement_id: aid } }, ...auth(funder.token, harbor.id) }));
+    const a = await call(api.GET("/agreements/{agreement_id}", { params: { path: { agreement_id: aid } }, ...auth(funder.token, payerOrg.id) }));
     const sig = { criteria_hash: a.criteria_hash };
     const confirm = (token: string, orgId: string, extra = {}) =>
       call(api.POST("/agreements/{agreement_id}/confirm", { params: { path: { agreement_id: aid } }, body: { ...sig, ...extra }, ...auth(token, orgId) }));
-    await confirm(grantee.token, riverside.organization.id);
-    await confirm(reviewer.token, sponsor.organization.id);
-    await confirm(funder.token, harbor.id, { auto_release_enabled: !!opts.withheld });
+    await confirm(grantee.token, payeeOrg.id);
+    if (reviewerOrg) await confirm(reviewer.token, reviewerOrg.id);
+    await confirm(funder.token, payerOrg.id, { auto_release_enabled: withheld || sow });
   }
 
-  // Keep all three people; the funder is active.
-  sessions.add(reviewer.token, reviewer.user, true);
+  let github: DemoGitHub | undefined;
+  const repo = opts.repo?.trim();
+  if (sow && repo) {
+    progress(`${names.payee} connects ${repo}`);
+    const g = await call(api.POST("/agreements/{agreement_id}/integrations/github", { params: { path: { agreement_id: aid } }, body: { repo }, ...auth(grantee.token, payeeOrg.id) }));
+    github = { repo: g.repo, via_app: !!g.via_app, webhook_url: g.webhook_url ?? null, secret: g.secret ?? null, labels: g.labels };
+  }
+
+  // Keep every person; the payer is active.
+  if (reviewerOrg) sessions.add(reviewer.token, reviewer.user, true);
   sessions.add(grantee.token, grantee.user, true);
   sessions.add(funder.token, funder.user, true);
+  const people: DemoPerson[] = sow
+    ? [
+        { key: "funder", email: emails.funder, userId: funder.user.id, orgId: payerOrg.id, orgName: names.payer, role: "Client", does: "Signs the SOW, pays each invoice when a milestone's pull request merges green." },
+        { key: "grantee", email: emails.grantee, userId: grantee.user.id, orgId: payeeOrg.id, orgName: names.payee, role: "Contractor", does: "Connects the repo, merges labelled pull requests, gets paid by invoice." },
+      ]
+    : [
+        { key: "funder", email: emails.funder, userId: funder.user.id, orgId: payerOrg.id, orgName: names.payer, role: "Payer", does: "Drafts the criteria, funds each tranche, reviews verdicts, releases payment." },
+        { key: "grantee", email: emails.grantee, userId: grantee.user.id, orgId: payeeOrg.id, orgName: names.payee, role: "Payee", does: "Pre-checks and submits evidence, gets paid, can dispute a rejection." },
+      ];
+  if (reviewerOrg && names.reviewer) {
+    people.push({ key: "reviewer", email: emails.reviewer, userId: reviewer.user.id, orgId: reviewerOrg.id, orgName: names.reviewer, role: "Reviewer", does: "Signs the criteria, approves or rejects verdicts, can contest a payment." });
+  }
   const record: DemoRecord = {
     agreementId: aid,
     title: body.title,
     createdAt: new Date().toISOString(),
-    people: [
-      { key: "funder", email: emails.funder, userId: funder.user.id, orgId: harbor.id, orgName: "Harbor Foundation", role: "Payer", does: "Drafts the criteria, funds each tranche, reviews verdicts, releases payment." },
-      { key: "grantee", email: emails.grantee, userId: grantee.user.id, orgId: riverside.organization.id, orgName: "Riverside Reads", role: "Payee", does: "Pre-checks and submits evidence, gets paid, can dispute a rejection." },
-      { key: "reviewer", email: emails.reviewer, userId: reviewer.user.id, orgId: sponsor.organization.id, orgName: "Sponsor Audit Partners", role: "Reviewer", does: "Signs the criteria, approves or rejects verdicts, can contest a payment." },
-    ],
+    kind,
+    people,
     ...(extraction ? { extraction } : {}),
+    ...(github ? { github } : {}),
   };
   demoStore.set(record);
   progress("Done");
-  return { agreementId: aid, orgId: harbor.id, emails, record };
+  return { agreementId: aid, orgId: payerOrg.id, emails, record };
 }

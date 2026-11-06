@@ -7,6 +7,7 @@ const file = (name: string, mimeType: string) => ({ name, mimeType, buffer: read
 
 export const SAMPLES = {
   agreement: file("Riverside Literacy Grant Agreement.pdf", "application/pdf"),
+  sow: file("Checkout redesign SOW.pdf", "application/pdf"),
   signInPdf: file("Spring workshop sign-in sheets (signed).pdf", "application/pdf"),
   signIn: file("Spring workshop sign-in sheets (register).csv", "text/csv"),
   budget: file("Spring workshop budget report.csv", "text/csv"),
