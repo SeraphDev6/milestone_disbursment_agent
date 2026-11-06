@@ -101,7 +101,7 @@ def test_paypal_unreachable_leaves_the_capture_waiting(client, direct):
     _, m1, _, capture_id = pending_capture(client, direct)
     gw(client).finish_capture(capture_id)
     gw(client).fail_next = PayPalError("PayPal 503", status=503, ambiguous=True)
-    assert follow(client) == {"captures_followed": 0, "payments_followed": 0, "invoices_followed": 0}
+    assert follow(client) == {"captures_followed": 0, "payments_followed": 0, "invoices_followed": 0, "shares_paid": 0}
     assert tranche(client, m1).status == "settling"
     assert follow(client)["captures_followed"] == 1  # next run catches up
 

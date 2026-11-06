@@ -51,8 +51,10 @@ class PrecheckRequest(SQLModel):
 
 
 class ReviewRequest(SQLModel):
-    decision: Literal["approve", "reject"] = Field(
-        description="approve releases the tranche (it settles when funded); reject sends it back with what's missing."
+    decision: Literal["approve", "reject", "release_met"] = Field(
+        description="approve releases the tranche (it settles when funded); reject sends it back with what's "
+        "missing; release_met (agreements with partial_release) pays the share the verdict's met criteria account "
+        "for and sends the rest back."
     )
     note: str | None = Field(None, max_length=2000, description="Shown to the payee and kept in the audit log.")
 
@@ -501,21 +503,21 @@ def get_verdict(milestone_id: str, auth: MilestoneAccessDep) -> VerdictRead:
 @router.post(
     "/milestones/{milestone_id}/review",
     openapi_extra={"x-sdk-core": "reviewMilestone"},
-    summary="Payer (admin) or reviewer approves or rejects a verdict in review",
+    summary="Payer (admin) or reviewer approves, rejects, or pays the met share of a verdict in review",
 )
 def review(
     milestone_id: str, body: ReviewRequest, auth: MilestoneAccessDep, session: SessionDep, request: Request
 ) -> ReviewOutcome:
     access, m = auth
     access.require(Action.review)
-    if body.decision == "approve" and access.party.role != Role.reviewer and disclosure.reviewer_decides(m):
+    if body.decision != "reject" and access.party.role != Role.reviewer and disclosure.reviewer_decides(m):
         why = (
             "this agreement requires a reviewer's approval"
             if m.agreement.require_reviewer_approval
             else "the evidence is withheld from the payer until the tranche is paid, so its reviewer decides"
         )
         raise AccessError(f"{why}; the payer can still reject", 403)
-    verification.review(session, gateway(request), m, access.actor, body.decision == "approve", body.note, utcnow())
+    verification.review(session, gateway(request), m, access.actor, body.decision, body.note, utcnow())
     session.refresh(m)
     v = verification.latest_verdict(m)
     missing = [] if body.decision == "approve" else disclosure.missing_for(v, m, access.party.role)

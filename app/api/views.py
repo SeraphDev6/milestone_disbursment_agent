@@ -60,6 +60,12 @@ def pay_path(s) -> str | None:
     return path(s)
 
 
+def _money_so_far(m) -> dict:
+    from app.services.settlement import paid_criteria, refunded, released
+
+    return {"amount_released": released(m) - refunded(m), "criteria_paid": sorted(paid_criteria(m))}
+
+
 def _awaiting_approval(m) -> bool:
     """Funding started (an order exists) but the payer hasn't approved it in PayPal yet."""
     return (
@@ -104,7 +110,7 @@ def _reviewer_invited(row: Agreement) -> bool:
 
 
 def agreement_read(row: Agreement) -> AgreementRead:
-    current = criteria_hash(row.milestones, row.deliverable_release, row.min_evidence_visibility)
+    current = criteria_hash(row.milestones, row.deliverable_release, row.min_evidence_visibility, row.partial_release)
     return AgreementRead.model_validate(
         row,
         update={
@@ -127,6 +133,7 @@ def agreement_read(row: Agreement) -> AgreementRead:
                         "pay_path": pay_path(m.settlements[-1]) if m.settlements else None,
                         "refund_failed": _refund_failed(m),
                         "awaiting_approval": _awaiting_approval(m),
+                        **_money_so_far(m),
                     },
                 )
                 for m in row.milestones

@@ -194,6 +194,7 @@ class PayPalGateway(Protocol):
         payee_merchant_id: str | None,
         delayed: bool,
         request_id: str,
+        final: bool = True,  # final_capture=false leaves the rest of the authorization open for more captures
     ) -> Capture: ...
 
     def capture_status(self, capture_id: str) -> Capture: ...  # where a capture stands now (follows PENDING)
@@ -411,11 +412,15 @@ class MockPayPal:
     def reauthorize(self, authorization_id, *, amount, currency, payee_merchant_id, request_id) -> Authorization:
         def reauth():
             old = self.authorizations.get(authorization_id)
-            if old is None or old["status"] != "CREATED":
+            if old is None or old["status"] not in ("CREATED", "PARTIALLY_CAPTURED"):
                 raise PayPalError("AUTHORIZATION_NOT_REAUTHORIZABLE", status=422)
             self._act_for(old["payee"], payee_merchant_id)
+            if amount > old["amount"] - old.get("captured", Decimal(0)):
+                raise PayPalError("REAUTHORIZATION_AMOUNT_EXCEEDED: more than the remaining authorization", status=422)
             aid = self._id("AUTH")
-            self.authorizations[aid] = {**old, "reauthorized_from": authorization_id}
+            # The new authorization is for the remainder; what was already captured stays on the old one.
+            self.authorizations[aid] = {**old, "amount": amount, "captured": Decimal(0), "status": "CREATED"}
+            self.authorizations[aid]["reauthorized_from"] = authorization_id
             return Authorization(aid, "CREATED")
 
         return self._idempotent(request_id, reauth)
@@ -428,7 +433,7 @@ class MockPayPal:
         return Capture(cid, self.captures[cid]["status"]) if cid else None
 
     def capture_authorization(
-        self, authorization_id, *, amount, currency, payee_merchant_id, delayed, request_id
+        self, authorization_id, *, amount, currency, payee_merchant_id, delayed, request_id, final=True
     ) -> Capture:
         def capture():
             auth = self.authorizations.get(authorization_id)
@@ -440,10 +445,14 @@ class MockPayPal:
                 raise PayPalError("AUTHORIZATION_VOIDED", status=422)
             if delayed and auth["payee"] is None:
                 raise PayPalError("DELAYED_DISBURSEMENT_NOT_SUPPORTED: platform is the payee", status=422)
+            if auth.get("captured", Decimal(0)) + amount > auth["amount"]:
+                raise PayPalError("MAX_CAPTURE_AMOUNT_EXCEEDED: more than the authorized amount", status=422)
             status = self.next_capture_status
             cid = self._id("CAPTURE")
             if status in ("COMPLETED", "PENDING"):
-                auth["status"] = "CAPTURED"
+                # A non-final capture leaves the remainder authorized (PayPal: PARTIALLY_CAPTURED).
+                auth["captured"] = auth.get("captured", Decimal(0)) + amount
+                auth["status"] = "CAPTURED" if final else "PARTIALLY_CAPTURED"
                 self.captures[cid] = {
                     "authorization_id": authorization_id,
                     "amount": amount,
@@ -478,7 +487,7 @@ class MockPayPal:
     def void_authorization(self, authorization_id, *, payee_merchant_id, request_id) -> None:
         def void():
             auth = self.authorizations.get(authorization_id)
-            if auth is None or auth["status"] != "CREATED":
+            if auth is None or auth["status"] not in ("CREATED", "PARTIALLY_CAPTURED"):
                 raise PayPalError("AUTHORIZATION_NOT_VOIDABLE", status=422)
             self._act_for(auth["payee"], payee_merchant_id)
             auth["status"] = "VOIDED"
@@ -879,9 +888,9 @@ class SandboxPayPal:
         return Authorization(auth.id, auth.status)
 
     def capture_authorization(
-        self, authorization_id, *, amount, currency, payee_merchant_id, delayed, request_id
+        self, authorization_id, *, amount, currency, payee_merchant_id, delayed, request_id, final=True
     ) -> Capture:
-        body = CaptureRequest(amount=Money(currency_code=currency, value=f"{amount:.2f}"), final_capture=True)
+        body = CaptureRequest(amount=Money(currency_code=currency, value=f"{amount:.2f}"), final_capture=final)
         if delayed:
             body.payment_instruction = PaymentInstruction(disbursement_mode="DELAYED")
         capture = self._sdk_call(

@@ -77,6 +77,7 @@ export function Tranche() {
             {m.due_date && <span>Due {date(m.due_date)}</span>}
             {m.funded_at && !m.captured_at && <span>Hold placed {date(m.funded_at)}</span>}
             {m.captured_at && <span>Captured {date(m.captured_at)}</span>}
+            {m.amount_released && Number(m.amount_released) > 0 && Number(m.amount_released) < Number(m.amount) && <span>Released so far {money(m.amount_released, a.currency)} for {(m.criteria_paid ?? []).join(", ")}</span>}
             {a.deliverable_release === "on_capture" && <span>{m.revealed_at ? `Work opened to the payer ${date(m.revealed_at)}` : "Work opens to the payer once paid"}</span>}
             {m.payout_route && <span>{m.payout_route === "direct" ? `Paid straight to ${payeeName}'s PayPal` : `Paid through the platform to ${payeeName}`}</span>}
           </>

@@ -31,6 +31,7 @@ from app.models import (
     SettlementMode,
     SettlementStatus,
 )
+from app.services import settlement
 
 # Tranche statuses in which the payer's authorization should still be a live hold at PayPal.
 HOLD_LIVE = {
@@ -159,7 +160,9 @@ def reconcile(
         )
     ).all()
     for m in holds:
-        check(m, "authorization", m.paypal_authorization_id or "", f"hold ({m.status})", authorization, {"CREATED"})
+        # PARTIALLY_CAPTURED: a partial release took a share with final_capture=false; the rest is still held.
+        ok = {"CREATED", "PARTIALLY_CAPTURED"} if settlement.released(m) else {"CREATED"}
+        check(m, "authorization", m.paypal_authorization_id or "", f"hold ({m.status})", authorization, ok)
 
     settlements = session.exec(select(Settlement).where(col(Settlement.paypal_ref).is_not(None))).all()
     for s in settlements:

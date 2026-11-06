@@ -16,7 +16,7 @@ type Acts = ReturnType<typeof useTrancheActions>;
  * reason, so nobody wonders where a button went. Every money-moving action is confirmed in a dialog.
  */
 export function Actions({ a, m, seat, verdict, acts, rejected }: { a: AgreementRead; m: MilestoneRead; seat: Seat; verdict: VerdictRead | null; acts: Acts; rejected: boolean }) {
-  const [dialog, setDialog] = useState<null | "fund" | "void" | "release" | "approve" | "reject" | "dispute" | "payNow" | "contest" | "resolveRelease" | "resolveRefund">(null);
+  const [dialog, setDialog] = useState<null | "fund" | "void" | "release" | "approve" | "releaseMet" | "reject" | "dispute" | "payNow" | "contest" | "resolveRelease" | "resolveRefund">(null);
   const [contestReason, setContestReason] = useState("");
   const [resolveNote, setResolveNote] = useState("");
   const [note, setNote] = useState("");
@@ -35,6 +35,9 @@ export function Actions({ a, m, seat, verdict, acts, rejected }: { a: AgreementR
   const hasReviewer = a.parties.some((p) => p.role === "reviewer" && p.org_id);
   const withheldForReviewer = a.deliverable_release === "on_capture" && !m.revealed_at && a.reviewer_decides_withheld && hasReviewer;
   const reviewerOnly = approveBlockedByReviewerRule(seat, a.require_reviewer_approval, withheldForReviewer);
+  // Partial release: the criteria this verdict meets that no capture has paid for yet, and what they add.
+  const unpaidMet = a.partial_release && verdict && !verdict.met ? verdict.criteria_results.filter((r) => r.met && !(m.criteria_paid ?? []).includes(r.criterion_id)).map((r) => r.criterion_id) : [];
+  const shareAmt = verdict?.weighted_share != null ? money((Number(m.amount) * verdict.weighted_share - Number(m.amount_released ?? 0)).toFixed(2), a.currency) : null;
 
   async function run(label: string, fn: () => Promise<unknown>, body?: string) {
     try {
@@ -59,6 +62,7 @@ export function Actions({ a, m, seat, verdict, acts, rejected }: { a: AgreementR
       <div className={s.action}>
         <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
           <Button variant="primary" icon="check" isDisabled={!r.ok || !!reviewerOnly} onPress={() => setDialog("approve")}>Approve</Button>
+          {unpaidMet.length > 0 && <Button icon="arrow" isDisabled={!r.ok || !!reviewerOnly || !m.paypal_authorization_id} onPress={() => setDialog("releaseMet")}>Pay the met share{shareAmt ? ` (${shareAmt})` : ""}</Button>}
           <Button variant="danger" icon="cross" isDisabled={!r.ok} onPress={() => setDialog("reject")}>Reject</Button>
         </div>
         {reviewerOnly && r.ok && <PermissionNote>{reviewerOnly}</PermissionNote>}
@@ -196,6 +200,18 @@ export function Actions({ a, m, seat, verdict, acts, rejected }: { a: AgreementR
         confirmLabel="Approve"
         isPending={acts.review.isPending}
         onConfirm={() => run("Approved", () => acts.review.mutateAsync({ decision: "approve", note: note.trim() || null }))}
+      >
+        <TextArea label="Note" optional description="Kept in the audit record and shown to the payee." value={note} onChange={setNote} rows={3} maxLength={2000} />
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        isOpen={dialog === "releaseMet"}
+        onOpenChange={(o) => !o && setDialog(null)}
+        title="Pay the met share now?"
+        summary={<p style={{ margin: 0 }}>Release <strong>{shareAmt ?? "the share"}</strong> of <strong>{m.title}</strong> to {payee} for {unpaidMet.join(", ")}. The rest stays on hold until the remaining criteria are met; {payee} is told what's missing.</p>}
+        confirmLabel={shareAmt ? `Pay ${shareAmt}` : "Pay the share"}
+        isPending={acts.review.isPending}
+        onConfirm={() => run("Share released", () => acts.review.mutateAsync({ decision: "release_met", note: note.trim() || null }), "The remainder stays on hold for the criteria still to be met.")}
       >
         <TextArea label="Note" optional description="Kept in the audit record and shown to the payee." value={note} onChange={setNote} rows={3} maxLength={2000} />
       </ConfirmDialog>

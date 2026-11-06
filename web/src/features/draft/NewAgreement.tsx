@@ -225,6 +225,14 @@ export function NewAgreement() {
                 <Switch isSelected={draft.require_reviewer_approval} onChange={(v) => set({ require_reviewer_approval: v })} hint="Only an invited reviewer's approval can release a tranche in review, withheld or not. You can still reject.">
                   Require a reviewer's approval
                 </Switch>
+                <Switch
+                  isSelected={draft.partial_release}
+                  onChange={(v) => set({ partial_release: v })}
+                  isDisabled={draft.settlement_mode !== "escrow_release"}
+                  hint={draft.settlement_mode !== "escrow_release" ? "Needs escrow: shares are captured from the tranche's hold." : "When some criteria are met, pay the share of the tranche they account for by weight; the hold keeps the rest until the remaining criteria are met. Shares reach the payee when captured; the dispute window applies to the final payment. Both sides sign this setting."}
+                >
+                  Pay criteria as they are met (partial release)
+                </Switch>
               </div>
             </div>
           </Sheet>
@@ -280,6 +288,7 @@ export function NewAgreement() {
                 ["Auto-release", `Off until you sign; threshold ${percent(draft.auto_release_threshold)}`],
                 ["Dispute window", draft.settlement_mode === "escrow_release" && draft.dispute_window_days ? `${draft.dispute_window_days} day${draft.dispute_window_days === 1 ? "" : "s"} after each release` : "None: released payments go straight to the payee"],
                 ["Seeing the work", draft.deliverable_release === "on_capture" ? `Once each tranche is paid: you pay on the verdict (before that: ${VISIBILITY_LABEL[draft.min_evidence_visibility].label.toLowerCase()})` : "As the payee submits it"],
+                ["Partial release", draft.partial_release && draft.settlement_mode === "escrow_release" ? "On: each criterion's weighted share pays as it is met" : "Off: a tranche pays in full once every criterion is met"],
                 ["Payee invite", draft.counterparty_email],
                 ["Reviewers", draft.reviewer_emails.filter(Boolean).join(", ") || "None"],
               ]}

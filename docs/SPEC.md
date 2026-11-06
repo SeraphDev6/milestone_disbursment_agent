@@ -35,7 +35,7 @@ The pitch: **an evidence-to-payment engine for funders**, not a freelance escrow
 | 6 | **Replayable audit record.** Each verdict stores criteria hash, evidence ids, model and prompt version; export as a funder compliance packet | Candid/Vestri tie-in; audit trail competitors lack | Approved — log and export |
 | 7 | **Two settlement modes, one engine.** Escrow release or invoice-on-verify per agreement | Covers funders who won't pre-fund | Build (cut-list item) |
 | 8 | **Platform, not app.** Adapters in, outbound webhooks out, MCP, generated SDKs | APIMatic prize; Vestri integration | Build |
-| 9 | **Partial release.** Optional per-criterion weights release a pro-rata share when some criteria pass | Matches how grants actually pay | Later |
+| 9 | **Partial release.** Optional per-criterion weights release a pro-rata share when some criteria pass | Matches how grants actually pay | Built (`partial_release`, #46) |
 | 10 | **Co-funded grants.** Several funders per agreement, each with a share of each tranche | Real grant pattern; nobody models it | Later |
 
 ## Prize plan
@@ -98,7 +98,7 @@ A tranche never releases on "did the thing". It holds one or more `Criterion` ob
 | `evidence_description` | The specific artifact | "Signed sign-in sheets for each session, one row per attendee" |
 | `verification` | `check` (deterministic, from the registry), `model` (judged with citations) or `human` (never auto-releases) | check |
 | `check_id` | Registry check when `verification=check`: `ci_green`, `file_present`, `row_count`, `sheet_total`, `dated_by` ([`app/domain/checks.py`](../app/domain/checks.py)) | row_count |
-| `due_by`, `weight` | Optional earlier deadline; weight reserved for partial release later | — |
+| `due_by`, `weight` | Optional earlier deadline; relative weight, which sets the criterion's share of the tranche under partial release | — |
 
 A `measure` is required on every criterion, so "done" always names the thing counted and the target.
 
@@ -141,7 +141,7 @@ No money moves without a verdict, and no verdict below the gate moves money with
 - **Dispute:** after a rejection the payee may dispute; the milestone moves to `disputed` and the engine builds a dispute pack (timeline, criteria, verdicts, evidence, PayPal refs). Resolution is human and outside the engine for the hackathon.
 - **Pre-check:** the payee can run the verifier against draft evidence; the result is stored with `is_precheck=True` and never changes state.
 - **Overdue:** a `due_date` passing with no evidence moves the milestone to `overdue` and notifies both parties; no money moves.
-- **Partial completion:** out of scope for the hackathon (all criteria or nothing). Weighted partial release is a later differentiator.
+- **Partial completion:** off by default (all criteria or nothing). With `partial_release` on the agreement, a verdict that meets some criteria can pay their weighted share; see "Partial release" below.
 - **Idempotency:** evidence dedupes on `(source, external_ref, pinned_ref)`. Capture keys are `{milestone_id}-{attempt}`, payout keys `{milestone_id}-payout-{attempt}`, refund keys `{milestone_id}-refund-{attempt}`, all sent as `PayPal-Request-Id`, so a retried call on the same attempt never pays twice. Payouts answers a reused `sender_batch_id` with an error rather than the original response; that is treated as "already submitted" and the payout webhook (matched on `sender_item_id` = our key) finishes it.
 - **Dispute window (contest after capture):** distinct from a payee disputing a rejection. `dispute_window_days` (0-14, default 0) on the agreement. A verified tranche is captured, then `held` until the window closes; the payer or a reviewer can contest it inside the window, which pauses the payout. Each side can only concede: the payer withdraws (payee is paid), the payee accepts (payer is refunded); a reviewer can decide either way. The payer can also waive the rest of the window and pay now.
 - **Deliverable release:** `deliverable_release` on the agreement, `on_submit` (default; the payer sees evidence as it arrives, usual for grants) or `on_capture` (full evidence opens once the tranche is captured, so the payer pays on the verdict; suggested for SOWs). Set at creation and included in the criteria hash when it isn't the default, so agreements signed before it existed keep their hash. Lint warns (`pays_on_model_alone`) when `on_capture` is combined with auto-release and no reviewer. With `on_capture`:
@@ -385,16 +385,41 @@ The engine and the escrow path are done by Nov 7; everything after that is surfa
 
 **Cut in this order if behind:** Zapier, email adapter, agent-as-payee, skeptic pass, dispute pack (keep the endpoint and state), generated SDKs (keep the PayPal Server SDK), invoice mode (keep it as a 10-second mention), AG Studio dashboard (keep the AG Grid ledger). Never cut: escrow release, server-derived verdict with citations, deterministic checks, review gate with role check, criteria lint, pre-check, audit log and compliance export, AG Grid ledger, the demo, the video.
 
-## Partial release (planned, #46)
+## Partial release (#46)
 
 Each criterion has a `weight` (default 1), signed into the criteria hash. Every verdict reports `weighted_share`: the
-share of the tranche its met criteria account for by weight. Release is still all-or-nothing; the lint says so when
-weights differ. Paying the share needs the settlement core to track money per capture rather than per tranche:
-capture the share with `final_capture=false` (the hold keeps the remainder, up to 29 days; reauthorize once after
-day 3 as today), record a Settlement per capture with its amount, keep the tranche `funded` with `amount_released`
-until the remaining criteria are met and a final capture settles it, run the dispute window per capture, and show the
-split in the ledger and the compliance packet. Co-funded grants (#47) need the same per-capture model with one hold
-per funder; both wait for that redesign.
+share of the tranche its met criteria account for by weight. With `partial_release` off (the default) release is
+all-or-nothing and the lint says so when weights differ (`weights_not_paid`). With it on (escrow only; signed into the
+criteria hash), the engine pays shares as criteria are met:
+
+- **Money per capture.** Every `Settlement` carries its `amount`, whether it is `final`, and the `criterion_ids` it
+  pays for; every `Disbursement` points at the capture whose money it moves and carries its amount. Ledger entries,
+  the funding summary, the ledger view and the compliance packet show the split. `MilestoneRead.amount_released` and
+  `criteria_paid` say where a tranche stands.
+- **The share.** `share_amount` = tranche amount × met weight ÷ total weight, rounded down to the cent; a capture
+  pays the difference between that and what earlier captures took, so the final capture settles the remainder to
+  the cent. The capture is sent with `final_capture=false`, so the hold keeps the rest (PayPal reports the
+  authorization as `PARTIALLY_CAPTURED`; reconciliation accepts that). The tranche returns to `funded` with the
+  share recorded (`partially_released`); when every criterion is paid for, the capture is final and the tranche
+  settles as today (`held` or `settled`).
+- **Who releases a share.** In review, `decision=release_met` pays the share the verdict's newly met criteria add and
+  sends the rest back (the response lists what's missing). With auto-release on, the gate pays a share on its own
+  when the met criteria clear the same bar as a full release (cited, not human-verified, confidence at or above the
+  threshold, and on `on_capture` agreements not doubted by the skeptic, which runs for partial candidates too); the
+  tranche passes through `needs_review` (`share_verified`) so a share that can't be captured waits there with the
+  verdict standing. The reviewer-decides rules apply to `release_met` as to `approve`.
+- **Paying the share.** A share reaches the payee when captured (direct route: the capture isn't delayed) or by
+  Payouts at once (platform route; failures are recorded as `share_payout_failed`, retried by `POST
+  /milestones/{id}/payout` and followed by the payouts job). The dispute window, contests and refunds apply to the
+  final capture only; the lint warns (`partial_shares_skip_window`) when partial release is combined with a window.
+- **The hold.** Reauthorization after the honor period and re-funding after expiry cover the remainder only; an
+  expired or voided hold records the remainder, and shares already paid stay paid. A declined share capture sends
+  the tranche back to `needs_review` (`partial_release_failed`); an ambiguous one is resumed with the same key by
+  `POST /milestones/{id}/release`.
+- **Unverified at PayPal (#38):** reauthorizing a partially captured authorization. The mock allows it for the
+  remainder; a sandbox run should confirm before relying on shares older than three days.
+
+Co-funded grants (#47) build on the same per-capture model with one hold per funder; that is the next redesign.
 
 ## Open questions
 
