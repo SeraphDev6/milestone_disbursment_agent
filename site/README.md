@@ -16,6 +16,9 @@ site/
   static/          copied as is: robots.txt, .nojekyll
 ```
 
+The Pages workflow also renders the SDK's core spec (`sdk/openapi-core.json`) with Redocly into `_site/sdk/reference.html`
+and copies the spec beside it. That page is Redocly's output, not one of ours, so it isn't part of the axe scan.
+
 Colour is never declared here. `build.mjs` copies `web/src/design/themes.css` (generated from `palette.ts`, every pair
 contrast-checked) and `tokens.css`, and the woff2 files for Newsreader, Atkinson Hyperlegible Next and Atkinson
 Hyperlegible Mono from `web/node_modules/@fontsource`, so the site and the app cannot drift apart and no font CDN is

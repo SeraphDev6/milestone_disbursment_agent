@@ -45,3 +45,8 @@ body into a `WebhookEvent`. It throws `WebhookVerificationError` with a stable `
 | `delivery_id` | `X-MDE-Delivery`, unique per attempt; store it to drop retries you already handled |
 
 `MILESTONE_STATUSES` and `AGREEMENT_STATUSES` list every status the engine emits.
+
+## License
+
+Apache-2.0 (see `LICENSE`). The engine itself is AGPL-3.0; the SDK packages, examples and fixtures under `sdk/` are
+Apache-2.0 so they can be used in closed products that integrate with a Milestone Ledger deployment.

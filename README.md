@@ -69,10 +69,39 @@ Everything is done as a signed-in person acting for an organization (see "Organi
 6. **Fund** (escrow): payer `POST /milestones/{id}/fund` returns an `approve_url` for the PayPal hold. Invoice mode skips this.
 7. **Evidence:** payee members pre-check (`/precheck`), then submit (`/evidence`, `/uploads`, merged GitHub PRs, or email forwarded to the agreement's address with the tranche's tag in the subject: `POST /agreements/{id}/integrations/email`, on deployments with `EMAIL_INBOX_DOMAIN`). Checks run first, then the AI verifier; `GET /milestones/{id}/verdict` shows results with citations.
 8. **Decide:** with auto-release on and a confident verdict, a funded tranche settles itself. Otherwise it waits in each side's `GET /orgs/{id}/review-queue` for a payer admin or reviewer to `POST /milestones/{id}/review` (with `require_reviewer_approval`, only a reviewer can approve). Rejections return what's missing; the payee can `/dispute`.
-9. **Agents (MCP):** point an MCP client (Claude Desktop, Claude Code, etc.) at `<base>/mcp`. It discovers the OAuth endpoints, opens a consent page where you sign in and pick the org it acts for, then gets org-bound tools (list agreements, status, evidence, verdicts, pre-check, submit evidence, review queue, portfolio, compliance packet, drafting). Headless agents use an org API key as the bearer token. Confirming, approving, releasing, funding and disputes stay with people.
+9. **Agents (MCP):** point an MCP client (Claude Desktop, Claude Code, etc.) at `<base>/mcp`. It discovers the OAuth endpoints, opens a consent page where you sign in and pick the org it acts for, then gets org-bound tools (list agreements, status, evidence, verdicts, pre-check, submit evidence, review queue, portfolio, compliance packet, drafting). An agent working as the payee starts with `open_work`: the tranches its org can earn, each with its criteria and what the last rejection asked for. Headless agents use an org API key as the bearer token. Confirming, approving, releasing, funding and disputes stay with people.
 10. **Track:** `GET /orgs/{id}/agreements?side=payer|payee|reviewer`, `GET /orgs/{id}/portfolio`, audit logs, compliance packets (JSON/PDF), and signed outbound webhooks via `POST /agreements/{id}/subscriptions`.
 
 The whole thing in one file: [`sdk/python/examples/quickstart.py`](sdk/python/examples/quickstart.py) or [`sdk/typescript/examples/quickstart.ts`](sdk/typescript/examples/quickstart.ts) run steps 2 to 8 against the hosted sandbox demo (or a local dev server) and print what happened; [`webhook_receiver.py`](sdk/python/examples/webhook_receiver.py) / [`webhook-receiver.ts`](sdk/typescript/examples/webhook-receiver.ts) show step 10 from the receiving end. A complete example draft is in [`tests/conftest.py`](tests/conftest.py), and [`tests/helpers.py`](tests/helpers.py) walks the whole sign-in, org and invitation flow.
+
+## Integrate
+
+Everything the web app does goes through the REST API, so your own system can too. The pieces, in the order you'll
+use them:
+
+- **Install the helpers:** `pip install ./sdk/python` or `npm install ./sdk/typescript` (`milestone-ledger`; on PyPI
+  and npm once #18 lands). Dependency-free; they verify webhooks and type the events. Calls to the API are plain HTTP
+  for now: the [core spec](sdk/openapi-core.json) is kept generator-ready for an APIMatic or OpenAPI client (#15).
+- **Read the reference:** [SDK reference](https://seraphdev6.github.io/milestone_disbursment_agent/sdk/reference.html)
+  (the core operations, with examples, error semantics and the conventions: bearer auth, `X-Org-Id`, idempotency,
+  money and time formats) and the full API at [app.milestone-ledger.com/api/docs](https://app.milestone-ledger.com/api/docs).
+- **The core flow,** by operation id: `extractAgreement` or `extractAgreementText` to propose tranches from a document,
+  `createAgreement` (as the payer org) to draft and invite, `getAgreement` and `confirmAgreement` for each party to
+  sign the criteria hash, `fundMilestone` for the PayPal hold (escrow), `precheckEvidence` and `submitEvidence` or
+  `uploadEvidence` for the payee, `getVerdict`, `reviewMilestone` when a person must decide, `releaseMilestone` and
+  `payoutMilestone` to move the money, `getLedger` for the record, and `createSubscription` for signed webhooks.
+- **Start from the quickstart:** [`sdk/python/examples/quickstart.py`](sdk/python/examples/quickstart.py) or
+  [`sdk/typescript/examples/quickstart.ts`](sdk/typescript/examples/quickstart.ts) run that flow end to end against the
+  hosted sandbox demo in about sixty lines.
+- **Hear about changes:** subscribe a URL to an agreement's events and verify every delivery with `verify_webhook` /
+  `verifyWebhook` (HMAC over timestamp and body, replay window, stable error codes). The example receivers
+  ([`webhook_receiver.py`](sdk/python/examples/webhook_receiver.py), [`webhook-receiver.ts`](sdk/typescript/examples/webhook-receiver.ts))
+  mark settled tranches paid in their own records and ignore retries they've handled.
+- **Let an agent do it:** the same operations are MCP tools at `/mcp` (OAuth for people, an org API key for headless
+  agents); see "Try the flow", step 9.
+
+Licensing: the engine is AGPL-3.0; everything under `sdk/` (packages, examples, fixtures, the core spec) is Apache-2.0,
+so integrating with a deployment never pulls your code under the AGPL.
 
 ## Running it for real
 
@@ -186,6 +215,16 @@ Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
     nobody else.
   - **Every read is recorded:** which side viewed or downloaded which item, and whether it saw the withheld or
     the full view. That record is the payee's dispute pack.
+- **Tamper-evident audit log.** Each audit event's SHA-256 covers its fields and the previous event's hash on the same
+  agreement, so the log is a chain: a row edited, removed or inserted later breaks it from that point. The compliance
+  packet opens with the chain's status and head hash, and `python -m app.jobs verify-audit` checks every agreement
+  (`seal-audit` hashes rows written before the chain existed).
+- **Access reviews.** `GET /orgs/{id}/access-review` (admin) lists who can act for an org: members and roles, pending
+  invitations, API keys (revoked ones included) and the MCP clients people have connected, with last use.
+- **Reconciliation.** The daily job (and `python -m app.jobs reconcile` on demand) reads every PayPal object the
+  ledger refers to back from PayPal (live holds, captures, invoices, pay-now orders, Payouts batches) and compares it
+  with what we recorded. A disagreement becomes a `reconciliation_mismatch` audit event on the tranche, once per object
+  and PayPal status, and a line in the job's output; nothing is changed on either side.
   - **Storage:** encrypted at rest by the app (AES-256-GCM), in the database or, with `FILE_STORAGE=s3`, a
     Cloudflare R2 (or any S3-compatible) bucket that only ever holds ciphertext. Every download goes through the
     app, which checks access, records the read and checks the file's hash; there are no direct bucket links.
@@ -217,4 +256,6 @@ privacy and AI governance) is tracked in
 
 ## License
 
-[AGPL-3.0-only](LICENSE).
+The engine is [AGPL-3.0-only](LICENSE). The SDK packages, examples, fixtures and the core spec under
+[`sdk/`](sdk/README.md) are Apache-2.0 (each package carries its own `LICENSE`), so a product that integrates with a
+Milestone Ledger deployment through the API, the SDK or webhooks is not an AGPL work.

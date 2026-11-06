@@ -31,7 +31,9 @@ INSTRUCTIONS = """\
 Milestone disbursement engine: grant and SOW payments released when evidence meets agreed criteria.
 You act for one organization with the rights of the person (or API key) that connected you.
 Typical flows: list_agreements -> get_agreement_status -> list_evidence / get_verdict / explain_milestone;
-payees: precheck_evidence before submit_evidence; payers: review_queue and get_portfolio.
+payees (an agent doing the work): open_work lists the tranches you can earn with their criteria and what a
+rejection asked for; precheck_evidence a draft, then submit_evidence; get_verdict shows what was decided.
+Payers: review_queue and get_portfolio.
 Confirming criteria, approving releases, funding and disputes are done by people in the app, not by tools.
 """
 
@@ -88,6 +90,7 @@ TOOL_HINTS: dict[str, tuple[str, bool, bool, bool]] = {
     "list_agreements": ("List agreements", True, True, False),
     "get_agreement_status": ("Get agreement status", True, True, False),
     "review_queue": ("Review queue", True, True, False),
+    "open_work": ("Open work (payee)", True, True, False),
     "get_portfolio": ("Funding portfolio", True, True, False),
     "list_evidence": ("List evidence", True, True, False),
     "get_verdict": ("Latest verdict", True, True, False),

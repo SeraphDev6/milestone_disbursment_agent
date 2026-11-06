@@ -4,6 +4,9 @@
   (`CORE_VERSION` in `app/sdk_spec.py`).
 - `python/`: `milestone-ledger`, webhook verification and typed events (`pip install ./sdk/python` until it's on PyPI).
 - `typescript/`: `milestone-ledger`, the same for Node 20+, Deno, Bun, Workers and browsers (`npm install ./sdk/typescript`).
+- **Reference:** the core spec rendered as a page, built by the Pages workflow from `openapi-core.json`:
+  [SDK reference](https://seraphdev6.github.io/milestone_disbursment_agent/sdk/reference.html) (the full API, with
+  every endpoint, is at [app.milestone-ledger.com/api/docs](https://app.milestone-ledger.com/api/docs)).
 - `fixtures/webhooks.json`: deliveries signed by the engine's own signer, which both SDKs' tests verify. Written by
   `scripts/sdk_fixtures.py`; `tests/test_sdk_webhooks.py` fails when it's stale.
 
@@ -20,7 +23,16 @@ MDE_BASE_URL=https://app.milestone-ledger.com/api npx tsx sdk/typescript/example
 # or locally: uv run python scripts/dev_server.py --port 8765, then MDE_BASE_URL=http://localhost:8765/api
 ```
 
+Both quickstarts double as contract tests: `tests/test_sdk_examples.py` runs the Python one against the hermetic app,
+and the TypeScript package's `test/quickstart.test.ts` runs the TypeScript one against a running engine when
+`MDE_BASE_URL` is set (CI starts `scripts/dev_server.py` and points it there), so an API change that breaks the core
+flow fails the build in both languages.
+
 `python/examples/webhook_receiver.py` and `typescript/examples/webhook-receiver.ts` are the smallest real integration:
 a receiver that verifies each delivery with the SDK and marks settled tranches paid in its own `paid.json`, ignoring
 retries it has already handled. `tests/test_sdk_examples.py` runs the Python quickstart against the hermetic app and
 the receiver against engine-signed deliveries; the TypeScript examples are typechecked with the package.
+
+## License
+
+Everything under `sdk/` is Apache-2.0 (each package carries the `LICENSE`); the engine is AGPL-3.0.

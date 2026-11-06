@@ -16,6 +16,7 @@ from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from sqlmodel import Session, select
 
+from app.db.audit import verify_chain
 from app.models import Agreement, AuditEvent, LedgerEntry, Milestone, Role, SkepticPass
 from app.services import disclosure
 
@@ -192,6 +193,11 @@ def build_packet(session: Session, a: Agreement, role: Role | str | None = None)
     released = sum((e.amount for e in ledger if e.kind in ("disbursed", "paid")), start=Decimal(0))
     return {
         "generated_at": datetime.now(UTC).isoformat(),
+        "integrity": {
+            **verify_chain(session, a.id).as_dict(),
+            "method": "Each audit event's SHA-256 covers its fields and the previous event's hash; "
+            "'verified' means every link recomputes. Quote 'head' to pin this packet's log.",
+        },
         "agreement": {
             "id": a.id,
             "title": a.title,
