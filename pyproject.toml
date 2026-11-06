@@ -43,7 +43,7 @@ sandbox = [
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = [".", "sdk/python"]
 testpaths = ["tests"]
 
 [tool.ruff]
