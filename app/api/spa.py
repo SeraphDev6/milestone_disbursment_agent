@@ -30,7 +30,10 @@ def make_spa(dist: Path = DIST) -> Starlette:
     async def page(request: Request) -> Response:
         path = request.path_params["path"]
         if path == "app" or path.startswith("app/"):  # where the app lived before it moved to the root
-            return RedirectResponse("/" + path[3:].lstrip("/"), status_code=308)
+            target = "/" + path[3:].lstrip("/")
+            if request.url.query:  # keep ?token=… on old emailed links
+                target += "?" + request.url.query
+            return RedirectResponse(target, status_code=308)
         candidate = (dist / path).resolve()
         if path and candidate.is_file() and dist in candidate.parents:
             return FileResponse(candidate)

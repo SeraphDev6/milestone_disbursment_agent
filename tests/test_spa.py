@@ -21,6 +21,9 @@ def test_client_routes_fall_back_to_index(tmp_path):
         r = c.get(path)
         assert r.status_code == 200 and "id=root" in r.text, path
     assert c.get("/app/o/1", follow_redirects=False).headers["location"] == "/o/1"  # the old prefix
+    # Links emailed while the app lived under /app keep their token across the redirect.
+    r = c.get("/app/auth/verify?token=mdl_x&keep=0", follow_redirects=False)
+    assert r.status_code == 308 and r.headers["location"] == "/auth/verify?token=mdl_x&keep=0"
 
 
 def test_files_are_served_and_missing_assets_404(tmp_path):
