@@ -24,6 +24,7 @@ from app.services.github_app import publish_checks
 from app.services.handover import run as run_handovers
 from app.services.notifications import NOTIFIER, Notifier
 from app.services.outbound import resolve_host, run_every, start_delivery_loop
+from app.services.paylinks import PAY_LINKS, PayLinks
 from app.services.ratelimit import RateLimited, RateLimiter
 from app.services.settlement import disburse_due
 
@@ -101,7 +102,9 @@ def create_app(
         if settings.auto_migrate:
             migrate.upgrade(engine)
         app.state.engine = engine
-        app.state.sessionmaker = make_sessionmaker(engine, info={NOTIFIER: app.state.notifier})
+        app.state.sessionmaker = make_sessionmaker(
+            engine, info={NOTIFIER: app.state.notifier, PAY_LINKS: app.state.pay_links}
+        )
         stops = []
         if settings.outbound_interval_seconds > 0:
             stops.append(
@@ -180,6 +183,7 @@ def create_app(
     # Emailed links open the web app when there is one (or PUBLIC_APP_URL names a separate one), else the API's pages.
     app.state.app_url = settings.public_app_url or (settings.public_base_url if _web_built(settings) else None)
     app.state.notifier = Notifier(app.state.mailer, settings.api_base_url, app.state.app_url)
+    app.state.pay_links = PayLinks.from_settings(settings)
     app.state.ratelimiter = RateLimiter()
     app.state.oidc = OIDCClient(allow_local=settings.local, resolve=resolve_host)
     app.state.txt_lookup = lookup_txt

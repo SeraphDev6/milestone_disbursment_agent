@@ -2505,7 +2505,7 @@
       "name": "AGPL-3.0-only"
     },
     "title": "Milestone Disbursement Engine (core)",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -3399,6 +3399,83 @@
           }
         },
         "summary": "Payer starts a PayPal hold for one tranche",
+        "tags": [
+          "settlement"
+        ],
+        "x-sdk-core": true
+      }
+    },
+    "/milestones/{milestone_id}/pay-link": {
+      "post": {
+        "operationId": "resend_pay_link_milestones__milestone_id__pay_link_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "milestone_id",
+            "required": true,
+            "schema": {
+              "title": "Milestone Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Invoice mode: email the payer side a fresh pay link and return it (links expire; this reissues one)",
         "tags": [
           "settlement"
         ],

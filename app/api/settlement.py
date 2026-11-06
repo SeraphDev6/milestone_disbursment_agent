@@ -75,14 +75,30 @@ def settlement_read(s, m, request: Request) -> SettlementRead:
 
 
 @router.get("/pay/{settlement_id}", include_in_schema=False)
-def pay(settlement_id: str, session: SessionDep, request: Request) -> Response:
-    """The payer's link for an invoice-mode tranche: a fresh PayPal order (or the PayPal invoice) each visit."""
+def pay(settlement_id: str, session: SessionDep, request: Request, t: str | None = None) -> Response:
+    """The payer's signed link for an invoice-mode tranche: a fresh PayPal order (or the PayPal invoice) each visit,
+    for as long as the signature is valid (pay_link_valid_days)."""
     try:
         rate_limit(request, "pay_link", client_ip(request))
-        url = settlement.payment_link(session, gateway(request), settlement_id, request.app.state.settings.api_base_url)
+        base = request.app.state.settings.api_base_url
+        url = settlement.payment_link(session, gateway(request), settlement_id, base, t, utcnow())
     except ServiceError as e:
         return html_page("Nothing to pay", e.message, e.status_code)
     return RedirectResponse(url, status_code=303)
+
+
+@router.post(
+    "/milestones/{milestone_id}/pay-link",
+    openapi_extra={"x-sdk-core": True},
+    summary="Invoice mode: email the payer side a fresh pay link and return it (links expire; this reissues one)",
+)
+def resend_pay_link(
+    milestone_id: str, auth: MilestoneAccessDep, session: SessionDep, request: Request
+) -> SettlementRead:
+    access, m = auth
+    access.require(Action.release)
+    s = settlement.resend_pay_link(session, m, access.actor, utcnow())
+    return settlement_read(s, m, request)
 
 
 @router.get("/paypal/paid", include_in_schema=False)

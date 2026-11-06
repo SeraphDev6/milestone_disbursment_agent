@@ -368,13 +368,55 @@ def test_pay_link_pays_the_payee_directly(client, pay_link_agreement):
     assert again.status_code == 409 and "already paid" in again.text
 
 
-def open_path(client, mid) -> str:
+def settlement_id(client, mid) -> str:
     with client.app.state.sessionmaker() as s:
         from sqlmodel import select
 
         from app.models import Settlement
 
-        return f"/pay/{s.exec(select(Settlement).where(Settlement.milestone_id == mid)).one().id}"
+        return s.exec(select(Settlement).where(Settlement.milestone_id == mid)).one().id
+
+
+def open_path(client, mid, at=None) -> str:
+    """A signed pay link for the tranche's settlement, as the app would issue it at `at`."""
+    return client.app.state.pay_links.path(settlement_id(client, mid), at or utcnow())
+
+
+def test_pay_links_are_signed_and_expire(client, pay_link_agreement):
+    aid, (m1, _), ctx = pay_link_agreement
+    sid = settlement_id(client, m1)
+    # Unsigned, tampered and foreign-signature links say nothing about the request.
+    for path in (f"/pay/{sid}", f"/pay/{sid}?t=junk", f"/pay/{sid}?t=9999999999.{'0' * 32}"):
+        r = client.get(path, follow_redirects=False)
+        assert r.status_code == 404 and "is not valid" in r.text, path
+    # The signature is bound to the settlement id.
+    other = client.app.state.pay_links.path("some-other-settlement", utcnow()).split("?t=")[1]
+    assert client.get(f"/pay/{sid}?t={other}", follow_redirects=False).status_code == 404
+    # A link issued 8 days ago has expired (links last pay_link_valid_days, 7 by default)...
+    r = client.get(open_path(client, m1, utcnow() - timedelta(days=8)), follow_redirects=False)
+    assert r.status_code == 410 and "expired" in r.text
+    # ...while the one the payer reads from the tranche is fresh and the audit log never carries a signed link.
+    assert client.get(open_pay_link(client, aid, ctx)).status_code == 200
+    audit = client.get(f"/agreements/{aid}/audit", headers=h(ctx["payer"])).json()
+    requested = next(e for e in audit if e["action"] == "payment_requested")
+    assert requested["detail"]["pay_path"] == f"/pay/{sid}"
+    assert all("?t=" not in json.dumps(e.get("detail") or {}) for e in audit)
+
+
+def test_payer_side_can_reissue_a_pay_link_and_it_is_emailed(client, pay_link_agreement):
+    aid, (m1, _), ctx = pay_link_agreement
+    before = [m for m in client.app.state.mailer.sent if "Payment due" in m.subject]
+    r = client.post(f"/milestones/{m1}/pay-link", headers=h(ctx["payer"]))
+    assert r.status_code == 200, r.text
+    assert "?t=" in r.json()["pay_url"]
+    [mail] = [m for m in client.app.state.mailer.sent if "Payment due" in m.subject][len(before) :]
+    assert mail.link == r.json()["pay_url"]
+    path = r.json()["pay_url"].replace(client.app.state.settings.api_base_url, "")
+    assert client.get(path, follow_redirects=False).status_code == 303
+    # The payee can't send the payer links, and a paid tranche has nothing to reissue.
+    assert client.post(f"/milestones/{m1}/pay-link", headers=h(ctx["payee"])).status_code == 403
+    client.get(open_pay_link(client, aid, ctx))
+    assert client.post(f"/milestones/{m1}/pay-link", headers=h(ctx["payer"])).status_code == 409
 
 
 def test_only_the_latest_order_completes_payment(client, pay_link_agreement):
