@@ -215,6 +215,12 @@ Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
     nobody else.
   - **Every read is recorded:** which side viewed or downloaded which item, and whether it saw the withheld or
     the full view. That record is the payee's dispute pack.
+- **Tamper-evident audit log.** Each audit event's SHA-256 covers its fields and the previous event's hash on the same
+  agreement, so the log is a chain: a row edited, removed or inserted later breaks it from that point. The compliance
+  packet opens with the chain's status and head hash, and `python -m app.jobs verify-audit` checks every agreement
+  (`seal-audit` hashes rows written before the chain existed).
+- **Access reviews.** `GET /orgs/{id}/access-review` (admin) lists who can act for an org: members and roles, pending
+  invitations, API keys (revoked ones included) and the MCP clients people have connected, with last use.
 - **Reconciliation.** The daily job (and `python -m app.jobs reconcile` on demand) reads every PayPal object the
   ledger refers to back from PayPal (live holds, captures, invoices, pay-now orders, Payouts batches) and compares it
   with what we recorded. A disagreement becomes a `reconciliation_mismatch` audit event on the tranche, once per object

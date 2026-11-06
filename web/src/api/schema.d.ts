@@ -353,6 +353,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/orgs/{org_id}/access-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Access review: members, API keys and MCP clients (admin) */
+        get: operations["access_review_orgs__org_id__access_review_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/orgs/{org_id}/open-work": {
         parameters: {
             query?: never;
@@ -1351,6 +1368,96 @@ export interface components {
             new_org?: components["schemas"]["OrganizationCreate"] | null;
         };
         /**
+         * AccessReview
+         * @description Who can act for this org, for a periodic access review: people, API keys and connected MCP clients.
+         */
+        AccessReview: {
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Org Id */
+            org_id: string;
+            /** Org Name */
+            org_name: string;
+            /** Members */
+            members: components["schemas"]["AccessReviewMember"][];
+            /**
+             * Pending Invitations
+             * @description Emails invited to join who haven't yet.
+             */
+            pending_invitations: string[];
+            /**
+             * Api Keys
+             * @description Including revoked ones, so removals are on record.
+             */
+            api_keys: components["schemas"]["AccessReviewKey"][];
+            /** Mcp Clients */
+            mcp_clients: components["schemas"]["AccessReviewClient"][];
+        };
+        /** AccessReviewClient */
+        AccessReviewClient: {
+            /** Client Id */
+            client_id: string;
+            /**
+             * Client Name
+             * @description From the client's registration, when it gave one.
+             */
+            client_name: string | null;
+            /**
+             * User Id
+             * @description The person who consented; the client acts with their rights here.
+             */
+            user_id: string | null;
+            /**
+             * Consents
+             * @description Token families issued (one per consent).
+             */
+            consents: number;
+            /**
+             * First Used At
+             * Format: date-time
+             */
+            first_used_at: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /**
+             * Active
+             * @description At least one token not revoked or expired.
+             */
+            active: boolean;
+        };
+        /** AccessReviewKey */
+        AccessReviewKey: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string | null;
+            role: components["schemas"]["OrgRole"] | null;
+            /** Created By */
+            created_by: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Revoked At */
+            revoked_at: string | null;
+        };
+        /** AccessReviewMember */
+        AccessReviewMember: {
+            /** User Id */
+            user_id: string;
+            /** Email */
+            email: string;
+            /** Name */
+            name: string | null;
+            role: components["schemas"]["OrgRole"];
+        };
+        /**
          * AgreementCreate
          * @description Created by the payer org. The payee and any reviewers are invited by email and join with their own org.
          */
@@ -1676,6 +1783,11 @@ export interface components {
              * Format: date-time
              */
             at?: string;
+            /**
+             * Hash
+             * @description SHA-256 over this event and the previous one's hash (the agreement's chain).
+             */
+            hash?: string | null;
         };
         /** Body_extract_agreement_agreements_extract_post */
         Body_extract_agreement_agreements_extract_post: {
@@ -4604,6 +4716,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    access_review_orgs__org_id__access_review_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessReview"];
                 };
             };
             /** @description Validation Error */

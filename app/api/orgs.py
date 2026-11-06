@@ -1,6 +1,6 @@
 """Organizations: members, API keys, and the org-scoped views each side works from."""
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -10,7 +10,7 @@ from sqlmodel import Field, SQLModel, col, select
 from app.api.auth import invitation_read
 from app.api.deps import PrincipalDep, SessionDep, mailer
 from app.api.views import funding_summary
-from app.db import utcnow
+from app.db import as_utc, utcnow
 from app.models import (
     Agreement,
     AgreementStatus,
@@ -20,11 +20,13 @@ from app.models import (
     ApiToken,
     AuditEvent,
     Criterion,
+    Invitation,
     InvitationKind,
     InvitationRead,
     Membership,
     MembershipRead,
     MilestoneStatus,
+    OAuthClient,
     Organization,
     OrganizationCreate,
     OrganizationRead,
@@ -332,6 +334,111 @@ def review_queue(org_id: str, principal: PrincipalDep, session: SessionDep) -> l
                 )
             )
     return items
+
+
+class AccessReviewMember(SQLModel):
+    user_id: str
+    email: str
+    name: str | None
+    role: OrgRole
+
+
+class AccessReviewKey(SQLModel):
+    id: str
+    name: str | None
+    role: OrgRole | None
+    created_by: str | None
+    created_at: datetime
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+
+
+class AccessReviewClient(SQLModel):
+    client_id: str
+    client_name: str | None = Field(description="From the client's registration, when it gave one.")
+    user_id: str | None = Field(description="The person who consented; the client acts with their rights here.")
+    consents: int = Field(description="Token families issued (one per consent).")
+    first_used_at: datetime
+    last_used_at: datetime | None
+    active: bool = Field(description="At least one token not revoked or expired.")
+
+
+class AccessReview(SQLModel):
+    """Who can act for this org, for a periodic access review: people, API keys and connected MCP clients."""
+
+    generated_at: datetime
+    org_id: str
+    org_name: str
+    members: list[AccessReviewMember]
+    pending_invitations: list[str] = Field(description="Emails invited to join who haven't yet.")
+    api_keys: list[AccessReviewKey] = Field(description="Including revoked ones, so removals are on record.")
+    mcp_clients: list[AccessReviewClient]
+
+
+@router.get("/orgs/{org_id}/access-review", summary="Access review: members, API keys and MCP clients (admin)")
+def access_review(org_id: str, principal: PrincipalDep, session: SessionDep) -> AccessReview:
+    org = _org(session, principal, org_id, OrgRole.admin)
+    now = utcnow()
+    keys = session.exec(
+        select(ApiToken)
+        .where(ApiToken.org_id == org_id, ApiToken.kind == TokenKind.api_key)
+        .order_by(col(ApiToken.created_at))
+    ).all()
+    oauth = session.exec(
+        select(ApiToken)
+        .where(ApiToken.org_id == org_id, col(ApiToken.kind).in_((TokenKind.oauth_access, TokenKind.oauth_refresh)))
+        .order_by(col(ApiToken.created_at))
+    ).all()
+    clients: dict[tuple[str, str | None], AccessReviewClient] = {}
+    for t in oauth:
+        key = (t.client_id or "", t.user_id)
+        c = clients.get(key)
+        live = t.revoked_at is None and (t.expires_at is None or as_utc(t.expires_at) > now)
+        if c is None:
+            registered = session.get(OAuthClient, t.client_id) if t.client_id else None
+            clients[key] = c = AccessReviewClient(
+                client_id=t.client_id or "",
+                client_name=(registered.info.get("client_name") if registered else None),
+                user_id=t.user_id,
+                consents=0,
+                first_used_at=t.created_at,
+                last_used_at=t.last_used_at,
+                active=False,
+            )
+        c.consents += t.kind == TokenKind.oauth_refresh
+        c.active = c.active or live
+        if t.last_used_at and (c.last_used_at is None or t.last_used_at > c.last_used_at):
+            c.last_used_at = t.last_used_at
+    pending = session.exec(
+        select(Invitation).where(
+            Invitation.org_id == org_id,
+            col(Invitation.accepted_at).is_(None),
+            col(Invitation.revoked_at).is_(None),
+        )
+    ).all()
+    return AccessReview(
+        generated_at=now,
+        org_id=org.id,
+        org_name=org.name,
+        members=[
+            AccessReviewMember(user_id=m.user_id, email=m.user.email, name=m.user.name, role=m.role)
+            for m in org.memberships
+        ],
+        pending_invitations=sorted(i.email for i in pending),
+        api_keys=[
+            AccessReviewKey(
+                id=k.id,
+                name=k.name,
+                role=k.org_role,
+                created_by=k.created_by,
+                created_at=k.created_at,
+                last_used_at=k.last_used_at,
+                revoked_at=k.revoked_at,
+            )
+            for k in keys
+        ],
+        mcp_clients=sorted(clients.values(), key=lambda c: c.first_used_at),
+    )
 
 
 class Rejection(SQLModel):
