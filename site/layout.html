@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en" data-page="{{page}}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>{{title}}</title>
+    <meta name="description" content="{{description}}" />
+    <meta property="og:title" content="{{title}}" />
+    <meta property="og:description" content="{{description}}" />
+    <meta property="og:type" content="website" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="stylesheet" href="./css/fonts.css" />
+    <link rel="stylesheet" href="./css/tokens.css" />
+    <link rel="stylesheet" href="./css/themes.css" />
+    <link rel="stylesheet" href="./css/site.css" />
+    <script>
+      // Apply the saved theme before first paint so there is no flash of the wrong theme. Same key as the app.
+      try {
+        var t = localStorage.getItem("mde.theme");
+        if (t === "paper" || t === "carbon" || t === "contrast") document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div class="ribbon" role="note" aria-label="Sandbox">
+      <span>Sandbox</span>
+      <span aria-hidden="true">·</span>
+      <span>The hosted app is connected to PayPal's sandbox: no real money moves</span>
+    </div>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="./">
+          <span>Milestone Ledger</span>
+          <span class="sr-only">, home</span>
+          <span class="brand-mark" aria-hidden="true">№ MDE</span>
+        </a>
+        <div class="tools">
+          <label class="sr-only" for="theme">Theme</label>
+          <select id="theme" class="theme-select">
+            <option value="system">Theme: match my device</option>
+            <option value="paper">Theme: Paper (light)</option>
+            <option value="carbon">Theme: Carbon (dark)</option>
+            <option value="contrast">Theme: Contrast</option>
+          </select>
+          <a class="button button-primary" href="https://app.milestone-ledger.com/">Open the app</a>
+        </div>
+        <nav class="site-nav" aria-label="Primary">
+        {{nav}}
+        </nav>
+      </div>
+    </header>
+    <main id="main" class="site-main" tabindex="-1">
+{{content}}
+    </main>
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <nav class="footer-col" aria-labelledby="footer-product">
+          <h2 id="footer-product" class="footer-heading">Product</h2>
+          <ul>
+            <li><a href="./#how-it-works">How it works</a></li>
+            <li><a href="https://app.milestone-ledger.com/demo">Try the demo</a></li>
+            <li><a href="https://app.milestone-ledger.com/">Open the app</a></li>
+            <li><a href="https://app.milestone-ledger.com/api/docs">API reference</a></li>
+            <li><a href="https://app.milestone-ledger.com/design">Design system</a></li>
+          </ul>
+        </nav>
+        <nav class="footer-col" aria-labelledby="footer-policies">
+          <h2 id="footer-policies" class="footer-heading">Policies</h2>
+          <ul>
+            <li><a href="./terms.html">Terms of Use</a></li>
+            <li><a href="./privacy.html">Privacy Policy</a></li>
+            <li><a href="./accessibility.html">Accessibility Statement</a></li>
+            <li><a href="./security.html">Security</a></li>
+          </ul>
+        </nav>
+        <div class="footer-col">
+          <h2 class="footer-heading">Contact</h2>
+          <ul>
+            <li><a href="mailto:support@milestone-ledger.com">support@milestone-ledger.com</a></li>
+            <li><a href="mailto:security@milestone-ledger.com">security@milestone-ledger.com</a></li>
+            <li><a href="mailto:privacy@milestone-ledger.com">privacy@milestone-ledger.com</a></li>
+            <li><a href="mailto:accessibility@milestone-ledger.com">accessibility@milestone-ledger.com</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-line">
+        <span>Milestone Disbursement Engine · AGPL-3.0</span>
+        <a href="https://github.com/SeraphDev6/milestone_disbursment_agent" rel="noopener">Source on GitHub</a>
+        <span>Built for the PayPal AI Hackathon, November 2026</span>
+      </div>
+    </footer>
+    <script src="./js/theme.js" defer></script>
+  </body>
+</html>

@@ -1,0 +1,110 @@
+<!--
+title: Accessibility Statement
+description: Milestone Ledger's accessibility statement: our WCAG 2.2 AA target, what we have done, what we know is not finished, and how to tell us about a barrier.
+-->
+<div class="doc">
+  <header class="doc-head">
+    <p class="eyebrow">Accessibility statement</p>
+    <h1>Accessibility at Milestone Ledger</h1>
+    <p class="lede">Money that moves on evidence should be usable by everyone who is party to it. This statement covers this website and the web application at app.milestone-ledger.com.</p>
+    <p class="doc-meta"><span>Prepared <time datetime="2026-11-06">November 6, 2026</time></span><span aria-hidden="true">·</span><span>Target: WCAG 2.2 Level AA</span></p>
+  </header>
+
+  <div class="doc-body">
+    <h2 id="commitment">Our commitment</h2>
+    <p>We want every side of an agreement, funder, grantee, contractor, client and reviewer, to be able to read the criteria, submit evidence, follow a verdict and release a payment without barriers. Accessibility is part of the design system the product is built on, not a check at the end.</p>
+
+    <h2 id="conformance">Conformance status</h2>
+    <p>The <a href="https://www.w3.org/TR/WCAG22/">Web Content Accessibility Guidelines (WCAG) 2.2</a> define requirements for designers and developers to improve accessibility for people with disabilities. They have three levels of conformance: A, AA and AAA.</p>
+    <ul>
+      <li><strong>This website</strong> is designed to be fully conformant with WCAG 2.2 Level AA. Every page is checked automatically in all three themes before it is published.</li>
+      <li><strong>The web application</strong> is designed to be conformant with WCAG 2.2 Level AA. We describe it as <strong>partially conformant</strong> because some manual checks listed under <a href="#limitations">known limitations</a> have not been completed yet.</li>
+    </ul>
+
+    <h2 id="measures">What we have done</h2>
+    <h3>Reading</h3>
+    <ul>
+      <li>Body text is set in Atkinson Hyperlegible Next, a typeface designed for low-vision readers, and money, hashes and identifiers in its monospaced companion with tabular figures. Body copy is never smaller than 16 pixels.</li>
+      <li>Three themes: Paper (light), Carbon (dark) and Contrast (black on white, with text at 7:1 and interface boundaries at 4.5:1). By default the product follows your device's light, dark and increased-contrast settings. You can also choose a theme from the header of every page.</li>
+      <li>Every colour pair in every theme is measured by the build, which fails if text falls below 4.5:1 or interface boundaries below 3:1.</li>
+      <li>Status is never conveyed by colour alone. Each status stamp carries a word and a distinct glyph, confidence meters are hatched below the threshold, and verdict marks use distinct symbols.</li>
+      <li>Pages reflow to a 320-pixel-wide viewport without horizontal scrolling, except inside data grids, which scroll on their own.</li>
+      <li>Windows High Contrast and other forced-colour modes keep every boundary and the system focus colour.</li>
+    </ul>
+    <h3>Operating</h3>
+    <ul>
+      <li>Everything can be done with a keyboard. Every interactive element shows a two-pixel focus ring with a halo that meets 3:1 in every theme.</li>
+      <li>A skip link and landmarks are on every page. In the application, focus moves to the new page's heading on navigation and the title is announced.</li>
+      <li>Targets are 44 pixels by default and never smaller than 24.</li>
+      <li>The header stops being sticky on short or narrow screens so it cannot cover what has focus.</li>
+      <li>The only motion is a brief stamp "press" when a status changes and the slide of a dialog. Both are off when your device asks for reduced motion.</li>
+    </ul>
+    <h3>Understanding</h3>
+    <ul>
+      <li>Copy is plain and specific, and reuses the product's own words: "Payee hasn't signed these criteria yet" rather than an error code.</li>
+      <li>Forms have visible labels, descriptions and errors linked to each field, and an error summary that takes focus and links to each problem.</li>
+      <li>Actions you are not allowed to take stay visible, with a note saying which role is needed and which you have.</li>
+      <li>Actions that move money or cannot be undone open a confirmation that states exactly what will happen.</li>
+      <li>Toasts are announced through one shared live region, stay for at least eight seconds, pause on hover or focus, and are never the only place an outcome appears.</li>
+      <li>Data grids are named by a visible caption and described by a one-line summary. Charts have a text summary and a "show as table" switch.</li>
+    </ul>
+
+    <h2 id="technical">Technical specifications</h2>
+    <p>Accessibility of this website and the application relies on the following technologies to work with the combination of web browser and any assistive technologies or plugins installed on your computer: HTML, CSS, JavaScript and WAI-ARIA. The application's interactive components are built on React Aria, which provides their keyboard behaviour, focus management and ARIA semantics. These technologies are relied upon for conformance with the accessibility standards used.</p>
+
+    <h2 id="assessment">How we assess it</h2>
+    <p>We assess the website and the application ourselves, with these checks running on every change:</p>
+    <div class="table-wrap">
+      <table>
+        <caption>Automated and manual checks</caption>
+        <thead>
+          <tr><th scope="col">Check</th><th scope="col">How</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Contrast of every declared colour pair in all three themes</td><td>Measured at build time; the build fails on any miss</td></tr>
+          <tr><td>WCAG 2.0, 2.1 and 2.2 A and AA rules on every page and route, in all three themes</td><td>axe-core, in the browser, on this site and on every route of the application</td></tr>
+          <tr><td>Forced colours and reflow at 320 pixels</td><td>Browser tests on every route</td></tr>
+          <tr><td>Keyboard-only signing, focus trapping and focus return in dialogs</td><td>Browser tests</td></tr>
+          <tr><td>Component semantics</td><td>axe in unit tests</td></tr>
+          <tr><td>Screen-reader passes (VoiceOver, NVDA) and zoom to 400%</td><td>Manual; see known limitations</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="limitations">Known limitations</h2>
+    <p>Despite our best efforts, some parts of the application may not yet be fully accessible. We list what we know here and will update this statement as it changes.</p>
+    <ul>
+      <li><strong>Screen-reader passes</strong> of the tranche page and the review dialog with VoiceOver and NVDA are still being done by hand. Automated checks pass, but we have not yet confirmed the reading order and announcements in every state. If something reads wrongly, please tell us.</li>
+      <li><strong>Zoom to 400%</strong> has not yet been verified on every route. Pages are built to reflow, and we expect it to work, but we have not finished checking.</li>
+      <li><strong>Data grids</strong> are built on AG Grid. They are keyboard-operable and described by a caption and summary, and pressing Enter on a title follows the link, but very large grids can be slow to navigate cell by cell. Every grid's data is also available through the API and in the compliance packet.</li>
+      <li><strong>Compliance packets</strong> are exported as PDF and as JSON. If the PDF does not work with your assistive technology, the JSON export contains the same record.</li>
+      <li><strong>PayPal's pages</strong>, where a payer approves a hold or pays an invoice and where a payee connects an account, are PayPal's own and are covered by <a href="https://www.paypal.com/us/webapps/mpp/accessibility">PayPal's accessibility statement</a>.</li>
+    </ul>
+
+    <h2 id="compatibility">Compatibility</h2>
+    <p>The website and the application are designed to work with current versions of Chrome, Firefox, Safari and Edge on desktop and mobile, with the screen readers built into those platforms and with NVDA and JAWS on Windows. They are not designed for Internet Explorer.</p>
+
+    <h2 id="feedback">Feedback and contact</h2>
+    <p>We welcome your feedback on the accessibility of Milestone Ledger. If you encounter a barrier, or need information in another format, please tell us:</p>
+    <ul>
+      <li>Email <a href="mailto:accessibility@milestone-ledger.com">accessibility@milestone-ledger.com</a>.</li>
+      <li>Or open an issue on the <a href="https://github.com/SeraphDev6/milestone_disbursment_agent/issues" rel="noopener">repository</a>, if you are comfortable with it being public.</li>
+    </ul>
+    <p>We aim to respond within 5 business days. Please include the page or step you were on, the browser and assistive technology you were using, and what happened.</p>
+    <p>This statement follows the structure of the <a href="https://www.w3.org/WAI/planning/statements/">W3C accessibility statement template</a>.</p>
+  </div>
+
+  <nav class="doc-toc" aria-labelledby="toc-title">
+    <h2 id="toc-title">On this page</h2>
+    <ol>
+      <li><a href="#commitment">Our commitment</a></li>
+      <li><a href="#conformance">Conformance status</a></li>
+      <li><a href="#measures">What we have done</a></li>
+      <li><a href="#technical">Technical specifications</a></li>
+      <li><a href="#assessment">How we assess it</a></li>
+      <li><a href="#limitations">Known limitations</a></li>
+      <li><a href="#compatibility">Compatibility</a></li>
+      <li><a href="#feedback">Feedback and contact</a></li>
+    </ol>
+  </nav>
+</div>

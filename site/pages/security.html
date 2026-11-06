@@ -1,0 +1,108 @@
+<!--
+title: Security
+description: How Milestone Ledger protects the money it decides on and the work it holds, and how to report a vulnerability.
+-->
+<div class="doc">
+  <header class="doc-head">
+    <p class="eyebrow">Security</p>
+    <h1>Security at Milestone Ledger</h1>
+    <p class="lede">Milestone Ledger decides when other people's money moves and holds the work they deliver. This page says how it is built to be trusted with that, what is not there yet, and how to tell us when something is wrong.</p>
+    <p class="doc-meta"><span>Last reviewed <time datetime="2026-11-06">November 6, 2026</time></span></p>
+  </header>
+
+  <div class="doc-body">
+    <h2 id="money">Money</h2>
+    <ul>
+      <li><strong>PayPal holds the funds, not us.</strong> Funding a tranche creates a PayPal authorization that the payer approves on PayPal's own pages. We never see card or bank details.</li>
+      <li><strong>In live mode the platform never holds funds.</strong> Payment goes from the payer to the payee's connected PayPal account. The platform route, where our account receives and pays out, exists for the sandbox only and is refused by a live deployment.</li>
+      <li><strong>Captures are reconciled.</strong> An hourly job asks PayPal about every capture, payment and invoice still in flight, so a missed webhook never strands a tranche, and polls PayPal's Disputes API for disputes no webhook announced before paying anything out.</li>
+      <li><strong>Incoming PayPal webhooks are verified</strong> against the webhook id with PayPal's signature verification, and rejected without it.</li>
+      <li><strong>Outgoing webhooks are signed.</strong> Every event we send to your systems carries an HMAC signature. The Python and TypeScript SDKs include the verification helpers.</li>
+    </ul>
+
+    <h2 id="who-can-do-what">Who can do what</h2>
+    <ul>
+      <li><strong>Everything happens as a signed-in person acting for an organization,</strong> with a role: owner, admin, member or viewer. The permission table is pinned by tests to the specification.</li>
+      <li><strong>Human-only steps.</strong> Confirming criteria, funding, approving or rejecting a tranche, releasing, contesting and disputing can be done only by a person with the right role. They are never offered to an MCP client or an API key, even one that calls the REST API directly with its token.</li>
+      <li><strong>Each side sees what its role allows.</strong> A payer never sees withheld work before capture; a reviewer sees what it needs to decide; the counterparty's members see their own side.</li>
+      <li><strong>Sign-in</strong> is by emailed magic link, or by your organization's OpenID Connect identity provider for domains you have verified by DNS. Sign-in and invitation tokens are removed from the address bar as soon as they are read. The API's own sign-in pages pair the token with a short-lived SameSite cookie so a cross-site request cannot sign someone's browser in as somebody else.</li>
+      <li><strong>Agents</strong> connect over OAuth with a consent page where a person signs in and picks the organization the agent acts for. Headless agents use organization API keys, which are stored hashed and can be revoked.</li>
+    </ul>
+
+    <h2 id="custody">Custody of evidence and deliverables</h2>
+    <ul>
+      <li><strong>Encrypted at rest.</strong> Uploaded files are encrypted with AES-256-GCM before they are stored, whether in the database or in an object store. The object store only ever holds ciphertext.</li>
+      <li><strong>Downloads are checked.</strong> Every download is served by the application after an access check, is written to the audit log, and is refused if its SHA-256 hash does not match what was stored. There are no signed bucket URLs.</li>
+      <li><strong>Handover is verified.</strong> When a contractor's code is handed to the client at capture, the git tree is recomputed from the source and must equal the verified commit's tree, or the handover fails closed.</li>
+      <li><strong>Retention is a setting, not an accident.</strong> Each deployment chooses how long closed tranches' originals are kept, and nothing is removed within 180 days of a capture, PayPal's chargeback window. Removal keeps the hashes and is recorded in the audit log.</li>
+      <li><strong>Evidence is rendered as text,</strong> never as HTML, in the web app.</li>
+    </ul>
+
+    <h2 id="verdicts">Verification integrity</h2>
+    <ul>
+      <li>Deterministic checks run before the model and their result is final.</li>
+      <li>The verifier must cite the evidence for every criterion it marks met, and the server derives the verdict from the structured result, not from free text.</li>
+      <li>A skeptic pass argues the opposite case before any auto-release, and disagreement sends the tranche to a person.</li>
+      <li>Each verdict records the criteria hash, the evidence ids, and the model and prompt version, so any decision can be replayed.</li>
+      <li>Prompt injection through evidence is in scope for our security programme (see below). Evidence is untrusted input to the verifier, and the human gate and the contest window exist because no verifier is perfect.</li>
+    </ul>
+
+    <h2 id="platform">The platform</h2>
+    <ul>
+      <li>The web app loads no third-party scripts or fonts, and this site loads none either. The API's own pages (sign-in, consent, pay links) are served with a content security policy that allows no scripts and no outside resources.</li>
+      <li>Session tokens expire after 30 days, sign-in links after 15 minutes and invitations after 14 days. Only hashes of tokens are stored.</li>
+      <li>Sign-in links, extraction, pre-check and pay-link visits are rate limited per client.</li>
+      <li>Secrets such as organizations' SSO client secrets are encrypted at rest.</li>
+      <li>Every state transition appends an immutable event to the audit log. The log and the compliance packet are available to the organizations party to an agreement.</li>
+      <li>The hosted service runs on Render, with Postgres on Render and encrypted file storage on Cloudflare R2, in the United States.</li>
+    </ul>
+
+    <h2 id="not-yet">What is not there yet</h2>
+    <p>We would rather say this here than have you find out later.</p>
+    <ul>
+      <li>The hosted service runs in PayPal's sandbox. Live payments need PayPal partner approval, which we are applying for.</li>
+      <li>There is no SOC 2 report yet. Reconciliation and a tamper-evident audit log come first, then the policies, then a Type I and a Type II.</li>
+      <li>Screen-reader passes and some other manual checks are still in progress; see the <a href="./accessibility.html">accessibility statement</a>.</li>
+      <li>Open work is tracked in the <a href="https://github.com/SeraphDev6/milestone_disbursment_agent/issues" rel="noopener">repository's issues</a>.</li>
+    </ul>
+
+    <h2 id="report">Reporting a vulnerability</h2>
+    <p>Please report problems privately so we can fix them before they are public.</p>
+    <ul>
+      <li>Use GitHub's private reporting: <a href="https://github.com/SeraphDev6/milestone_disbursment_agent/security/advisories/new" rel="noopener">Security → Report a vulnerability</a> on the repository, or email <a href="mailto:security@milestone-ledger.com">security@milestone-ledger.com</a>.</li>
+      <li>Include what you found, how to reproduce it (requests, accounts or agreement setup), and what an attacker gains.</li>
+      <li>We aim to acknowledge reports within 3 business days and to tell you what we will do within 10. We will credit you in the fix unless you would rather we did not.</li>
+      <li>Test against your own instance in sandbox mode, or the development server in the repository. Please do not test against app.milestone-ledger.com or other people's data, and do not run load or denial-of-service tests against it.</li>
+    </ul>
+
+    <h3 id="scope">In scope</h3>
+    <ul>
+      <li>The engine: REST API, MCP server and OAuth, magic-link sign-in, organization SSO, API keys.</li>
+      <li>Money paths: funding, holds, capture, release, refunds, Payouts, invoice mode and pay links, PayPal webhooks.</li>
+      <li>Access between organizations and roles: anything that lets one party see another party's evidence or take a step that belongs to someone else, or lets an agent take a human-only step.</li>
+      <li>Verification integrity: getting a tranche marked verified or released without meeting its criteria, including prompt injection through evidence.</li>
+      <li>The web app and outbound webhooks (SSRF, signature bypass).</li>
+    </ul>
+    <h3 id="out-of-scope">Out of scope</h3>
+    <ul>
+      <li>PayPal's, Anthropic's, GitHub's, Resend's or Render's own services. Please report those to them.</li>
+      <li>Findings that need a compromised device, browser or organization admin account.</li>
+      <li>Missing best-practice headers or rate limits with no demonstrated impact.</li>
+      <li>The test stand-ins in the repository, which never run on a deployment.</li>
+    </ul>
+    <p>The full policy is the repository's <a href="https://github.com/SeraphDev6/milestone_disbursment_agent/blob/main/SECURITY.md" rel="noopener">SECURITY.md</a>. Only the latest commit on <code>main</code> and the hosted deployment it runs are supported.</p>
+  </div>
+
+  <nav class="doc-toc" aria-labelledby="toc-title">
+    <h2 id="toc-title">On this page</h2>
+    <ol>
+      <li><a href="#money">Money</a></li>
+      <li><a href="#who-can-do-what">Who can do what</a></li>
+      <li><a href="#custody">Custody of evidence</a></li>
+      <li><a href="#verdicts">Verification integrity</a></li>
+      <li><a href="#platform">The platform</a></li>
+      <li><a href="#not-yet">What is not there yet</a></li>
+      <li><a href="#report">Reporting a vulnerability</a></li>
+    </ol>
+  </nav>
+</div>
