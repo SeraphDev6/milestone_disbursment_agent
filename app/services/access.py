@@ -27,6 +27,7 @@ class Action(StrEnum):
     release = "release"
     submit_evidence = "submit_evidence"
     connect_github = "connect_github"
+    connect_email = "connect_email"
     dispute = "dispute"
     compliance_packet = "compliance_packet"
     dispute_pack = "dispute_pack"
@@ -53,6 +54,7 @@ RULES: dict[Action, dict[Role, OrgRole]] = {
     Action.release: {P: A},
     Action.submit_evidence: {E: M},
     Action.connect_github: {E: A},
+    Action.connect_email: {E: A},
     Action.dispute: {E: A},
     Action.compliance_packet: {P: M, R: M},
     Action.dispute_pack: {E: M, R: M},  # the payee's answer to a chargeback; the payer has the packet

@@ -17,6 +17,7 @@ from app.integrations.crypto import SecretBox
 from app.integrations.email import Mailer, SkipUndeliverable, make_mailer
 from app.integrations.github import GitHubClient
 from app.integrations.github_app import GitHubApp, MockGitHubApp, make_github_app
+from app.integrations.inbound_email import Inbox, ResendInbox
 from app.integrations.oidc import OIDCClient, lookup_txt
 from app.integrations.paypal import MockPayPal, PayPalGateway, make_gateway
 from app.services import ServiceError
@@ -90,6 +91,7 @@ def create_app(
     paypal: PayPalGateway | None = None,
     mailer: Mailer | None = None,
     github_app: GitHubApp | None = None,
+    inbox: Inbox | None = None,
 ) -> FastAPI:
     """The REST API and the MCP server. `paypal`, `mailer` and `github_app` replace the real integrations with
     stand-ins (tests, and the walkthrough's dry run); the deployment never passes them. When the PayPal or GitHub
@@ -176,6 +178,11 @@ def create_app(
     app.state.ai = claude_runtime(key) if use_claude(settings) else mock_runtime()
     app.state.github = GitHubClient(token=settings.github_token)
     app.state.github_app = github_app or make_github_app(settings)
+    app.state.inbox = inbox or (
+        ResendInbox(settings.resend_api_key.get_secret_value())
+        if settings.email_inbox_domain and settings.resend_api_key
+        else None
+    )
     app.state.resolve = resolve_host
     app.state.mailer = mailer or make_mailer(settings)
     if settings.demo_enabled:  # the demo's people can't receive mail; don't ask the provider to try

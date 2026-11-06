@@ -17,6 +17,7 @@ export type Action =
   | "release"
   | "submit_evidence"
   | "connect_github"
+  | "connect_email"
   | "dispute"
   | "compliance_packet"
   | "manage_subscriptions"
@@ -40,6 +41,7 @@ export const RULES: Record<Action, Partial<Record<Role, OrgRole>>> = {
   release: { payer: "admin" },
   submit_evidence: { payee: "member" },
   connect_github: { payee: "admin" },
+  connect_email: { payee: "admin" },
   dispute: { payee: "admin" },
   compliance_packet: { payer: "member", reviewer: "member" },
   manage_subscriptions: { payer: "admin", payee: "admin", reviewer: "admin" },
@@ -62,6 +64,7 @@ const VERB: Record<Action, string> = {
   release: "release payments",
   submit_evidence: "submit evidence",
   connect_github: "connect GitHub",
+  connect_email: "set up the evidence address",
   dispute: "dispute a rejection",
   compliance_packet: "export the compliance packet",
   manage_subscriptions: "manage webhooks",

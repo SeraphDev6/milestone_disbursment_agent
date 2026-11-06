@@ -8,6 +8,7 @@ from app.api import (
     audit,
     auth,
     demo,
+    email_evidence,
     evidence,
     github_app,
     integrations,
@@ -40,6 +41,7 @@ for module in (
     ledger,
     evidence,
     integrations,
+    email_evidence,
     audit,
 ):
     api_router.include_router(module.router)

@@ -405,6 +405,13 @@ export function useConnectGitHub(agreementId: string, orgId: string) {
   });
 }
 
+/** The agreement's evidence address (payee admin). 404 when the server receives no email. */
+export function useConnectEmail(agreementId: string, orgId: string) {
+  return useMutation({
+    mutationFn: () => call(api.POST("/agreements/{agreement_id}/integrations/email", { params: { path: { agreement_id: agreementId } }, ...asOrg(orgId) })),
+  });
+}
+
 /** Code handed over from a contractor's repo once the tranche was paid. Polls while one is still pending. */
 export function useHandovers(milestoneId: string, orgId: string, enabled: boolean) {
   return useQuery({
