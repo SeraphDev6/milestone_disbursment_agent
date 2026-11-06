@@ -47,9 +47,9 @@ cd web && npx playwright test -c playwright.site.config.ts
 
 [`.github/workflows/pages.yml`](../.github/workflows/pages.yml) builds, runs the check and deploys to GitHub Pages on
 every push to `main` that touches the site (pull requests get the build and the check only). Pages is enabled with
-**Source: GitHub Actions**. The site is at `https://www.seraphdev.com/milestone_disbursment_agent/` (project sites
-inherit the owner's user-site domain, so the `seraphdev6.github.io` address redirects there); all links are relative
-so it works at any base path.
+**Source: GitHub Actions** and the custom domain `milestone-ledger.com` (`site/static/CNAME` keeps it across deploys;
+the apex has GitHub Pages' A/AAAA records and `www` is a CNAME to `seraphdev6.github.io`). All links are relative so
+the site also works at any base path.
 
 If a deploy ever sits in `deployment_queued` and times out, or fails at once with "Deployment cancelled": GitHub keys
 Pages deployments by commit, and a freshly created Pages site can refuse its first deployment. What cleared it on
@@ -58,13 +58,9 @@ once so the site builds, then set the source back to GitHub Actions and re-run t
 
 ### Custom domain (milestone-ledger.com)
 
-The apex currently points at the Render app. To serve this site there instead:
-
-1. Add `milestone-ledger.com` under **Settings → Pages → Custom domain** (GitHub then expects a `CNAME` file; add
-   `site/static/CNAME` containing the domain so the build keeps it).
-2. In Cloudflare, replace the apex record with GitHub Pages' four `A` records (and `AAAA` if wanted), and add
-   `www` as a `CNAME` to `seraphdev6.github.io`. Keep `app` pointing at Render.
-3. Turn on **Enforce HTTPS** once the certificate is issued.
+Set up Nov 6, 2026: the apex carries GitHub Pages' `A`/`AAAA` records, `www` is a `CNAME` to `seraphdev6.github.io`,
+the domain is set under **Settings → Pages → Custom domain**, and `site/static/CNAME` keeps it. `app` stays on
+Render and `mail` on Resend. If the certificate ever lapses, **Enforce HTTPS** in the same settings page re-requests it.
 
 ## Contact addresses
 
