@@ -1,5 +1,6 @@
 """Organizations: members, API keys, and the org-scoped views each side works from."""
 
+from datetime import date
 from decimal import Decimal
 from typing import Literal
 
@@ -12,10 +13,13 @@ from app.api.views import funding_summary
 from app.db import utcnow
 from app.models import (
     Agreement,
+    AgreementStatus,
     ApiKeyCreate,
     ApiKeyCreated,
     ApiKeyRead,
     ApiToken,
+    AuditEvent,
+    Criterion,
     InvitationKind,
     InvitationRead,
     Membership,
@@ -27,6 +31,7 @@ from app.models import (
     OrgRole,
     Party,
     Role,
+    SettlementMode,
     TokenKind,
     UserRead,
 )
@@ -327,6 +332,79 @@ def review_queue(org_id: str, principal: PrincipalDep, session: SessionDep) -> l
                 )
             )
     return items
+
+
+class Rejection(SQLModel):
+    note: str | None = Field(description="What the reviewer wrote.")
+    missing: list[dict] = Field(description="Per unmet criterion: criterion_id and what to send instead.")
+
+
+class WorkItem(SQLModel):
+    """A tranche open to this org as payee: what it pays, what it needs, and what was missing last time."""
+
+    agreement_id: str
+    agreement_title: str
+    milestone_id: str
+    milestone_title: str
+    amount: Decimal
+    currency: str
+    due_date: date | None
+    status: MilestoneStatus
+    funded: bool = Field(description="Escrow: the payer's hold is in place, so a verified tranche pays at once.")
+    settlement_mode: SettlementMode
+    criteria: list[Criterion] = Field(description="What the evidence must show; precheck_evidence tests a draft.")
+    last_rejection: Rejection | None = Field(description="Set when the last submission was rejected.")
+    submit_with: str = Field(
+        description="The tool to use: submit_evidence (text, links, data) or the uploads endpoint for files."
+    )
+
+
+@router.get(
+    "/orgs/{org_id}/open-work",
+    openapi_extra={"x-mcp-tool": "open_work"},
+    summary="Tranches this org can earn as payee: open for evidence, with their criteria and any rejection",
+)
+def open_work(org_id: str, principal: PrincipalDep, session: SessionDep) -> list[WorkItem]:
+    """For an agent (or a person) working as the payee: everything that can be submitted against right now.
+    A tranche is open while it is pending, funded or overdue; one in review, verifying or paid is not."""
+    principal.require_org(org_id, OrgRole.viewer)
+    items = []
+    for party in _seats(session, org_id, Role.payee):
+        a = party.agreement
+        if a.status != AgreementStatus.active:
+            continue
+        for m in a.milestones:
+            if m.status not in (MilestoneStatus.pending, MilestoneStatus.funded, MilestoneStatus.overdue):
+                continue
+            last = session.exec(
+                select(AuditEvent)
+                .where(
+                    AuditEvent.milestone_id == m.id,
+                    col(AuditEvent.action).in_(("review_rejected", "evidence_received")),
+                )
+                .order_by(col(AuditEvent.at).desc())
+            ).first()
+            rejection = None
+            if last is not None and last.action == "review_rejected":
+                rejection = Rejection(note=last.detail.get("note"), missing=list(last.detail.get("missing") or []))
+            items.append(
+                WorkItem(
+                    agreement_id=a.id,
+                    agreement_title=a.title,
+                    milestone_id=m.id,
+                    milestone_title=m.title,
+                    amount=m.amount,
+                    currency=a.currency,
+                    due_date=m.due_date,
+                    status=m.status,
+                    funded=m.paypal_authorization_id is not None,
+                    settlement_mode=a.settlement_mode,
+                    criteria=list(m.criteria),
+                    last_rejection=rejection,
+                    submit_with="submit_evidence",
+                )
+            )
+    return sorted(items, key=lambda i: (i.last_rejection is None, str(i.due_date or "9999"), i.agreement_title))
 
 
 @router.get(

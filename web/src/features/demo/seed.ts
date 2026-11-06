@@ -125,7 +125,9 @@ export type DemoExtraction = { file: string; model: string; tranches: number; cr
 /** The SOW's GitHub connection: what to add on the repo so a merged PR arrives as evidence. */
 export type DemoGitHub = { repo: string; via_app: boolean; webhook_url: string | null; secret: string | null; labels: { milestone_id: string; title: string; label: string }[] };
 export type DemoKind = "grant" | "withheld" | "sow";
-export type DemoRecord = { agreementId: string; title: string; createdAt: string; kind?: DemoKind; people: DemoPerson[]; extraction?: DemoExtraction; github?: DemoGitHub };
+/** An org API key minted for the payee so an agent can do the work over MCP (shown once by the API; kept here for the demo). */
+export type DemoAgent = { token: string; orgId: string; orgName: string; createdAt: string };
+export type DemoRecord = { agreementId: string; title: string; createdAt: string; kind?: DemoKind; people: DemoPerson[]; extraction?: DemoExtraction; github?: DemoGitHub; agent?: DemoAgent };
 
 const STORE = "mde.demo";
 
