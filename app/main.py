@@ -246,4 +246,15 @@ def _startup_warnings(settings: Settings) -> None:
         )
 
 
-app = create_site()
+_site: Site | None = None
+
+
+def __getattr__(name: str):
+    """`uvicorn app.main:app` builds the site from the environment on first use. Importing this module for
+    create_app (tests, scripts/openapi.py, app.sdk_spec) needs no configuration at all."""
+    global _site
+    if name == "app":
+        if _site is None:
+            _site = create_site()
+        return _site
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
