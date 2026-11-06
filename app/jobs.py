@@ -31,7 +31,7 @@ from app.services.paylinks import PAY_LINKS, PayLinks
 from app.services.settlement import disburse_due, expire_stale_holds, expire_stale_invoices
 from app.services.verification import mark_overdue
 
-JOBS = ("migrate", "daily", "payouts", "deliver-webhooks", "encrypt-files")
+JOBS = ("migrate", "daily", "payouts", "deliver-webhooks", "encrypt-files", "verify-audit", "seal-audit")
 
 
 def main(argv: list[str]) -> int:
@@ -53,6 +53,24 @@ def main(argv: list[str]) -> int:
     info = {NOTIFIER: notifier, PAY_LINKS: PayLinks.from_settings(settings)}
     with make_sessionmaker(engine, info=info)() as session:
         now = utcnow()
+        if argv[0] in ("verify-audit", "seal-audit"):
+            from sqlmodel import select
+
+            from app.db.audit import seal_chain, verify_chain
+            from app.models import Agreement
+
+            broken = 0
+            for aid in session.exec(select(Agreement.id)).all():
+                if argv[0] == "seal-audit":
+                    n = seal_chain(session, aid)
+                    if n:
+                        print(f"{aid}: sealed {n} event(s)")
+                r = verify_chain(session, aid)
+                if r.status != "verified":
+                    print(f"{aid}: {r.status} ({r.events} events, {r.unsealed} unsealed, broken at {r.broken_at})")
+                    broken += r.status == "broken"
+            print(f"audit chains: {'all verified' if not broken else f'{broken} broken'}")
+            return 1 if broken else 0
         if argv[0] == "daily":
             holds = expire_stale_holds(session, now)
             invoices = expire_stale_invoices(session, make_gateway(settings), now)
