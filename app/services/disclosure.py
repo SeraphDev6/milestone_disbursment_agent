@@ -18,6 +18,7 @@ from datetime import timedelta
 from sqlmodel import Session, select
 
 from app.db import record_audit, utcnow
+from app.domain.criteria import weighted_share
 from app.models import (
     AuditEvent,
     CriterionResult,
@@ -97,7 +98,8 @@ def _rationale(m: Milestone, evidence_ids: list[str], text: str) -> str:
 
 
 def verdict_read(v: Verdict, m: Milestone, role: Role | str | None) -> VerdictRead:
-    out = VerdictRead.model_validate(v)
+    met = {r.criterion_id for r in v.criteria_results if r.met}
+    out = VerdictRead.model_validate(v, update={"weighted_share": weighted_share(m.criteria, met)})
     if not restricted(role, m):
         return out
     skeptic = None

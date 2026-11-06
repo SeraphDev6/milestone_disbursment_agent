@@ -1879,7 +1879,7 @@ export interface components {
              * Key
              * @enum {string}
              */
-            key: "agreement" | "sign_in_pdf" | "sign_in" | "budget" | "report" | "report_draft" | "thin";
+            key: "agreement" | "sow" | "sign_in_pdf" | "sign_in" | "budget" | "report" | "report_draft" | "thin";
             /**
              * Name
              * @description File name; GET /demo/files/{name} serves it.
@@ -3654,6 +3654,11 @@ export interface components {
              * @description When the verifier finished.
              */
             created_at: string;
+            /**
+             * Weighted Share
+             * @description The share of the tranche the met criteria account for, by criterion weight (1.0 when all are met). Reported for partial release; the release itself is still all-or-nothing.
+             */
+            weighted_share?: number | null;
         };
         /**
          * VerificationMethod

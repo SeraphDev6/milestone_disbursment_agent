@@ -13,6 +13,7 @@ const base: CriterionForm = {
   verification: "check",
   check_id: "row_count",
   due_by: null,
+  weight: "1",
 };
 
 test("targets are typed by comparator, like Measure's validator", () => {
