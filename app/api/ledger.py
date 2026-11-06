@@ -14,42 +14,42 @@ router = APIRouter(tags=["settlement"])
 
 
 class LedgerEntryRead(SQLModel):
-    id: str
-    milestone_id: str | None
+    id: str = Field(description="Ledger entry id.")
+    milestone_id: str | None = Field(description="The tranche the money belongs to; null for agreement-level.")
     kind: str = Field(description="authorized, captured, voided, expired, invoiced, paid or invoice_cancelled.")
-    amount: Decimal
-    paypal_ref: str
-    at: datetime
+    amount: Decimal = Field(description="In the agreement's currency.")
+    paypal_ref: str = Field(description="PayPal's id for the object: authorization, capture, invoice or order.")
+    at: datetime = Field(description="When the engine recorded it.")
 
 
 class SettlementAttempt(SQLModel):
-    id: str
-    milestone_id: str
-    attempt: int
-    mode: SettlementMode
-    idempotency_key: str
-    paypal_ref: str | None
-    status: SettlementStatus
-    error: str | None
-    created_at: datetime
-    updated_at: datetime
+    id: str = Field(description="Settlement attempt id.")
+    milestone_id: str = Field(description="The tranche being settled.")
+    attempt: int = Field(description="1 for the first try; a failed release retries with the next number.")
+    mode: SettlementMode = Field(description="escrow_release (capture a hold) or invoice_on_verify.")
+    idempotency_key: str = Field(description="Sent to PayPal as PayPal-Request-Id, so a retry can't double-charge.")
+    paypal_ref: str | None = Field(description="Capture id, invoice id or pay-now order id once PayPal answered.")
+    status: SettlementStatus = Field(description="submitted, succeeded, failed or expired.")
+    error: str | None = Field(description="PayPal's error when the attempt failed.")
+    created_at: datetime = Field(description="When the attempt started.")
+    updated_at: datetime = Field(description="Last change.")
 
 
 class DisbursementAttempt(SQLModel):
-    id: str
-    milestone_id: str
+    id: str = Field(description="Disbursement attempt id.")
+    milestone_id: str = Field(description="The tranche whose captured money moves.")
     kind: DisbursementKind = Field(description="referenced_payout or payout (to the payee), refund (to the payer).")
-    attempt: int
-    idempotency_key: str
-    paypal_ref: str | None
-    status: SettlementStatus
-    error: str | None
-    created_at: datetime
-    updated_at: datetime
+    attempt: int = Field(description="1 for the first try; a failed payout retries with the next number.")
+    idempotency_key: str = Field(description="Sent to PayPal as PayPal-Request-Id, so a retry can't double-pay.")
+    paypal_ref: str | None = Field(description="Payout item id, referenced payout id or refund id from PayPal.")
+    status: SettlementStatus = Field(description="submitted, succeeded, failed or unclaimed.")
+    error: str | None = Field(description="PayPal's error when the attempt failed.")
+    created_at: datetime = Field(description="When the attempt started.")
+    updated_at: datetime = Field(description="Last change.")
 
 
 class LedgerView(SQLModel):
-    currency: str
+    currency: str = Field(description="The agreement's ISO 4217 currency; every amount below is in it.")
     entries: list[LedgerEntryRead] = Field(description="PayPal money movements, oldest first.")
     settlements: list[SettlementAttempt] = Field(description="Every capture or invoice attempt, per tranche.")
     disbursements: list[DisbursementAttempt] = Field(description="Payouts to the payee and refunds to the payer.")
@@ -57,7 +57,7 @@ class LedgerView(SQLModel):
 
 @router.get(
     "/agreements/{agreement_id}/ledger",
-    openapi_extra={"x-sdk-core": True},
+    openapi_extra={"x-sdk-core": "getLedger"},
     summary="Every PayPal money movement and settlement attempt on an agreement",
 )
 def ledger(agreement_id: str, access: AgreementAccessDep, session: SessionDep) -> LedgerView:

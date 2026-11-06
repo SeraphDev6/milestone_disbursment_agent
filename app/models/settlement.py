@@ -44,8 +44,8 @@ class Settlement(SettlementBase, table=True):
 
 
 class SettlementRead(SettlementBase):
-    id: str
-    milestone_status: MilestoneStatus
+    id: str = Field(description="Settlement attempt id.")
+    milestone_status: MilestoneStatus = Field(description="The tranche's status after this call.")
     pay_url: str | None = Field(
         default=None, description="Invoice mode: send the payer here to pay this tranche (while it's open)."
     )
@@ -55,7 +55,7 @@ class DisbursementBase(SQLModel):
     """After a capture: paying the payee (referenced payout or Payouts) or refunding the payer."""
 
     kind: DisbursementKind = Field(sa_type=enum_type(DisbursementKind, 24))
-    attempt: int = Field(ge=1)
+    attempt: int = Field(ge=1, description="1 for the first try; a failed payout retries with the next number.")
     idempotency_key: str = Field(max_length=80, unique=True, description="Sent as PayPal-Request-Id.")
     paypal_ref: str | None = Field(
         default=None, max_length=128, index=True, description="Payout item, payout batch or refund id."
@@ -78,8 +78,8 @@ class Disbursement(DisbursementBase, table=True):
 
 
 class DisbursementRead(DisbursementBase):
-    id: str
-    milestone_status: MilestoneStatus
+    id: str = Field(description="Disbursement attempt id.")
+    milestone_status: MilestoneStatus = Field(description="The tranche's status after this call.")
 
 
 class LedgerEntry(SQLModel, table=True):

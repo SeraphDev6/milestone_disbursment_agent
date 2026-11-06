@@ -3,6 +3,62 @@
     "schemas": {
       "AgreementCreate": {
         "description": "Created by the payer org. The payee and any reviewers are invited by email and join with their own org.",
+        "examples": [
+          {
+            "auto_release_threshold": 0.85,
+            "counterparty_email": "director@riverside.example.org",
+            "currency": "USD",
+            "milestones": [
+              {
+                "amount": "10000.00",
+                "criteria": [
+                  {
+                    "check_id": "row_count",
+                    "evidence_description": "Signed sign-in sheets for each session, one row per attendee",
+                    "evidence_required": [
+                      "spreadsheet"
+                    ],
+                    "measure": {
+                      "comparator": "at_least",
+                      "metric": "workshop attendees",
+                      "target": 200,
+                      "unit": "people"
+                    },
+                    "statement": "At least 200 people attend the spring reading workshops",
+                    "verification": "check"
+                  }
+                ],
+                "due_date": "2027-05-31",
+                "title": "Tranche 1: spring workshops"
+              },
+              {
+                "amount": "20000.00",
+                "criteria": [
+                  {
+                    "evidence_description": "Final outcomes report PDF with the anonymized score table",
+                    "evidence_required": [
+                      "document"
+                    ],
+                    "measure": {
+                      "comparator": "exists",
+                      "metric": "students with pre and post scores"
+                    },
+                    "statement": "Final report shows pre and post reading scores for every enrolled student",
+                    "verification": "model"
+                  }
+                ],
+                "due_date": "2027-09-30",
+                "title": "Tranche 2: outcomes report"
+              }
+            ],
+            "reviewer_emails": [
+              "auditor@sponsor.example.org"
+            ],
+            "settlement_mode": "escrow_release",
+            "title": "Riverside Literacy Grant 2027",
+            "total_amount": "30000.00"
+          }
+        ],
         "properties": {
           "auto_release_threshold": {
             "default": 0.85,
@@ -119,9 +175,11 @@
       "AgreementCreated": {
         "properties": {
           "agreement": {
-            "$ref": "#/components/schemas/AgreementRead"
+            "$ref": "#/components/schemas/AgreementRead",
+            "description": "The draft as stored, with its lint."
           },
           "invitations": {
+            "description": "Invitations sent to the counterparty and reviewers.",
             "items": {
               "$ref": "#/components/schemas/InvitationRead"
             },
@@ -139,6 +197,7 @@
       "AgreementRead": {
         "properties": {
           "auto_release_enabled": {
+            "description": "Set by the payer when signing: a funded tranche settles itself on a confident verdict.",
             "title": "Auto Release Enabled",
             "type": "boolean"
           },
@@ -180,6 +239,7 @@
             "$ref": "#/components/schemas/FundingSummary"
           },
           "id": {
+            "description": "Agreement id.",
             "title": "Id",
             "type": "string"
           },
@@ -192,6 +252,7 @@
             "type": "boolean"
           },
           "milestones": {
+            "description": "Tranches in payment order.",
             "items": {
               "$ref": "#/components/schemas/MilestoneRead"
             },
@@ -204,6 +265,7 @@
             "description": "on_capture only: the least the payee may show the payer of each evidence item before capture. hash_only (pass/fail and the pinned hash), verdict_only (+ observed values), excerpt (+ the verifier's quotes and rationale) or preview. The payee picks a level at or above it per item. Signed with the criteria."
           },
           "parties": {
+            "description": "Payer, payee and any reviewers that have joined.",
             "items": {
               "$ref": "#/components/schemas/PartyRead"
             },
@@ -242,7 +304,8 @@
             "title": "Source Document Uri"
           },
           "status": {
-            "$ref": "#/components/schemas/AgreementStatus"
+            "$ref": "#/components/schemas/AgreementStatus",
+            "description": "draft, awaiting_confirmation, active, completed or cancelled."
           },
           "title": {
             "description": "Human-readable name of the grant or SOW.",
@@ -275,6 +338,7 @@
         "type": "object"
       },
       "AgreementStatus": {
+        "description": "draft (being edited), awaiting_confirmation (sent; parties signing), active (all signed), completed (every tranche settled), cancelled.",
         "enum": [
           "draft",
           "awaiting_confirmation",
@@ -286,6 +350,12 @@
         "type": "string"
       },
       "AgreementText": {
+        "examples": [
+          {
+            "text": "GRANT AGREEMENT between Harbor Foundation and Riverside Reads ... Tranche 1 (USD 10,000) is payable when ...",
+            "title": "Riverside grant.txt"
+          }
+        ],
         "properties": {
           "text": {
             "description": "Full text of the grant agreement or SOW.",
@@ -312,6 +382,7 @@
         "properties": {
           "file": {
             "contentMediaType": "application/octet-stream",
+            "description": "The agreement: PDF, plain text or Markdown, up to 20 MB.",
             "title": "File",
             "type": "string"
           }
@@ -391,6 +462,7 @@
         "type": "object"
       },
       "Comparator": {
+        "description": "How the observed value is compared to the target: at_least, at_most, equals, exists (no target), on_or_before (a date).",
         "enum": [
           "at_least",
           "at_most",
@@ -402,6 +474,12 @@
         "type": "string"
       },
       "ConfirmRequest": {
+        "examples": [
+          {
+            "auto_release_enabled": false,
+            "criteria_hash": "3f1c\u2026e9a2"
+          }
+        ],
         "properties": {
           "auto_release_enabled": {
             "anyOf": [
@@ -696,10 +774,12 @@
       "DisbursementAttempt": {
         "properties": {
           "attempt": {
+            "description": "1 for the first try; a failed payout retries with the next number.",
             "title": "Attempt",
             "type": "integer"
           },
           "created_at": {
+            "description": "When the attempt started.",
             "format": "date-time",
             "title": "Created At",
             "type": "string"
@@ -713,13 +793,16 @@
                 "type": "null"
               }
             ],
+            "description": "PayPal's error when the attempt failed.",
             "title": "Error"
           },
           "id": {
+            "description": "Disbursement attempt id.",
             "title": "Id",
             "type": "string"
           },
           "idempotency_key": {
+            "description": "Sent to PayPal as PayPal-Request-Id, so a retry can't double-pay.",
             "title": "Idempotency Key",
             "type": "string"
           },
@@ -728,6 +811,7 @@
             "description": "referenced_payout or payout (to the payee), refund (to the payer)."
           },
           "milestone_id": {
+            "description": "The tranche whose captured money moves.",
             "title": "Milestone Id",
             "type": "string"
           },
@@ -740,12 +824,15 @@
                 "type": "null"
               }
             ],
+            "description": "Payout item id, referenced payout id or refund id from PayPal.",
             "title": "Paypal Ref"
           },
           "status": {
-            "$ref": "#/components/schemas/SettlementStatus"
+            "$ref": "#/components/schemas/SettlementStatus",
+            "description": "submitted, succeeded, failed or unclaimed."
           },
           "updated_at": {
+            "description": "Last change.",
             "format": "date-time",
             "title": "Updated At",
             "type": "string"
@@ -767,6 +854,7 @@
         "type": "object"
       },
       "DisbursementKind": {
+        "description": "After a capture: referenced_payout releases a delayed capture to the connected payee, payout sends PayPal Payouts to the payee's email (platform route), refund returns the capture to the payer.",
         "enum": [
           "referenced_payout",
           "payout",
@@ -778,11 +866,13 @@
       "DisbursementRead": {
         "properties": {
           "attempt": {
+            "description": "1 for the first try; a failed payout retries with the next number.",
             "minimum": 1.0,
             "title": "Attempt",
             "type": "integer"
           },
           "id": {
+            "description": "Disbursement attempt id.",
             "title": "Id",
             "type": "string"
           },
@@ -796,7 +886,8 @@
             "$ref": "#/components/schemas/DisbursementKind"
           },
           "milestone_status": {
-            "$ref": "#/components/schemas/MilestoneStatus"
+            "$ref": "#/components/schemas/MilestoneStatus",
+            "description": "The tranche's status after this call."
           },
           "paypal_ref": {
             "anyOf": [
@@ -826,8 +917,29 @@
         "title": "DisbursementRead",
         "type": "object"
       },
+      "ErrorResponse": {
+        "properties": {
+          "detail": {
+            "description": "What went wrong, for a person.",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
       "EvidenceAccepted": {
         "description": "Result of an intake call (not an entity).",
+        "examples": [
+          {
+            "duplicate": false,
+            "evidence_id": "ev_01hx\u2026",
+            "milestone_status": "evidence_received"
+          }
+        ],
         "properties": {
           "duplicate": {
             "description": "True when identical evidence was already on file.",
@@ -835,11 +947,13 @@
             "type": "boolean"
           },
           "evidence_id": {
+            "description": "The stored evidence item (the existing one when duplicate).",
             "title": "Evidence Id",
             "type": "string"
           },
           "milestone_status": {
-            "$ref": "#/components/schemas/MilestoneStatus"
+            "$ref": "#/components/schemas/MilestoneStatus",
+            "description": "The tranche's status after intake, before verification."
           }
         },
         "required": [
@@ -852,6 +966,14 @@
       },
       "EvidenceCreate": {
         "description": "Evidence submitted through the API or MCP. Adapters (GitHub, upload) build the same shape.",
+        "examples": [
+          {
+            "content": "session_date,session,attendee,signed\n2027-04-10,Session 1,Ava Nguyen,yes\n...",
+            "dated": "2027-05-22",
+            "evidence_type": "spreadsheet",
+            "title": "Spring workshop sign-in sheets (register).csv"
+          }
+        ],
         "properties": {
           "artifact_uris": {
             "description": "Links to the original files or pages.",
@@ -952,6 +1074,7 @@
         "type": "object"
       },
       "EvidenceType": {
+        "description": "document, spreadsheet, photo, link, code_change (commit or PR), ci_run, dataset, attestation (signed statement from a named third party).",
         "enum": [
           "document",
           "spreadsheet",
@@ -979,10 +1102,12 @@
       "ExtractionProblem": {
         "properties": {
           "message": {
+            "description": "Why it was left out.",
             "title": "Message",
             "type": "string"
           },
           "path": {
+            "description": "Where the proposal would have landed, e.g. 'milestones[1].criteria[0]'.",
             "title": "Path",
             "type": "string"
           }
@@ -997,11 +1122,13 @@
       "ExtractionResult": {
         "properties": {
           "currency": {
+            "description": "ISO 4217, from the document (USD when unstated).",
             "title": "Currency",
             "type": "string"
           },
           "lint": {
-            "$ref": "#/components/schemas/LintReport"
+            "$ref": "#/components/schemas/LintReport",
+            "description": "The same lint that gates signing, run on the proposal."
           },
           "milestones": {
             "description": "Proposed tranches; edit, then POST /agreements.",
@@ -1012,6 +1139,7 @@
             "type": "array"
           },
           "model": {
+            "description": "Which model produced it ('mock' on a stand-in).",
             "title": "Model",
             "type": "string"
           },
@@ -1032,6 +1160,7 @@
             "type": "array"
           },
           "provenance": {
+            "description": "The agreement sentence each criterion was drawn from.",
             "items": {
               "$ref": "#/components/schemas/Provenance"
             },
@@ -1039,6 +1168,7 @@
             "type": "array"
           },
           "title": {
+            "description": "The agreement's name as the model read it.",
             "title": "Title",
             "type": "string"
           },
@@ -1051,6 +1181,7 @@
                 "type": "null"
               }
             ],
+            "description": "The agreement total; null when the document gives none.",
             "title": "Total Amount"
           }
         },
@@ -1069,6 +1200,12 @@
         "type": "object"
       },
       "FundingStarted": {
+        "examples": [
+          {
+            "approve_url": "https://www.sandbox.paypal.com/checkoutnow?token=5O190127TN364715T",
+            "order_id": "5O190127TN364715T"
+          }
+        ],
         "properties": {
           "approve_url": {
             "description": "Send the payer here to approve the hold in PayPal.",
@@ -1076,6 +1213,7 @@
             "type": "string"
           },
           "order_id": {
+            "description": "The PayPal order holding the authorization; the approve_url refers to it.",
             "title": "Order Id",
             "type": "string"
           }
@@ -1145,6 +1283,7 @@
         "type": "object"
       },
       "InvitationKind": {
+        "description": "counterparty (join as the payee), reviewer (join as a reviewer), member (join an organization).",
         "enum": [
           "counterparty",
           "reviewer",
@@ -1165,6 +1304,7 @@
                 "type": "null"
               }
             ],
+            "description": "Set once accepted.",
             "title": "Accepted At"
           },
           "agreement_id": {
@@ -1176,6 +1316,7 @@
                 "type": "null"
               }
             ],
+            "description": "For counterparty and reviewer invitations.",
             "title": "Agreement Id"
           },
           "agreement_title": {
@@ -1187,23 +1328,28 @@
                 "type": "null"
               }
             ],
+            "description": "Its title, for display.",
             "title": "Agreement Title"
           },
           "email": {
+            "description": "The address invited; only a person signed in with it can accept.",
             "title": "Email",
             "type": "string"
           },
           "expires_at": {
+            "description": "After this the invitation can't be accepted.",
             "format": "date-time",
             "title": "Expires At",
             "type": "string"
           },
           "id": {
+            "description": "Invitation id; POST /invitations/{id}/accept takes it.",
             "title": "Id",
             "type": "string"
           },
           "kind": {
-            "$ref": "#/components/schemas/InvitationKind"
+            "$ref": "#/components/schemas/InvitationKind",
+            "description": "counterparty or reviewer (join an agreement), member (join an org)."
           },
           "org_id": {
             "anyOf": [
@@ -1214,6 +1360,7 @@
                 "type": "null"
               }
             ],
+            "description": "For member invitations: the organization to join.",
             "title": "Org Id"
           },
           "org_role": {
@@ -1224,7 +1371,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "For member invitations: the role offered."
           },
           "revoked_at": {
             "anyOf": [
@@ -1236,6 +1384,7 @@
                 "type": "null"
               }
             ],
+            "description": "Set when withdrawn by the inviter.",
             "title": "Revoked At"
           }
         },
@@ -1266,8 +1415,15 @@
         "type": "object"
       },
       "InviteToAgreement": {
+        "examples": [
+          {
+            "email": "auditor@sponsor.example.org",
+            "kind": "reviewer"
+          }
+        ],
         "properties": {
           "email": {
+            "description": "Who to invite.",
             "maxLength": 320,
             "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
             "title": "Email",
@@ -1275,6 +1431,7 @@
           },
           "kind": {
             "default": "reviewer",
+            "description": "counterparty: the payee (replaces a pending payee invitation); reviewer.",
             "enum": [
               "counterparty",
               "reviewer"
@@ -1292,15 +1449,18 @@
       "LedgerEntryRead": {
         "properties": {
           "amount": {
+            "description": "In the agreement's currency.",
             "title": "Amount",
             "type": "string"
           },
           "at": {
+            "description": "When the engine recorded it.",
             "format": "date-time",
             "title": "At",
             "type": "string"
           },
           "id": {
+            "description": "Ledger entry id.",
             "title": "Id",
             "type": "string"
           },
@@ -1318,9 +1478,11 @@
                 "type": "null"
               }
             ],
+            "description": "The tranche the money belongs to; null for agreement-level.",
             "title": "Milestone Id"
           },
           "paypal_ref": {
+            "description": "PayPal's id for the object: authorization, capture, invoice or order.",
             "title": "Paypal Ref",
             "type": "string"
           }
@@ -1339,6 +1501,7 @@
       "LedgerView": {
         "properties": {
           "currency": {
+            "description": "The agreement's ISO 4217 currency; every amount below is in it.",
             "title": "Currency",
             "type": "string"
           },
@@ -1420,6 +1583,7 @@
         "type": "object"
       },
       "LintLevel": {
+        "description": "error blocks signing; warning is shown but doesn't.",
         "enum": [
           "error",
           "warning"
@@ -1714,6 +1878,7 @@
             "title": "Funded At"
           },
           "id": {
+            "description": "Tranche (milestone) id.",
             "title": "Id",
             "type": "string"
           },
@@ -1738,6 +1903,7 @@
                 "type": "null"
               }
             ],
+            "description": "Payee-side user the tranche is assigned to.",
             "title": "Payee Assignee Id"
           },
           "payer_assignee_id": {
@@ -1749,6 +1915,7 @@
                 "type": "null"
               }
             ],
+            "description": "Payer-side user the tranche is assigned to.",
             "title": "Payer Assignee Id"
           },
           "payout_route": {
@@ -1775,6 +1942,7 @@
             "title": "Paypal Authorization Id"
           },
           "position": {
+            "description": "0-based order within the agreement.",
             "title": "Position",
             "type": "integer"
           },
@@ -1811,7 +1979,8 @@
             "title": "Revealed At"
           },
           "status": {
-            "$ref": "#/components/schemas/MilestoneStatus"
+            "$ref": "#/components/schemas/MilestoneStatus",
+            "description": "Where the tranche is in its life, pending to settled."
           },
           "title": {
             "description": "Short name of the tranche or deliverable.",
@@ -1833,6 +2002,7 @@
         "type": "object"
       },
       "MilestoneStatus": {
+        "description": "A tranche's life: pending, funded (hold placed), evidence_received, verifying, needs_review, verified, settling, held (captured, in the dispute window), contested, settled (paid), refunded, settlement_failed, payout_failed, disputed (payee contests a rejection), overdue.",
         "enum": [
           "pending",
           "funded",
@@ -1854,6 +2024,7 @@
         "type": "string"
       },
       "OrgRole": {
+        "description": "owner, admin, member, viewer: what a person may do inside their organization (admins sign and release; members submit evidence; viewers read).",
         "enum": [
           "owner",
           "admin",
@@ -1878,10 +2049,12 @@
             "type": "string"
           },
           "id": {
+            "description": "Party id.",
             "title": "Id",
             "type": "string"
           },
           "org_id": {
+            "description": "The organization acting in this role.",
             "title": "Org Id",
             "type": "string"
           },
@@ -1935,6 +2108,17 @@
         "type": "string"
       },
       "PrecheckRequest": {
+        "examples": [
+          {
+            "evidence": [
+              {
+                "content": "Riverside Reads draft report, dated 2027-09-12 ...",
+                "evidence_type": "document",
+                "title": "Draft report.txt"
+              }
+            ]
+          }
+        ],
         "properties": {
           "evidence": {
             "description": "Draft evidence; nothing is stored.",
@@ -1973,6 +2157,20 @@
         "type": "object"
       },
       "ReviewOutcome": {
+        "examples": [
+          {
+            "milestone_status": "funded",
+            "missing": [
+              {
+                "criterion_id": "c1",
+                "decided_by": "model",
+                "evidence_ids": [],
+                "met": false,
+                "missing": "Post-program scores for section B (R-045 to R-087)."
+              }
+            ]
+          }
+        ],
         "properties": {
           "milestone_status": {
             "$ref": "#/components/schemas/MilestoneStatus"
@@ -1994,8 +2192,15 @@
         "type": "object"
       },
       "ReviewRequest": {
+        "examples": [
+          {
+            "decision": "reject",
+            "note": "Table 2 is missing the post-program scores for section B."
+          }
+        ],
         "properties": {
           "decision": {
+            "description": "approve releases the tranche (it settles when funded); reject sends it back with what's missing.",
             "enum": [
               "approve",
               "reject"
@@ -2036,10 +2241,12 @@
       "SettlementAttempt": {
         "properties": {
           "attempt": {
+            "description": "1 for the first try; a failed release retries with the next number.",
             "title": "Attempt",
             "type": "integer"
           },
           "created_at": {
+            "description": "When the attempt started.",
             "format": "date-time",
             "title": "Created At",
             "type": "string"
@@ -2053,22 +2260,27 @@
                 "type": "null"
               }
             ],
+            "description": "PayPal's error when the attempt failed.",
             "title": "Error"
           },
           "id": {
+            "description": "Settlement attempt id.",
             "title": "Id",
             "type": "string"
           },
           "idempotency_key": {
+            "description": "Sent to PayPal as PayPal-Request-Id, so a retry can't double-charge.",
             "title": "Idempotency Key",
             "type": "string"
           },
           "milestone_id": {
+            "description": "The tranche being settled.",
             "title": "Milestone Id",
             "type": "string"
           },
           "mode": {
-            "$ref": "#/components/schemas/SettlementMode"
+            "$ref": "#/components/schemas/SettlementMode",
+            "description": "escrow_release (capture a hold) or invoice_on_verify."
           },
           "paypal_ref": {
             "anyOf": [
@@ -2079,12 +2291,15 @@
                 "type": "null"
               }
             ],
+            "description": "Capture id, invoice id or pay-now order id once PayPal answered.",
             "title": "Paypal Ref"
           },
           "status": {
-            "$ref": "#/components/schemas/SettlementStatus"
+            "$ref": "#/components/schemas/SettlementStatus",
+            "description": "submitted, succeeded, failed or expired."
           },
           "updated_at": {
+            "description": "Last change.",
             "format": "date-time",
             "title": "Updated At",
             "type": "string"
@@ -2106,6 +2321,7 @@
         "type": "object"
       },
       "SettlementMode": {
+        "description": "How a verified tranche is paid: escrow_release captures a PayPal hold placed when funding; invoice_on_verify asks the payer to pay once it's verified.",
         "enum": [
           "escrow_release",
           "invoice_on_verify"
@@ -2122,6 +2338,7 @@
             "type": "integer"
           },
           "id": {
+            "description": "Settlement attempt id.",
             "title": "Id",
             "type": "string"
           },
@@ -2132,7 +2349,8 @@
             "type": "string"
           },
           "milestone_status": {
-            "$ref": "#/components/schemas/MilestoneStatus"
+            "$ref": "#/components/schemas/MilestoneStatus",
+            "description": "The tranche's status after this call."
           },
           "mode": {
             "$ref": "#/components/schemas/SettlementMode",
@@ -2180,6 +2398,7 @@
         "type": "object"
       },
       "SettlementStatus": {
+        "description": "submitted (sent to PayPal), succeeded, failed, unclaimed (payout to an email with no PayPal account), expired (hold lapsed or invoice timed out).",
         "enum": [
           "submitted",
           "succeeded",
@@ -2255,6 +2474,14 @@
         "type": "object"
       },
       "SubscriptionCreate": {
+        "examples": [
+          {
+            "events": [
+              "milestone.status_changed"
+            ],
+            "url": "https://example.org/hooks/milestone-ledger"
+          }
+        ],
         "properties": {
           "events": {
             "description": "Event types (milestone.status_changed), prefixes ending in '.' (milestone.), or '*'.",
@@ -2280,10 +2507,12 @@
       "SubscriptionCreated": {
         "properties": {
           "active": {
+            "description": "False once deleted; deliveries stop.",
             "title": "Active",
             "type": "boolean"
           },
           "created_at": {
+            "description": "When it was registered.",
             "format": "date-time",
             "title": "Created At",
             "type": "string"
@@ -2297,6 +2526,7 @@
             "type": "array"
           },
           "id": {
+            "description": "Subscription id.",
             "title": "Id",
             "type": "string"
           },
@@ -2325,10 +2555,12 @@
       "SubscriptionRead": {
         "properties": {
           "active": {
+            "description": "False once deleted; deliveries stop.",
             "title": "Active",
             "type": "boolean"
           },
           "created_at": {
+            "description": "When it was registered.",
             "format": "date-time",
             "title": "Created At",
             "type": "string"
@@ -2342,6 +2574,7 @@
             "type": "array"
           },
           "id": {
+            "description": "Subscription id.",
             "title": "Id",
             "type": "string"
           },
@@ -2404,6 +2637,7 @@
       "VerdictRead": {
         "properties": {
           "created_at": {
+            "description": "When the verifier finished.",
             "format": "date-time",
             "title": "Created At",
             "type": "string"
@@ -2423,6 +2657,7 @@
             "type": "string"
           },
           "id": {
+            "description": "Verdict id; review decisions refer to it in the audit log.",
             "title": "Id",
             "type": "string"
           },
@@ -2488,6 +2723,7 @@
         "type": "object"
       },
       "VerificationMethod": {
+        "description": "check: a deterministic check from the registry decides it; model: the verifier reads the evidence; human: a named person must sign off.",
         "enum": [
           "check",
           "model",
@@ -2496,22 +2732,29 @@
         "title": "VerificationMethod",
         "type": "string"
       }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "description": "A person's session token or an organization API key. People in several organizations also send X-Org-Id.",
+        "scheme": "bearer",
+        "type": "http"
+      }
     }
   },
   "info": {
-    "description": "The core flow an SDK covers: draft and confirm an agreement, fund a tranche, submit evidence, read the verdict, review and release. Turns an agreement into checkable acceptance criteria, verifies evidence against them, and settles each tranche through PayPal.",
+    "description": "The core flow an SDK covers: draft and confirm an agreement, fund a tranche, submit evidence, read the verdict, review and release. Turns an agreement into checkable acceptance criteria, verifies evidence against them, and settles each tranche through PayPal.\n\n## Conventions\n\n- **Authentication:** `Authorization: Bearer <token>`, where the token is a person's session (from a magic link or\n  SSO) or an organization API key (`POST /orgs/{id}/api-keys`). A person who belongs to several organizations sends\n  `X-Org-Id` to say which one they act for.\n- **Errors:** every 4xx body is `{\"detail\": \"<what went wrong>\"}` (422 carries FastAPI's field-level list in `detail`).\n  401: no or expired token. 403: this org or role may not do that. 404: no such resource, or not yours to see.\n  409: the resource isn't in a state that allows the call; the detail says what state it is in. 429: rate limited\n  (`Retry-After` in seconds).\n- **Idempotency and retries:** submitting identical evidence is a no-op (`duplicate: true`). Funding, releasing\n  and paying out are safe to call again: an in-flight attempt is resumed with the same PayPal idempotency key, a\n  finished one answers 409. Confirming with a stale `criteria_hash` answers 409 with the current criteria.\n- **Pagination:** none. Lists (ledger, subscriptions, evidence) are per agreement or tranche and returned whole.\n- **Money:** decimal strings with two places, in the agreement's ISO 4217 `currency`. Times are ISO 8601 with offset.\n",
     "license": {
       "identifier": "AGPL-3.0-only",
       "name": "AGPL-3.0-only"
     },
     "title": "Milestone Disbursement Engine (core)",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "openapi": "3.1.0",
   "paths": {
     "/agreements/extract": {
       "post": {
-        "operationId": "extract_agreement_agreements_extract_post",
+        "operationId": "extractAgreement",
         "parameters": [
           {
             "description": "Deployment key, required when the server sets one.",
@@ -2569,6 +2812,46 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -2577,19 +2860,33 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request body or parameters failed validation."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limited for this caller; `Retry-After` says when to try again."
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Propose tranches and checkable criteria from an agreement document (PDF or text upload)",
         "tags": [
           "agreements"
-        ],
-        "x-sdk-core": true
+        ]
       }
     },
     "/agreements/extract-text": {
       "post": {
-        "operationId": "extract_agreement_text_agreements_extract_text_post",
+        "operationId": "extractAgreementText",
         "parameters": [
           {
             "description": "Deployment key, required when the server sets one.",
@@ -2647,6 +2944,46 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -2655,20 +2992,34 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request body or parameters failed validation."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limited for this caller; `Retry-After` says when to try again."
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Propose tranches and checkable criteria from an agreement's text",
         "tags": [
           "agreements"
         ],
-        "x-mcp-tool": "draft_agreement_from_text",
-        "x-sdk-core": true
+        "x-mcp-tool": "draft_agreement_from_text"
       }
     },
     "/agreements/{agreement_id}": {
       "get": {
-        "operationId": "get_agreement_agreements__agreement_id__get",
+        "operationId": "getAgreement",
         "parameters": [
           {
             "in": "path",
@@ -2725,6 +3076,46 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -2733,20 +3124,24 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request body or parameters failed validation."
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Agreement, tranches, criteria, lint and confirmation status",
         "tags": [
           "agreements"
         ],
-        "x-mcp-tool": "get_agreement_status",
-        "x-sdk-core": true
+        "x-mcp-tool": "get_agreement_status"
       }
     },
     "/agreements/{agreement_id}/confirm": {
       "post": {
-        "operationId": "confirm_agreements__agreement_id__confirm_post",
+        "operationId": "confirmAgreement",
         "parameters": [
           {
             "in": "path",
@@ -2813,6 +3208,46 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -2821,19 +3256,23 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request body or parameters failed validation."
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Sign the current criteria hash for your org; activates when every party has signed",
         "tags": [
           "agreements"
-        ],
-        "x-sdk-core": true
+        ]
       }
     },
     "/agreements/{agreement_id}/invitations": {
       "post": {
-        "operationId": "invite_to_agreement_agreements__agreement_id__invitations_post",
+        "operationId": "inviteToAgreement",
         "parameters": [
           {
             "in": "path",
@@ -2900,6 +3339,46 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -2908,19 +3387,23 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request body or parameters failed validation."
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Invite a reviewer (or the payee, if none has joined) to this agreement (payer admin)",
         "tags": [
           "agreements"
-        ],
-        "x-sdk-core": true
+        ]
       }
     },
     "/agreements/{agreement_id}/ledger": {
       "get": {
-        "operationId": "ledger_agreements__agreement_id__ledger_get",
+        "operationId": "getLedger",
         "parameters": [
           {
             "in": "path",
@@ -2977,6 +3460,46 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -2985,19 +3508,23 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request body or parameters failed validation."
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Every PayPal money movement and settlement attempt on an agreement",
         "tags": [
           "settlement"
-        ],
-        "x-sdk-core": true
+        ]
       }
     },
     "/agreements/{agreement_id}/subscriptions": {
       "get": {
-        "operationId": "list_subscriptions_agreements__agreement_id__subscriptions_get",
+        "operationId": "listSubscriptions",
         "parameters": [
           {
             "in": "path",
@@ -3058,6 +3585,46 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -3066,17 +3633,21 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request body or parameters failed validation."
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Subscriptions on this agreement",
         "tags": [
           "events"
-        ],
-        "x-sdk-core": true
+        ]
       },
       "post": {
-        "operationId": "subscribe_agreements__agreement_id__subscriptions_post",
+        "operationId": "createSubscription",
         "parameters": [
           {
             "in": "path",
@@ -3143,6 +3714,46 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -3151,19 +3762,23 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request body or parameters failed validation."
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Subscribe a URL to this agreement's events",
         "tags": [
           "events"
-        ],
-        "x-sdk-core": true
+        ]
       }
     },
     "/agreements/{agreement_id}/subscriptions/{subscription_id}": {
       "delete": {
-        "operationId": "unsubscribe_agreements__agreement_id__subscriptions__subscription_id__delete",
+        "operationId": "deleteSubscription",
         "parameters": [
           {
             "in": "path",
@@ -3222,6 +3837,46 @@
           "204": {
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -3230,19 +3885,23 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request body or parameters failed validation."
           }
         },
-        "summary": "Unsubscribe",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Remove a subscription; deliveries to it stop",
         "tags": [
           "events"
-        ],
-        "x-sdk-core": true
+        ]
       }
     },
     "/milestones/{milestone_id}/evidence": {
       "post": {
-        "operationId": "submit_evidence_milestones__milestone_id__evidence_post",
+        "operationId": "submitEvidence",
         "parameters": [
           {
             "in": "path",
@@ -3309,6 +3968,46 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -3317,20 +4016,24 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request body or parameters failed validation."
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Payee submits evidence for a tranche; verification runs in the background",
         "tags": [
           "evidence"
         ],
-        "x-mcp-tool": "submit_evidence",
-        "x-sdk-core": true
+        "x-mcp-tool": "submit_evidence"
       }
     },
     "/milestones/{milestone_id}/fund": {
       "post": {
-        "operationId": "fund_milestones__milestone_id__fund_post",
+        "operationId": "fundMilestone",
         "parameters": [
           {
             "in": "path",
@@ -3387,6 +4090,46 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -3395,19 +4138,23 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request body or parameters failed validation."
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Payer starts a PayPal hold for one tranche",
         "tags": [
           "settlement"
-        ],
-        "x-sdk-core": true
+        ]
       }
     },
     "/milestones/{milestone_id}/payout": {
       "post": {
-        "operationId": "payout_milestones__milestone_id__payout_post",
+        "operationId": "payoutMilestone",
         "parameters": [
           {
             "in": "path",
@@ -3464,6 +4211,46 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -3472,19 +4259,23 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request body or parameters failed validation."
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Pay a captured tranche to the payee now (waives the rest of the dispute window; retries a failed payout)",
         "tags": [
           "settlement"
-        ],
-        "x-sdk-core": true
+        ]
       }
     },
     "/milestones/{milestone_id}/precheck": {
       "post": {
-        "operationId": "precheck_milestones__milestone_id__precheck_post",
+        "operationId": "precheckEvidence",
         "parameters": [
           {
             "in": "path",
@@ -3551,6 +4342,46 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -3559,20 +4390,34 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request body or parameters failed validation."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limited for this caller; `Retry-After` says when to try again."
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Payee checks draft evidence against the criteria without submitting it",
         "tags": [
           "evidence"
         ],
-        "x-mcp-tool": "precheck_evidence",
-        "x-sdk-core": true
+        "x-mcp-tool": "precheck_evidence"
       }
     },
     "/milestones/{milestone_id}/release": {
       "post": {
-        "operationId": "release_milestones__milestone_id__release_post",
+        "operationId": "releaseMilestone",
         "parameters": [
           {
             "in": "path",
@@ -3629,6 +4474,46 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -3637,19 +4522,23 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request body or parameters failed validation."
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Settle a verified tranche: capture its hold or send its invoice (also resumes a failed release)",
         "tags": [
           "settlement"
-        ],
-        "x-sdk-core": true
+        ]
       }
     },
     "/milestones/{milestone_id}/review": {
       "post": {
-        "operationId": "review_milestones__milestone_id__review_post",
+        "operationId": "reviewMilestone",
         "parameters": [
           {
             "in": "path",
@@ -3716,6 +4605,46 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -3724,19 +4653,23 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request body or parameters failed validation."
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Payer (admin) or reviewer approves or rejects a verdict in review",
         "tags": [
           "evidence"
-        ],
-        "x-sdk-core": true
+        ]
       }
     },
     "/milestones/{milestone_id}/uploads": {
       "post": {
-        "operationId": "upload_evidence_milestones__milestone_id__uploads_post",
+        "operationId": "uploadEvidence",
         "parameters": [
           {
             "in": "path",
@@ -3807,6 +4740,46 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -3815,19 +4788,23 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request body or parameters failed validation."
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Payee uploads evidence files (PDF, CSV, XLSX, TXT, MD, images); verification runs in the background",
         "tags": [
           "evidence"
-        ],
-        "x-sdk-core": true
+        ]
       }
     },
     "/milestones/{milestone_id}/verdict": {
       "get": {
-        "operationId": "get_verdict_milestones__milestone_id__verdict_get",
+        "operationId": "getVerdict",
         "parameters": [
           {
             "in": "path",
@@ -3884,6 +4861,46 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -3892,20 +4909,24 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request body or parameters failed validation."
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Latest verdict for a tranche, with per-criterion results and citations",
         "tags": [
           "evidence"
         ],
-        "x-mcp-tool": "get_verdict",
-        "x-sdk-core": true
+        "x-mcp-tool": "get_verdict"
       }
     },
     "/orgs/{org_id}/agreements": {
       "post": {
-        "operationId": "create_agreement_orgs__org_id__agreements_post",
+        "operationId": "createAgreement",
         "parameters": [
           {
             "in": "path",
@@ -3954,6 +4975,46 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -3962,16 +5023,49 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request body or parameters failed validation."
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Create a draft agreement as this org (the payer) and invite the payee and any reviewers",
         "tags": [
           "agreements"
         ],
-        "x-mcp-tool": "create_agreement",
-        "x-sdk-core": true
+        "x-mcp-tool": "create_agreement"
       }
     }
-  }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "servers": [
+    {
+      "description": "Hosted sandbox (PayPal sandbox, demo on)",
+      "url": "https://app.milestone-ledger.com/api"
+    }
+  ],
+  "tags": [
+    {
+      "description": "Drafting, inviting, reading and signing agreements.",
+      "name": "agreements"
+    },
+    {
+      "description": "Pre-checks, submissions, verdicts and review decisions on a tranche.",
+      "name": "evidence"
+    },
+    {
+      "description": "Funding, releasing and paying out a tranche; the ledger.",
+      "name": "settlement"
+    },
+    {
+      "description": "Signed outbound webhooks for an agreement's events.",
+      "name": "events"
+    }
+  ]
 }

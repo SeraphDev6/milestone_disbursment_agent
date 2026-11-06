@@ -116,16 +116,16 @@ class Invitation(SQLModel, table=True):
 
 
 class InvitationRead(SQLModel):
-    id: str
-    kind: InvitationKind
-    email: str
-    agreement_id: str | None
-    agreement_title: str | None = None
-    org_id: str | None
-    org_role: OrgRole | None
-    expires_at: datetime
-    accepted_at: datetime | None
-    revoked_at: datetime | None
+    id: str = Field(description="Invitation id; POST /invitations/{id}/accept takes it.")
+    kind: InvitationKind = Field(description="counterparty or reviewer (join an agreement), member (join an org).")
+    email: str = Field(description="The address invited; only a person signed in with it can accept.")
+    agreement_id: str | None = Field(description="For counterparty and reviewer invitations.")
+    agreement_title: str | None = Field(default=None, description="Its title, for display.")
+    org_id: str | None = Field(description="For member invitations: the organization to join.")
+    org_role: OrgRole | None = Field(description="For member invitations: the role offered.")
+    expires_at: datetime = Field(description="After this the invitation can't be accepted.")
+    accepted_at: datetime | None = Field(description="Set once accepted.")
+    revoked_at: datetime | None = Field(description="Set when withdrawn by the inviter.")
 
 
 # --- Tokens ----------------------------------------------------------------------------

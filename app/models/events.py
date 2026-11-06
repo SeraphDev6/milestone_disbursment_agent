@@ -194,9 +194,9 @@ class SubscriptionCreate(SubscriptionBase):
 
 
 class SubscriptionRead(SubscriptionBase):
-    id: str
-    active: bool
-    created_at: datetime
+    id: str = Field(description="Subscription id.")
+    active: bool = Field(description="False once deleted; deliveries stop.")
+    created_at: datetime = Field(description="When it was registered.")
 
 
 class SubscriptionCreated(SubscriptionRead):

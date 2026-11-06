@@ -355,7 +355,7 @@ async def github_webhook(
 
 @router.post(
     "/agreements/{agreement_id}/subscriptions",
-    openapi_extra={"x-sdk-core": True},
+    openapi_extra={"x-sdk-core": "createSubscription"},
     tags=["events"],
     summary="Subscribe a URL to this agreement's events",
 )
@@ -381,7 +381,7 @@ def subscribe(
 
 @router.get(
     "/agreements/{agreement_id}/subscriptions",
-    openapi_extra={"x-sdk-core": True},
+    openapi_extra={"x-sdk-core": "listSubscriptions"},
     tags=["events"],
     summary="Subscriptions on this agreement",
 )
@@ -393,9 +393,10 @@ def list_subscriptions(agreement_id: str, access: AgreementAccessDep, session: S
 
 @router.delete(
     "/agreements/{agreement_id}/subscriptions/{subscription_id}",
-    openapi_extra={"x-sdk-core": True},
+    openapi_extra={"x-sdk-core": "deleteSubscription"},
     tags=["events"],
     status_code=204,
+    summary="Remove a subscription; deliveries to it stop",
 )
 def unsubscribe(agreement_id: str, subscription_id: str, access: AgreementAccessDep, session: SessionDep) -> Response:
     access.require(Action.manage_subscriptions)

@@ -200,5 +200,5 @@ class Verdict(VerdictBase, table=True):
 
 
 class VerdictRead(VerdictBase):
-    id: str
-    created_at: datetime
+    id: str = Field(description="Verdict id; review decisions refer to it in the audit log.")
+    created_at: datetime = Field(description="When the verifier finished.")

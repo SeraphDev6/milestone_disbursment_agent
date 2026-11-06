@@ -66,8 +66,8 @@ class Party(PartyBase, table=True):
 
 
 class PartyRead(PartyBase):
-    id: str
-    org_id: str
+    id: str = Field(description="Party id.")
+    org_id: str = Field(description="The organization acting in this role.")
     confirmed_current: bool = Field(description="Whether this party has signed the current criteria hash.")
     paypal_connected: bool | None = Field(
         default=None,
@@ -138,12 +138,12 @@ class MilestoneCreate(MilestoneBase):
 
 
 class MilestoneRead(MilestoneBase):
-    id: str
-    position: int
-    status: MilestoneStatus
+    id: str = Field(description="Tranche (milestone) id.")
+    position: int = Field(description="0-based order within the agreement.")
+    status: MilestoneStatus = Field(description="Where the tranche is in its life, pending to settled.")
     paypal_authorization_id: str | None = Field(default=None, description="Live PayPal hold for this tranche.")
-    payer_assignee_id: str | None = None
-    payee_assignee_id: str | None = None
+    payer_assignee_id: str | None = Field(default=None, description="Payer-side user the tranche is assigned to.")
+    payee_assignee_id: str | None = Field(default=None, description="Payee-side user the tranche is assigned to.")
     funded_at: datetime | None = Field(default=None, description="When the original hold was placed.")
     payout_route: PayoutRoute | None = Field(
         default=None, description="direct: paid into the payee's connected PayPal; platform: via PayPal Payouts."
@@ -271,15 +271,17 @@ class FundingSummary(SQLModel):
 
 
 class AgreementRead(AgreementBase):
-    id: str
-    status: AgreementStatus
-    auto_release_enabled: bool
+    id: str = Field(description="Agreement id.")
+    status: AgreementStatus = Field(description="draft, awaiting_confirmation, active, completed or cancelled.")
+    auto_release_enabled: bool = Field(
+        description="Set by the payer when signing: a funded tranche settles itself on a confident verdict."
+    )
     criteria_hash: str = Field(description="Hash of the current tranches and criteria; sign this to confirm.")
     locked: bool = Field(description="True once every party signed and criteria can no longer change.")
-    parties: list[PartyRead]
+    parties: list[PartyRead] = Field(description="Payer, payee and any reviewers that have joined.")
     pending_invitations: list[str] = Field(
         default_factory=list, description="Emails invited (as counterparty or reviewer) who haven't joined yet."
     )
-    milestones: list[MilestoneRead]
+    milestones: list[MilestoneRead] = Field(description="Tranches in payment order.")
     funding: FundingSummary
     lint: LintReport

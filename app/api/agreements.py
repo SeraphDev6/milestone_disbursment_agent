@@ -47,13 +47,15 @@ class TranchesDraft(SQLModel):
 
 
 class AgreementCreated(SQLModel):
-    agreement: AgreementRead
-    invitations: list[InvitationRead]
+    agreement: AgreementRead = Field(description="The draft as stored, with its lint.")
+    invitations: list[InvitationRead] = Field(description="Invitations sent to the counterparty and reviewers.")
 
 
 class InviteToAgreement(SQLModel):
-    email: str = Field(max_length=320, schema_extra={"pattern": EMAIL_PATTERN})
-    kind: Literal["counterparty", "reviewer"] = "reviewer"
+    email: str = Field(max_length=320, schema_extra={"pattern": EMAIL_PATTERN}, description="Who to invite.")
+    kind: Literal["counterparty", "reviewer"] = Field(
+        default="reviewer", description="counterparty: the payee (replaces a pending payee invitation); reviewer."
+    )
 
 
 class InvitationSent(SQLModel):
@@ -86,7 +88,7 @@ class AgreementText(SQLModel):
 
 @router.post(
     "/agreements/extract-text",
-    openapi_extra={"x-sdk-core": True, "x-mcp-tool": "draft_agreement_from_text"},
+    openapi_extra={"x-sdk-core": "extractAgreementText", "x-mcp-tool": "draft_agreement_from_text"},
     summary="Propose tranches and checkable criteria from an agreement's text",
 )
 async def extract_agreement_text(
@@ -101,11 +103,14 @@ async def extract_agreement_text(
 
 @router.post(
     "/agreements/extract",
-    openapi_extra={"x-sdk-core": True},
+    openapi_extra={"x-sdk-core": "extractAgreement"},
     summary="Propose tranches and checkable criteria from an agreement document (PDF or text upload)",
 )
 async def extract_agreement(
-    request: Request, _: OrgKeyDep, principal: PrincipalDep, file: Annotated[UploadFile, File()]
+    request: Request,
+    _: OrgKeyDep,
+    principal: PrincipalDep,
+    file: Annotated[UploadFile, File(description="The agreement: PDF, plain text or Markdown, up to 20 MB.")],
 ) -> ExtractionResult:
     rate_limit(request, "extract", principal.actor)
     media_type = (file.content_type or "").split(";")[0]
@@ -132,7 +137,7 @@ def lint(draft: TranchesDraft) -> LintReport:
 @router.post(
     "/orgs/{org_id}/agreements",
     status_code=status.HTTP_201_CREATED,
-    openapi_extra={"x-sdk-core": True, "x-mcp-tool": "create_agreement"},
+    openapi_extra={"x-sdk-core": "createAgreement", "x-mcp-tool": "create_agreement"},
     summary="Create a draft agreement as this org (the payer) and invite the payee and any reviewers",
 )
 def create_agreement(
@@ -176,7 +181,7 @@ def create_agreement(
 
 @router.get(
     "/agreements/{agreement_id}",
-    openapi_extra={"x-sdk-core": True, "x-mcp-tool": "get_agreement_status"},
+    openapi_extra={"x-sdk-core": "getAgreement", "x-mcp-tool": "get_agreement_status"},
     summary="Agreement, tranches, criteria, lint and confirmation status",
 )
 def get_agreement(agreement_id: str, access: AgreementAccessDep) -> AgreementRead:
@@ -186,7 +191,7 @@ def get_agreement(agreement_id: str, access: AgreementAccessDep) -> AgreementRea
 
 @router.post(
     "/agreements/{agreement_id}/invitations",
-    openapi_extra={"x-sdk-core": True},
+    openapi_extra={"x-sdk-core": "inviteToAgreement"},
     status_code=201,
     summary="Invite a reviewer (or the payee, if none has joined) to this agreement (payer admin)",
 )
@@ -267,7 +272,7 @@ def replace_milestones(
 
 @router.post(
     "/agreements/{agreement_id}/confirm",
-    openapi_extra={"x-sdk-core": True},
+    openapi_extra={"x-sdk-core": "confirmAgreement"},
     summary="Sign the current criteria hash for your org; activates when every party has signed",
 )
 def confirm(agreement_id: str, body: ConfirmRequest, access: AgreementAccessDep, session: SessionDep) -> AgreementRead:
