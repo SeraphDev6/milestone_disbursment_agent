@@ -394,8 +394,7 @@ def _skeptic_detail(v: Verdict) -> dict:
 
 def _notify_review_needed(session: Session, m: Milestone, verdict: Verdict) -> None:
     subject = tranche_subject(m, "Review needed")
-    sides = [Role.reviewer] if m.agreement.require_reviewer_approval else [Role.payer, Role.reviewer]
-    for role in sides:
+    for role in disclosure.approver_sides(m):
         # The payer side reads what disclosure allows while the work is withheld (deliverable_release=on_capture).
         shown = disclosure.verdict_read(verdict, m, role)
         unmet = [r for r in shown.criteria_results if not r.met]

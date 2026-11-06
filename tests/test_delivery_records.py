@@ -46,10 +46,15 @@ def test_reviewer_and_payee_see_what_the_payer_sees(client, draft):
 
 
 def test_lint_suggests_reviewer_approval_when_the_payer_cant_see_the_work(client, draft):
+    # By default the reviewer decides withheld tranches (#8), so there's nothing to warn about...
     aid, _, ctx = setup(client, draft, reviewer=True)
     codes = [i["code"] for i in client.get(f"/agreements/{aid}", headers=h(ctx["payer"])).json()["lint"]["issues"]]
+    assert "payer_reviews_unseen_work" not in codes
+    # ...unless that's turned off and nothing else routes review to the reviewer.
+    aid, _, ctx = setup(client, draft, reviewer=True, reviewer_decides_withheld=False)
+    codes = [i["code"] for i in client.get(f"/agreements/{aid}", headers=h(ctx["payer"])).json()["lint"]["issues"]]
     assert "payer_reviews_unseen_work" in codes
-    aid, _, ctx = setup(client, draft, reviewer=True, require_reviewer_approval=True)
+    aid, _, ctx = setup(client, draft, reviewer=True, reviewer_decides_withheld=False, require_reviewer_approval=True)
     codes = [i["code"] for i in client.get(f"/agreements/{aid}", headers=h(ctx["payer"])).json()["lint"]["issues"]]
     assert "payer_reviews_unseen_work" not in codes
 

@@ -1370,6 +1370,12 @@ export interface components {
              */
             require_reviewer_approval?: boolean;
             /**
+             * Reviewer Decides Withheld
+             * @description deliverable_release=on_capture: while a tranche's evidence is withheld from the payer, a tranche in review waits for an invited reviewer's approval (they see all the evidence; the payer can't judge what they can't see, but can still reject). Without a reviewer on the agreement the payer decides as usual.
+             * @default true
+             */
+            reviewer_decides_withheld?: boolean;
+            /**
              * Dispute Window Days
              * @description Escrow: days between capturing a verified tranche and paying the payee, during which the payer or a reviewer can contest it. 0 pays at once.
              * @default 0
@@ -1444,6 +1450,12 @@ export interface components {
              * @default false
              */
             require_reviewer_approval?: boolean;
+            /**
+             * Reviewer Decides Withheld
+             * @description deliverable_release=on_capture: while a tranche's evidence is withheld from the payer, a tranche in review waits for an invited reviewer's approval (they see all the evidence; the payer can't judge what they can't see, but can still reject). Without a reviewer on the agreement the payer decides as usual.
+             * @default true
+             */
+            reviewer_decides_withheld?: boolean;
             /**
              * Dispute Window Days
              * @description Escrow: days between capturing a verified tranche and paying the payee, during which the payer or a reviewer can contest it. 0 pays at once.
@@ -3052,6 +3064,13 @@ export interface components {
              * @default false
              */
             second_opinion_disagreed?: boolean;
+            /** @description Whose approval it waits for: the reviewer when the agreement requires one or the work is withheld from the payer, else the payer. A payer can always reject. */
+            waiting_on: components["schemas"]["Role"];
+            /**
+             * Yours To Decide
+             * @description This org's side is the one whose approval it waits for.
+             */
+            yours_to_decide: boolean;
         };
         /** ReviewOutcome */
         ReviewOutcome: {
