@@ -1,0 +1,162 @@
+<!--
+title: Terms of Use
+description: The terms for using the Milestone Ledger hosted service: what it does, what we are and are not responsible for, and what we ask of you.
+-->
+<div class="doc">
+  <header class="doc-head">
+    <p class="eyebrow">Terms of use</p>
+    <h1>Terms of Use</h1>
+    <p class="lede">The agreement between you and us for using the Milestone Ledger hosted service. Plain language where the law allows it.</p>
+    <p class="doc-meta"><span>Effective <time datetime="2026-11-06">November 6, 2026</time></span><span aria-hidden="true">·</span><span class="stamp stamp-review stamp-flat">Sandbox stage</span></p>
+  </header>
+
+  <div class="doc-body">
+    <div class="callout callout-warning">
+      <svg class="glyph" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" aria-hidden="true" focusable="false"><path d="M8 2.5l6 11H2zM8 6.5v3.5M8 11.5v.5"/></svg>
+      <div class="callout-body">
+        <p class="callout-title">Sandbox stage</p>
+        <p>The hosted service currently runs in PayPal's sandbox. No real money moves, only PayPal sandbox accounts can be connected, and agreements made on it are for evaluation. These terms govern that use now. They will be reviewed by counsel, and the fee schedule and governing law stated, before any live deployment accepts real payments.</p>
+      </div>
+    </div>
+
+    <h2 id="agreement">1. The agreement</h2>
+    <p>These terms are between you and Milestone Ledger ("we", "us"), the hosted service at app.milestone-ledger.com run by the maintainers of the open-source Milestone Disbursement Engine. By creating an account, joining an organization, connecting an agent or otherwise using the service, you agree to them. If you act for an organization, you confirm that you may bind it, and "you" includes that organization.</p>
+    <p>The <a href="./privacy.html">Privacy Policy</a> is part of these terms. If you run your own copy of the open-source engine, these terms do not apply; the <a href="https://github.com/SeraphDev6/milestone_disbursment_agent/blob/main/LICENSE" rel="noopener">AGPL-3.0 licence</a> does.</p>
+
+    <h2 id="service">2. What the service does</h2>
+    <p>Milestone Ledger turns a grant or statement of work into tranches with acceptance criteria, lets each party confirm those criteria, holds the payer's funds at PayPal, takes in evidence, checks it against the criteria with deterministic checks and an AI verifier, routes close calls to people, and settles each tranche through PayPal. It keeps an audit log and produces compliance packets.</p>
+    <p>The service has two modes. <strong>Sandbox</strong> is connected to PayPal's sandbox: no real money moves. <strong>Live</strong> is connected to PayPal's production API, pays connected payees directly, and requires PayPal partner approval. The hosted service tells you on every page which mode it is in.</p>
+
+    <h2 id="accounts">3. Accounts, organizations and roles</h2>
+    <ul>
+      <li>You must be at least 18 and able to enter contracts. You sign in with an email address you control, or through your organization's identity provider.</li>
+      <li>Everything is done as a person acting for an organization, with a role (owner, admin, member or viewer). The organization is responsible for who it adds, what roles it gives them, and what they do.</li>
+      <li>API keys and connected agents act with the organization's authority. Keep keys secret, revoke them when they are no longer needed, and tell us at once if one is exposed.</li>
+      <li>You are responsible for the accuracy of what you enter, including the PayPal account an organization connects.</li>
+    </ul>
+
+    <h2 id="agreements">4. Agreements between parties</h2>
+    <ul>
+      <li>An agreement on the service is between its parties: the payer, the payee and any reviewers. <strong>We are not a party to it.</strong> We provide the tooling that records it, verifies evidence against it and settles it; we do not guarantee that either party will perform.</li>
+      <li>Each party signs the exact criteria it reviewed. You are responsible for reading them before you confirm. The criteria lint and the extraction are aids; they do not replace your judgement.</li>
+      <li>You are responsible for your agreements complying with the law that applies to you, including grant terms, tax and employment rules.</li>
+    </ul>
+
+    <h2 id="payments">5. Payments and PayPal</h2>
+    <ul>
+      <li>All payments are made through PayPal under <a href="https://www.paypal.com/us/legalhub/useragreement-full">PayPal's user agreement</a> and its fees. You need a PayPal account to pay or be paid, and PayPal may decline, hold or reverse a payment under its own rules.</li>
+      <li>Funds held for a tranche are held by PayPal under an authorization the payer approved, not by us. In live mode payment goes from the payer to the payee directly; we never hold funds.</li>
+      <li>PayPal authorizations expire. If a hold expires before a tranche verifies, the payer may need to fund it again.</li>
+      <li>After a capture there is a contest window during which the payer may contest the tranche. Contests and PayPal disputes pause payment to the payee until a reviewer resolves them or, failing that, until PayPal's own timelines apply. The ledger shows the window for each tranche.</li>
+      <li>We are not responsible for PayPal's acts or omissions, for exchange rates, or for a payee's failure to connect or maintain a PayPal account that can receive payment.</li>
+    </ul>
+
+    <h2 id="verification">6. Verification and automatic release</h2>
+    <ul>
+      <li>Verdicts combine deterministic checks with an AI verifier that returns a confidence and citations. <strong>A verdict is an assessment, not a guarantee</strong> that the work meets the criteria. The verifier can be wrong, and evidence can be misleading.</li>
+      <li>Each organization chooses whether tranches can release automatically and the confidence it requires. If you turn on automatic release, you accept that a tranche meeting your threshold will be captured and released without a person looking at it first, subject to the contest window.</li>
+      <li>Below the threshold, or with automatic release off, a person with the right role decides. The record of who decided, and on what, is in the audit log.</li>
+      <li>You must not try to influence a verdict other than by submitting genuine evidence. Instructions hidden in evidence, fabricated artefacts and tampered check results are a breach of these terms and may be an offence.</li>
+    </ul>
+
+    <h2 id="custody">7. Deliverables we hold</h2>
+    <ul>
+      <li>When an agreement withholds work until payment, we hold the payee's deliverables, encrypted, and release them to the payer when the tranche is captured. Until then the payer sees only what the agreement allows, such as a commit's tree and its check results.</li>
+      <li>The payee keeps all rights in the work until the agreement between the parties says otherwise. We take no rights in it beyond what we need to hold, verify and hand it over.</li>
+      <li>Retention of originals after a tranche closes follows the deployment's retention setting, as described in the Privacy Policy. Hashes are kept so the record stays verifiable.</li>
+      <li>If a handover fails its integrity check, it fails closed and both sides are told. We are not responsible for the content of deliverables.</li>
+    </ul>
+
+    <h2 id="fees">8. Fees</h2>
+    <ul>
+      <li>The sandbox service is free. No fees are charged while the hosted service is in sandbox mode.</li>
+      <li>When the service goes live, we intend to charge the payer a platform fee on each captured tranche, collected through PayPal at capture, and to offer paid plans for funders running grant programs. Payees never pay to get paid; pre-check and the criteria lint stay free. The fee schedule will be published and shown before you fund a tranche, and these terms will be updated first.</li>
+      <li>PayPal's own fees are separate and are set by PayPal.</li>
+    </ul>
+
+    <h2 id="use">9. Acceptable use</h2>
+    <p>You agree not to:</p>
+    <ul>
+      <li>use the service for anything unlawful, or for agreements that are themselves unlawful;</li>
+      <li>use the sandbox service to document real obligations as if money had moved, or represent a sandbox transaction as a real payment;</li>
+      <li>connect a PayPal account you do not control, or impersonate a person or organization;</li>
+      <li>take or attempt a step your role does not allow, or gain access to another party's data;</li>
+      <li>attempt to influence a verdict other than with genuine evidence (see section 6);</li>
+      <li>probe, load-test or attack the hosted service, or use it to attack others. Security research is welcome against your own instance; see the <a href="./security.html">security page</a>;</li>
+      <li>scrape the service or resell access to it;</li>
+      <li>upload content you have no right to upload, or content that is malicious.</li>
+    </ul>
+
+    <h2 id="content">10. Your content</h2>
+    <ul>
+      <li>You own what you put into the service: documents, criteria, evidence, deliverables. You give us a licence to store, process, display to the parties entitled to see it, send to our processors (including the AI verifier) and hand over as the agreement requires, for the purpose of providing the service.</li>
+      <li>You are responsible for having the rights to what you upload.</li>
+      <li>Feedback you give us about the service may be used without obligation to you.</li>
+    </ul>
+
+    <h2 id="agents">11. Agents and the API</h2>
+    <ul>
+      <li>MCP clients and API keys act for the organization that authorized them, within the tools shown at consent. Steps that bind a party or move money (confirming criteria, funding, reviewing, releasing, contesting, disputing, and organization administration) are never available to them.</li>
+      <li>You are responsible for what your agents do with the access you give them, and for keeping their credentials safe.</li>
+      <li>We may change the API. We will keep documented endpoints stable where we can and announce breaking changes in the repository.</li>
+    </ul>
+
+    <h2 id="open-source">12. The open-source engine</h2>
+    <p>The engine's source code is licensed under the GNU Affero General Public License, version 3. That licence governs the code; these terms govern your use of our hosted service. Nothing in these terms limits your rights under the AGPL to run, study, change and share the code.</p>
+
+    <h2 id="third-parties">13. Third-party services</h2>
+    <p>The service depends on PayPal, Anthropic, GitHub, Resend, Render and Cloudflare. Their terms govern your relationship with them where you have one (for example, your PayPal or GitHub account). We are not responsible for their availability or conduct.</p>
+
+    <h2 id="disclaimers">14. Disclaimers</h2>
+    <p>The service is provided "as is" and "as available". To the extent the law allows, we make no warranties, express or implied, including of merchantability, fitness for a particular purpose, non-infringement, or that verdicts will be correct, that payments will complete, or that the service will be uninterrupted or error-free. The sandbox service in particular is an evaluation environment and may be reset or changed without notice.</p>
+
+    <h2 id="liability">15. Limitation of liability</h2>
+    <p>To the extent the law allows, we are not liable for indirect, incidental, special, consequential or punitive damages, or for lost profits, revenue, data or goodwill, arising from your use of the service. Our total liability for all claims relating to the service in any twelve-month period is limited to the fees you paid us in that period, or one hundred US dollars if you paid none. Nothing here limits liability that cannot be limited by law.</p>
+
+    <h2 id="indemnity">16. Your responsibility to us</h2>
+    <p>If a third party brings a claim against us because of your content, your agreements or your breach of these terms, you will defend us and cover the resulting costs, damages and reasonable legal fees, to the extent the law allows.</p>
+
+    <h2 id="termination">17. Ending this agreement</h2>
+    <ul>
+      <li>You may stop using the service at any time and ask us to delete your account as the Privacy Policy describes.</li>
+      <li>We may suspend or end your access if you breach these terms, if the law requires it, or if we stop offering the service. We will give notice where we reasonably can.</li>
+      <li>Agreements in progress are not cancelled by an account ending. Funds held at PayPal remain subject to PayPal's rules, and the record of an agreement remains available to its other parties.</li>
+      <li>Sections 10 and 14 to 19 survive termination.</li>
+    </ul>
+
+    <h2 id="changes">18. Changes to these terms</h2>
+    <p>The effective date at the top changes whenever these terms do. For a material change we will email every account before it takes effect and say what changed. If you keep using the service after that date, the new terms apply. The history is in the <a href="https://github.com/SeraphDev6/milestone_disbursment_agent/commits/main/site/pages/terms.html" rel="noopener">repository</a>.</p>
+
+    <h2 id="law">19. Governing law and disputes</h2>
+    <p>These terms are governed by the laws of the United States and of the state in which we are organized, without regard to conflict-of-law rules. Before bringing a claim, you agree to write to us at <a href="mailto:legal@milestone-ledger.com">legal@milestone-ledger.com</a> and give us 30 days to resolve it. The specific state and venue will be stated here, after legal review, before any live deployment.</p>
+
+    <h2 id="contact">20. Contact</h2>
+    <p>Questions about these terms: <a href="mailto:legal@milestone-ledger.com">legal@milestone-ledger.com</a>. Anything else: <a href="mailto:support@milestone-ledger.com">support@milestone-ledger.com</a>.</p>
+  </div>
+
+  <nav class="doc-toc" aria-labelledby="toc-title">
+    <h2 id="toc-title">On this page</h2>
+    <ol>
+      <li><a href="#agreement">1. The agreement</a></li>
+      <li><a href="#service">2. What the service does</a></li>
+      <li><a href="#accounts">3. Accounts and roles</a></li>
+      <li><a href="#agreements">4. Agreements between parties</a></li>
+      <li><a href="#payments">5. Payments and PayPal</a></li>
+      <li><a href="#verification">6. Verification</a></li>
+      <li><a href="#custody">7. Deliverables we hold</a></li>
+      <li><a href="#fees">8. Fees</a></li>
+      <li><a href="#use">9. Acceptable use</a></li>
+      <li><a href="#content">10. Your content</a></li>
+      <li><a href="#agents">11. Agents and the API</a></li>
+      <li><a href="#open-source">12. The open-source engine</a></li>
+      <li><a href="#third-parties">13. Third-party services</a></li>
+      <li><a href="#disclaimers">14. Disclaimers</a></li>
+      <li><a href="#liability">15. Limitation of liability</a></li>
+      <li><a href="#indemnity">16. Your responsibility to us</a></li>
+      <li><a href="#termination">17. Ending this agreement</a></li>
+      <li><a href="#changes">18. Changes</a></li>
+      <li><a href="#law">19. Governing law</a></li>
+      <li><a href="#contact">20. Contact</a></li>
+    </ol>
+  </nav>
+</div>

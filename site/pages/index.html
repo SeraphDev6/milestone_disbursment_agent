@@ -1,0 +1,229 @@
+<!--
+title: Verified delivery on PayPal
+description: Milestone Ledger turns a grant or statement of work into tranches with checkable acceptance criteria, verifies the evidence against them, and settles each tranche through PayPal.
+-->
+<section class="hero" aria-labelledby="hero-title">
+  <div>
+    <p class="eyebrow">Verified delivery on PayPal</p>
+    <h1 id="hero-title">Pay against evidence, not promises.</h1>
+    <p class="lede">Milestone Ledger turns a grant or statement of work into tranches with checkable acceptance criteria, verifies the evidence against them, and settles each tranche through PayPal. Neither side has to go first.</p>
+    <div class="actions">
+      <a class="button button-primary button-lg" href="https://app.milestone-ledger.com/demo">Try the demo</a>
+      <a class="button button-secondary button-lg" href="#how-it-works">How it works</a>
+    </div>
+    <p class="hero-note">The demo runs on PayPal's sandbox with a funder, a grantee and a reviewer already signed in, so you can play every side. No account and no real money.</p>
+  </div>
+
+  <figure class="sheet" aria-labelledby="ledger-title">
+    <figcaption>
+      <p class="eyebrow" id="ledger-title">Riverside Reads · Spring literacy grant</p>
+    </figcaption>
+    <ol class="ledger">
+      <li class="ledger-head" aria-hidden="true"><span>№</span><span>Tranche</span><span>Amount</span></li>
+      <li class="ledger-row">
+        <span class="ledger-no">1</span>
+        <span class="ledger-title"><strong>Hire and train three workshop leads</strong><span>Criteria met · 3 of 3 · paid 14 Mar</span></span>
+        <span class="ledger-amount"><span class="money">USD 4,000.00</span><span class="stamp stamp-settled stamp-final"><svg class="glyph" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" aria-hidden="true" focusable="false"><path d="M3 8.5l3 3L13 4.5"/></svg>Settled</span></span>
+      </li>
+      <li class="ledger-row">
+        <span class="ledger-no">2</span>
+        <span class="ledger-title"><strong>Run twelve spring workshops</strong><span>Evidence submitted · verifier found it met (92%)</span></span>
+        <span class="ledger-amount"><span class="money">USD 10,000.00</span><span class="stamp stamp-held"><svg class="glyph" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" aria-hidden="true" focusable="false"><path d="M6 3.5v9M10 3.5v9"/></svg>Held</span></span>
+      </li>
+      <li class="ledger-row">
+        <span class="ledger-no">3</span>
+        <span class="ledger-title"><strong>Publish attendance and outcomes report</strong><span>Due 30 Jun · waiting on the funder to fund</span></span>
+        <span class="ledger-amount"><span class="money">USD 6,000.00</span><span class="stamp"><svg class="glyph" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" aria-hidden="true" focusable="false"><path d="M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11"/></svg>Unfunded</span></span>
+      </li>
+      <li class="ledger-total">
+        <span class="ledger-no" aria-hidden="true">Σ</span>
+        <span>Total</span>
+        <span class="ledger-amount"><span class="money">USD 20,000.00</span></span>
+      </li>
+    </ol>
+    <p class="ledger-split"><span>Released <span class="money">4,000.00</span></span><span>Held at PayPal <span class="money">10,000.00</span></span><span>Not yet funded <span class="money">6,000.00</span></span></p>
+    <p class="ledger-caption">A tranche settles when its evidence meets the criteria both sides signed.</p>
+  </figure>
+</section>
+
+<section class="section" aria-labelledby="problem-title">
+  <div class="section-head">
+    <p class="eyebrow">The problem</p>
+    <h2 id="problem-title">Whoever moves first takes the risk.</h2>
+  </div>
+  <p>Work paid by milestone runs on trust and chasing. A contractor delivers and then waits weeks for the client to sign off. A grantee files a report and the next tranche sits until a program officer reads it.</p>
+  <p>If the contractor hands over the work first, the client can stop paying. If the client pays first, the contractor can stop delivering. Escrow solves half of that: it protects the money, but not the work.</p>
+  <p>Milestone Ledger holds both. The payer's money is held at PayPal and the payee's work is held by the engine. When the evidence meets the criteria, PayPal captures the payment and the work is released at the same moment.</p>
+</section>
+
+<section class="section" id="how-it-works" aria-labelledby="how-title">
+  <div class="section-head">
+    <p class="eyebrow">How it works</p>
+    <h2 id="how-title">How a tranche moves</h2>
+    <p class="lede">Five stages. Each one leaves a line in the audit log, and each status is a stamp that means the same thing everywhere in the product.</p>
+  </div>
+  <ol class="steps">
+    <li class="step">
+      <div>
+        <div class="step-head"><h3>Agree on criteria</h3><span class="stamp stamp-flat">Draft</span></div>
+        <p>Write the tranches yourself, or upload the grant or statement of work and the engine proposes tranches with criteria, each quoting the clause it came from. A lint flags criteria nobody could check ("make good progress") before anyone signs.</p>
+        <p>Every party signs the exact version they read. The criteria hash is the seal: if a word changes, the signatures no longer apply.</p>
+      </div>
+    </li>
+    <li class="step">
+      <div>
+        <div class="step-head"><h3>Fund the tranche</h3><span class="stamp stamp-held stamp-flat">Held</span></div>
+        <p>The payer approves a PayPal hold for the tranche. The funds sit at PayPal, never with us, and the payee can see the hold before starting work. Invoice mode skips the hold and sends a PayPal pay link once the tranche verifies instead.</p>
+      </div>
+    </li>
+    <li class="step">
+      <div>
+        <div class="step-head"><h3>Submit evidence</h3><span class="stamp stamp-flat">Evidence in</span></div>
+        <p>Upload files, paste text, or connect GitHub so merged, labelled pull requests arrive on their own. Contractors can keep code in their own private repository, pin a commit per tranche, and hand it over only when the tranche is paid.</p>
+        <p>Pre-check before you submit: the same checks run and tell you what would pass and what is still missing.</p>
+      </div>
+    </li>
+    <li class="step">
+      <div>
+        <div class="step-head"><h3>Verify</h3><span class="stamp stamp-review stamp-flat">Needs review</span></div>
+        <p>Deterministic checks run first: file present, tests green, numbers in range. Then the AI verifier reads the rest of the evidence against each criterion and returns a verdict with citations into the evidence. A skeptic pass argues the other side before anything releases on its own.</p>
+        <p>Below the confidence threshold your organization set, a person decides. Rejections say exactly what is missing, and the payee can dispute.</p>
+      </div>
+    </li>
+    <li class="step">
+      <div>
+        <div class="step-head"><h3>Settle</h3><span class="stamp stamp-settled stamp-final stamp-flat">Settled</span></div>
+        <p>PayPal captures the payment and any withheld work is released to the payer at the same moment. A short window lets the payer contest; after it closes, the payee is paid. The ledger, the verdicts and the evidence references are exportable as a compliance packet.</p>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<section class="section" aria-labelledby="who-title">
+  <div class="section-head">
+    <p class="eyebrow">Who it's for</p>
+    <h2 id="who-title">Every side of the agreement</h2>
+    <p class="lede">We start where PayPal is already how money moves, and where tranches are small enough that card and wallet fees are acceptable.</p>
+  </div>
+  <div class="grid-3">
+    <article class="sheet">
+      <h3>Payees</h3>
+      <p class="muted small">Contractors, agencies, grantees</p>
+      <ul>
+        <li>Funds are held before you start, and you can see the hold.</li>
+        <li>Pre-check your evidence against the criteria before you submit.</li>
+        <li>Your work stays yours until you are paid.</li>
+        <li>You never pay to get paid. Pre-check and the criteria lint are free.</li>
+      </ul>
+    </article>
+    <article class="sheet">
+      <h3>Payers</h3>
+      <p class="muted small">Clients and funders</p>
+      <ul>
+        <li>Pay only against evidence that meets what you agreed to.</li>
+        <li>Every decision comes with citations into the evidence.</li>
+        <li>Set your own confidence threshold, or keep every release in human hands.</li>
+        <li>A contest window after each capture, and a dispute pack if you need one.</li>
+      </ul>
+    </article>
+    <article class="sheet">
+      <h3>Grant programs</h3>
+      <p class="muted small">Community foundations, microgrants, sponsorships</p>
+      <ul>
+        <li>A portfolio view of every grant, with what is held, released and overdue.</li>
+        <li>Reviewer roles, so a program officer or a neutral reviewer decides the close calls.</li>
+        <li>Compliance packets (PDF and JSON) ready for your finance team or auditors.</li>
+        <li>Grantees use it free.</li>
+      </ul>
+    </article>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="trust-title">
+  <div class="section-head">
+    <p class="eyebrow">Trust in the verdict</p>
+    <h2 id="trust-title">The model never decides alone.</h2>
+  </div>
+  <div class="grid-2">
+    <div class="sheet">
+      <h3>How a verdict is reached</h3>
+      <ul>
+        <li><strong>Checks before the model.</strong> Anything that can be checked deterministically is, and the result is final.</li>
+        <li><strong>Citations required.</strong> The verifier must point at the evidence for every criterion it marks met.</li>
+        <li><strong>A skeptic pass.</strong> Before a tranche can release on its own, a second pass argues that the criteria were not met. Disagreement sends it to a person.</li>
+        <li><strong>A person below the threshold.</strong> Each organization sets the confidence it needs for auto-release, or turns auto-release off.</li>
+        <li><strong>Replayable.</strong> Every verdict stores the criteria hash, the evidence ids, and the model and prompt version it used.</li>
+        <li><strong>Money moves only by human hands or by your rule.</strong> Confirming criteria, funding, approving, releasing and disputing are never available to an agent or an API key.</li>
+      </ul>
+    </div>
+    <div class="sheet">
+      <h3>The five stamps</h3>
+      <p class="small muted">Status is never colour alone. Each stamp carries a word and a glyph, and the inks mean the same thing on every page.</p>
+      <ul class="inks">
+        <li><span class="stamp stamp-settled stamp-flat">Settled</span><span>Paid, and the work released.</span></li>
+        <li><span class="stamp stamp-held stamp-flat">Held</span><span>Funds held at PayPal, or verification in progress.</span></li>
+        <li><span class="stamp stamp-review stamp-flat">Needs review</span><span>A person has to decide.</span></li>
+        <li><span class="stamp stamp-alert stamp-flat">Disputed</span><span>Failed, contested or disputed.</span></li>
+        <li><span class="stamp stamp-flat">Draft</span><span>Neutral: not yet signed, funded or submitted.</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="agents-title">
+  <div class="section-head">
+    <p class="eyebrow">Agents</p>
+    <h2 id="agents-title">Built for people and their agents.</h2>
+  </div>
+  <div class="grid-2">
+    <div>
+      <p>Point Claude Desktop, Claude Code or any other MCP client at the server. It signs you in, asks which organization it should act for, and gets tools bound to that organization: list agreements, check status, read evidence and verdicts, pre-check a submission, submit evidence, read the review queue and the portfolio, export a compliance packet, and draft new agreements.</p>
+      <p>Headless agents use an organization API key as their bearer token, scoped the same way.</p>
+      <p>The steps that move money or bind a party stay with people: confirming criteria, funding, reviewing, releasing and disputing. An agent can prepare the decision, but a person signs it.</p>
+    </div>
+    <div class="callout callout-info">
+      <svg class="glyph" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" aria-hidden="true" focusable="false"><path d="M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11M8 7.5v4M8 5v.5"/></svg>
+      <div class="callout-body">
+        <p class="callout-title">Connect an MCP client</p>
+        <p>Enter <code>https://app.milestone-ledger.com/mcp</code> as a remote server. The client discovers the OAuth endpoints and opens a consent page. <a href="https://github.com/SeraphDev6/milestone_disbursment_agent/blob/main/docs/MCP_CLIENTS.md">Client compatibility notes</a>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="open-title">
+  <div class="section-head">
+    <p class="eyebrow">Open source</p>
+    <h2 id="open-title">The engine is open. Run it yourself.</h2>
+  </div>
+  <div class="grid-2">
+    <div>
+      <p>The Milestone Disbursement Engine is licensed under the AGPL-3.0: agreements, the criteria lint, verification and the release gate, PayPal settlement, the evidence adapters, the MCP server and the web app. One <code>docker compose up</code> runs the whole thing against a PayPal sandbox app of your own.</p>
+      <p>Client SDKs for Python and TypeScript, with webhook signature verification, live in the same repository. The specification and the business plan are public too.</p>
+      <div class="actions">
+        <a class="button button-secondary" href="https://github.com/SeraphDev6/milestone_disbursment_agent" rel="noopener">Source on GitHub</a>
+        <a class="button button-secondary" href="https://github.com/SeraphDev6/milestone_disbursment_agent/blob/main/docs/SPEC.md" rel="noopener">Read the spec</a>
+        <a class="button button-secondary" href="https://app.milestone-ledger.com/api/docs">API reference</a>
+      </div>
+    </div>
+    <div class="callout callout-note">
+      <svg class="glyph" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" aria-hidden="true" focusable="false"><path d="M5.5 2.5h5v3l-1 2h3l1 3h-11l1-3h3l-1-2zM2.5 13.5h11"/></svg>
+      <div class="callout-body">
+        <p class="callout-title">Where it stands</p>
+        <p>Milestone Ledger was built for the PayPal AI Hackathon in November 2026. The hosted service at app.milestone-ledger.com runs in sandbox mode: payees connect PayPal sandbox accounts, payers approve holds with sandbox accounts, and no real money moves. A live deployment needs PayPal partner approval, which we are applying for. <a href="https://github.com/SeraphDev6/milestone_disbursment_agent/issues" rel="noopener">What's left is tracked in the open.</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="cta-title">
+  <div class="cta">
+    <h2 id="cta-title">Try it with sandbox money.</h2>
+    <p>Play the funder, the grantee and the reviewer on a ready-made grant. Approve a hold, submit evidence, watch the verdict land, and release the tranche.</p>
+    <div class="actions">
+      <a class="button button-secondary button-lg" href="https://app.milestone-ledger.com/demo">Try the demo</a>
+      <a class="button button-quiet button-lg" href="https://app.milestone-ledger.com/">Sign in to the app</a>
+    </div>
+    <p class="small">Questions? <a href="mailto:support@milestone-ledger.com">support@milestone-ledger.com</a></p>
+  </div>
+</section>
