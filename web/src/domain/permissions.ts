@@ -160,9 +160,13 @@ export function canOnTranche(
   }
 }
 
-/** With require_reviewer_approval on, only a reviewer's approval releases a tranche in review. */
-export function approveBlockedByReviewerRule(seat: Seat, requireReviewer: boolean): string | null {
-  return requireReviewer && seat.role === "payer"
-    ? "This agreement requires a reviewer's approval. You can still reject."
-    : null;
+/** Why the payer can't approve this tranche: the agreement requires a reviewer's approval, or the work is withheld
+ * from the payer and the agreement leaves withheld tranches to its reviewer. Either way the payer can still reject.
+ * `withheldForReviewer`: deliverable_release is on_capture, the tranche isn't revealed yet, the option is on and a
+ * reviewer has joined. */
+export function approveBlockedByReviewerRule(seat: Seat, requireReviewer: boolean, withheldForReviewer = false): string | null {
+  if (seat.role !== "payer") return null;
+  if (requireReviewer) return "This agreement requires a reviewer's approval. You can still reject.";
+  if (withheldForReviewer) return "The evidence is withheld from you until this tranche is paid, so your reviewer decides. You can still reject.";
+  return null;
 }

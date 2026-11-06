@@ -300,15 +300,18 @@ def lint_agreement(agreement: AgreementBase, *, reviewer_invited: bool = False) 
     reviewers = getattr(agreement, "reviewer_emails", None) or [
         p for p in getattr(agreement, "parties", []) if p.role == Role.reviewer
     ]
-    if on_capture and (reviewers or reviewer_invited) and not getattr(agreement, "require_reviewer_approval", False):
+    reviewer_decides = getattr(agreement, "require_reviewer_approval", False) or getattr(
+        agreement, "reviewer_decides_withheld", True
+    )
+    if on_capture and (reviewers or reviewer_invited) and not reviewer_decides:
         report.issues.append(
             _issue(
                 LintLevel.warning,
                 "payer_reviews_unseen_work",
-                "require_reviewer_approval",
+                "reviewer_decides_withheld",
                 "The payer can't see the work until it's paid for, but a tranche in review can be approved by the "
                 "payer, who would be judging work they haven't seen.",
-                "Require a reviewer's approval: the reviewer sees all the evidence, and the payer can still reject.",
+                "Let the reviewer decide withheld tranches: they see all the evidence, and the payer can still reject.",
             )
         )
     if on_capture and getattr(agreement, "auto_release_enabled", False) and not reviewers and not reviewer_invited:

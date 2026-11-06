@@ -506,8 +506,13 @@ def review(
 ) -> ReviewOutcome:
     access, m = auth
     access.require(Action.review)
-    if body.decision == "approve" and m.agreement.require_reviewer_approval and access.party.role != Role.reviewer:
-        raise AccessError("this agreement requires a reviewer's approval; the payer can still reject", 403)
+    if body.decision == "approve" and access.party.role != Role.reviewer and disclosure.reviewer_decides(m):
+        why = (
+            "this agreement requires a reviewer's approval"
+            if m.agreement.require_reviewer_approval
+            else "the evidence is withheld from the payer until the tranche is paid, so its reviewer decides"
+        )
+        raise AccessError(f"{why}; the payer can still reject", 403)
     verification.review(session, gateway(request), m, access.actor, body.decision == "approve", body.note, utcnow())
     session.refresh(m)
     v = verification.latest_verdict(m)

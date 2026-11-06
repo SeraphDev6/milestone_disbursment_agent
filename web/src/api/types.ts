@@ -9,7 +9,7 @@ type S = components["schemas"];
  */
 type Req<T, K extends keyof T> = Omit<T, K> & { [P in K]-?: NonNullable<T[P]> };
 
-export type AgreementRead = Omit<Req<S["AgreementRead"], "currency" | "auto_release_threshold" | "require_reviewer_approval" | "pending_invitations" | "dispute_window_days" | "deliverable_release" | "min_evidence_visibility">, "lint" | "milestones" | "funding"> & { lint: LintReport; milestones: MilestoneRead[]; funding: FundingSummary };
+export type AgreementRead = Omit<Req<S["AgreementRead"], "currency" | "auto_release_threshold" | "require_reviewer_approval" | "reviewer_decides_withheld" | "pending_invitations" | "dispute_window_days" | "deliverable_release" | "min_evidence_visibility">, "lint" | "milestones" | "funding"> & { lint: LintReport; milestones: MilestoneRead[]; funding: FundingSummary };
 export type AgreementCreate = S["AgreementCreate"];
 export type AgreementCreated = S["AgreementCreated"];
 export type AgreementSummary = Req<S["AgreementSummary"], "in_dispute_window" | "refunded">;

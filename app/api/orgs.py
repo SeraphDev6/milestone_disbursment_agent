@@ -31,7 +31,7 @@ from app.models import (
     UserRead,
 )
 from app.models.identity import EMAIL_PATTERN
-from app.services import identity
+from app.services import disclosure, identity
 from app.services.access import AccessError
 
 router = APIRouter(tags=["organizations"])
@@ -89,6 +89,11 @@ class ReviewItem(SQLModel):
         default=False,
         description="The skeptic pass disagreed with the verifier (or couldn't run), which is why it's in review.",
     )
+    waiting_on: Role = Field(
+        description="Whose approval it waits for: the reviewer when the agreement requires one or the work is "
+        "withheld from the payer, else the payer. A payer can always reject."
+    )
+    yours_to_decide: bool = Field(description="This org's side is the one whose approval it waits for.")
 
 
 class Portfolio(SQLModel):
@@ -301,6 +306,10 @@ def review_queue(org_id: str, principal: PrincipalDep, session: SessionDep) -> l
             if m.status not in (MilestoneStatus.needs_review, MilestoneStatus.disputed, MilestoneStatus.contested):
                 continue
             v = next((v for v in reversed(m.verdicts) if not v.is_precheck), None)
+            in_review = m.status in (MilestoneStatus.needs_review, MilestoneStatus.disputed)
+            waiting_on = Role.reviewer if in_review and disclosure.reviewer_decides(m) else Role.payer
+            if not in_review:
+                waiting_on = party.role  # a contest is resolved by either side
             items.append(
                 ReviewItem(
                     agreement_id=party.agreement_id,
@@ -313,6 +322,8 @@ def review_queue(org_id: str, principal: PrincipalDep, session: SessionDep) -> l
                     verdict_met=v.met if v else None,
                     verdict_confidence=v.model_confidence if v else None,
                     second_opinion_disagreed=bool(v and v.skeptic and (v.skeptic.disagrees_on or v.skeptic.error)),
+                    waiting_on=waiting_on,
+                    yours_to_decide=waiting_on == party.role,
                 )
             )
     return items

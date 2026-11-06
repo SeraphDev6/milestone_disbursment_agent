@@ -48,6 +48,25 @@ def restricted(role: Role | str | None, m: Milestone) -> bool:
     return role == Role.payer and withheld(m)
 
 
+def has_reviewer(m: Milestone) -> bool:
+    return any(p.role == Role.reviewer and p.org_id for p in m.agreement.parties)
+
+
+def reviewer_decides(m: Milestone) -> bool:
+    """Only a reviewer's approval releases this tranche from review: the agreement requires it outright, or the
+    work is withheld from the payer and the agreement leaves withheld tranches to its reviewer. The payer may
+    still reject either way. Falls back to the payer when no reviewer has joined."""
+    a = m.agreement
+    if not has_reviewer(m):
+        return False
+    return bool(a.require_reviewer_approval or (a.reviewer_decides_withheld and withheld(m)))
+
+
+def approver_sides(m: Milestone) -> list[Role]:
+    """Who is asked to review this tranche."""
+    return [Role.reviewer] if reviewer_decides(m) else [Role.payer, Role.reviewer]
+
+
 def level_of(m: Milestone, evidence_ids: Iterable[str]) -> EvidenceVisibility:
     """The least disclosed level among the cited evidence: a quote can only be shown if every source allows it."""
     by_id = {e.id: e for e in m.evidence}

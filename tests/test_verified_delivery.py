@@ -457,3 +457,73 @@ def test_review_queue_flags_a_second_opinion_disagreement(client, draft):
     upload(client, m2, ctx, content=REPORT + " Scores for section B: TODO.")
     [item] = client.get(f"/orgs/{ctx['payer_org']}/review-queue", headers=h(ctx["payer"])).json()
     assert item["milestone_id"] == m2 and item["verdict_met"] and item["second_opinion_disagreed"]
+
+
+# --- #8: a neutral reviewer judges work the payer can't see ----------------------------------
+
+
+def test_withheld_tranche_in_review_waits_for_the_reviewer(client, draft):
+    _aid, m2, ctx = setup(client, draft, reviewer=True)
+    fund(client, m2, ctx)
+    upload(client, m2, ctx, "Riverside Reads draft. Table 2 lists all 87 enrolled students with pre and post scores.")
+    assert milestone(client, m2).status == "needs_review"
+    mails_before = [x for x in client.app.state.mailer.sent if "Review needed" in x.subject]
+    assert mails_before and all(x.to == REVIEWER_EMAIL for x in mails_before)  # only the reviewer was asked
+
+    # The payer's queue shows it waiting on the reviewer; the reviewer's shows it as theirs.
+    [payer_item] = client.get(f"/orgs/{ctx['payer_org']}/review-queue", headers=h(ctx["payer"])).json()
+    assert payer_item["waiting_on"] == "reviewer" and payer_item["yours_to_decide"] is False
+    reviewer_org = client.get("/me", headers=h(ctx["reviewer"])).json()["memberships"][0]["org_id"]
+    [rv_item] = client.get(f"/orgs/{reviewer_org}/review-queue", headers=h(ctx["reviewer"])).json()
+    assert rv_item["waiting_on"] == "reviewer" and rv_item["yours_to_decide"] is True
+
+    # The payer can't approve what they can't see, but can still reject.
+    r = client.post(f"/milestones/{m2}/review", json={"decision": "approve"}, headers=h(ctx["payer"]))
+    assert r.status_code == 403 and "withheld" in r.json()["detail"]
+    # The reviewer sees the full evidence (the payer's view is filtered) and approves; the hold is captured.
+    [ev] = client.get(f"/milestones/{m2}/evidence", headers=h(ctx["reviewer"])).json()
+    assert ev["excerpt"] and "87 enrolled" in ev["excerpt"]
+    [payer_ev] = client.get(f"/milestones/{m2}/evidence", headers=h(ctx["payer"])).json()
+    assert not payer_ev["excerpt"]
+    r = client.post(
+        f"/milestones/{m2}/review",
+        json={"decision": "approve", "note": "Table 2 is complete"},
+        headers=h(ctx["reviewer"]),
+    )
+    assert r.status_code == 200 and r.json()["milestone_status"] in ("verified", "held", "settled")
+    views = [e for e in actions(client, m2) if e.action == "evidence_viewed"]
+    assert {(e.detail["side"], e.detail["view"]) for e in views} >= {("reviewer", "full"), ("payer", "filtered")}
+
+
+def test_payer_decides_withheld_work_when_the_option_is_off_or_there_is_no_reviewer(client, draft):
+    _aid, m2, ctx = setup(client, draft, reviewer=True, reviewer_decides_withheld=False)
+    fund(client, m2, ctx)
+    upload(client, m2, ctx, "Riverside Reads draft. Table 2 lists all 87 enrolled students with pre and post scores.")
+    [item] = client.get(f"/orgs/{ctx['payer_org']}/review-queue", headers=h(ctx["payer"])).json()
+    assert item["waiting_on"] == "payer" and item["yours_to_decide"] is True
+    assert (
+        client.post(f"/milestones/{m2}/review", json={"decision": "approve"}, headers=h(ctx["payer"])).status_code
+        == 200
+    )
+
+    _aid, m2, ctx = setup(client, draft)  # on by default, but nobody to decide: the payer does
+    fund(client, m2, ctx)
+    upload(client, m2, ctx, "Riverside Reads draft. Table 2 lists all 87 enrolled students with pre and post scores.")
+    [item] = client.get(f"/orgs/{ctx['payer_org']}/review-queue", headers=h(ctx["payer"])).json()
+    assert item["waiting_on"] == "payer"
+    assert (
+        client.post(f"/milestones/{m2}/review", json={"decision": "reject"}, headers=h(ctx["payer"])).status_code == 200
+    )
+
+
+def test_lint_no_longer_nags_when_the_reviewer_decides_withheld_work(client, draft):
+    """The agreement-level lint (on the stored agreement) warns only when the payer would judge unseen work."""
+
+    def codes(**extra) -> set[str]:
+        aid, _, ctx = create_draft(client, on_capture(draft, **extra), reviewers=(REVIEWER_EMAIL,))
+        a = client.get(f"/agreements/{aid}", headers=h(ctx["payer"])).json()
+        return {i["code"] for i in a["lint"]["issues"]}
+
+    assert "payer_reviews_unseen_work" not in codes()  # on by default: the invited reviewer will decide
+    assert "payer_reviews_unseen_work" in codes(reviewer_decides_withheld=False)
+    assert "payer_reviews_unseen_work" not in codes(reviewer_decides_withheld=False, require_reviewer_approval=True)

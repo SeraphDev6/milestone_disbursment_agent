@@ -195,6 +195,12 @@ class AgreementBase(SQLModel):
     require_reviewer_approval: bool = Field(
         default=False, description="When on, only a reviewer's approval releases a tranche in review."
     )
+    reviewer_decides_withheld: bool = Field(
+        default=True,
+        description="deliverable_release=on_capture: while a tranche's evidence is withheld from the payer, a tranche "
+        "in review waits for an invited reviewer's approval (they see all the evidence; the payer can't judge what "
+        "they can't see, but can still reject). Without a reviewer on the agreement the payer decides as usual.",
+    )
     dispute_window_days: int = Field(
         default=0,
         ge=0,
