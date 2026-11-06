@@ -44,7 +44,7 @@ sandbox = [
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = [".", "sdk/python"]
 testpaths = ["tests"]
 # tests/evals run the real model and spend credits: `uv run pytest -m eval tests/evals -s`.
 addopts = "-m 'not eval'"
