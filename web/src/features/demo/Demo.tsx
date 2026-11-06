@@ -3,15 +3,15 @@ import { Link, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, call } from "@/api/client";
 import { errorMessage } from "@/api/errors";
-import { hasDemo, useDemoInfo, useHealth } from "@/api/queries";
-import type { AgreementRead } from "@/api/types";
+import { hasDemo, useDemoFiles, useDemoInfo, useHealth } from "@/api/queries";
+import type { AgreementRead, DemoFile } from "@/api/types";
 import { paths } from "@/app/context";
 import { useTitle } from "@/app/RouteAnnouncer";
 import { sessions, useSessions } from "@/auth/session";
 import { money } from "@/domain/format";
 import { MILESTONE_STAMPS } from "@/domain/status";
 import { Busy, Button, Callout, clearToasts, CopyButton, Facts, Glyph, layout, NumberField, PageHeader, RadioGroup, Sheet, Stamp, toast } from "@/design/components";
-import { demoStore, sampleFile, SAMPLES, seedDemo, type DemoPerson, type DemoRecord } from "./seed";
+import { demoStore, fetchDemoFile, seedDemo, SIGN_IN_DATE, type DemoPerson, type DemoRecord } from "./seed";
 import s from "./Demo.module.css";
 
 /**
@@ -40,18 +40,19 @@ export function Demo() {
       <PageHeader
         eyebrow="Demo · sandbox"
         title="Try the whole loop in three minutes"
-        lede="A literacy grant between a funder and a grantee, with an independent reviewer. You play all three people in this browser. Money moves in PayPal's sandbox, with sandbox accounts; nothing real is charged."
+        lede="A literacy grant between a funder and a grantee, with an independent reviewer. The grant comes from a real agreement document, the evidence is real files, and the money moves in PayPal's sandbox. You play all three people in this browser; nothing real is charged."
       />
       <div className={layout.split}>
         <div className={layout.stackLg}>
           <LoadDemo onLoaded={setRecord} hasRecord={!!record} />
           {record && <Cast record={record} />}
+          {record?.extraction && <Proposed record={record} />}
           {record && <Shortcuts record={record} />}
         </div>
         <div className={layout.stack}>
           <Script />
           <PayPalAccounts />
-          <Samples />
+          <Documents />
           {record && (
             <Sheet title="Start over" titleLevel={2} tight>
               <p>Forget this demo's people and shortcuts. The agreement stays on the server.</p>
@@ -79,6 +80,7 @@ export function Demo() {
 function LoadDemo({ onLoaded, hasRecord }: { onLoaded: (r: DemoRecord) => void; hasRecord: boolean }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const [source, setSource] = useState<"document" | "ready">("document");
   const [signed, setSigned] = useState<"signed" | "unsigned">("signed");
   const [windowDays, setWindowDays] = useState<number>(0);
   const [kind, setKind] = useState<"grant" | "withheld">("grant");
@@ -87,11 +89,15 @@ function LoadDemo({ onLoaded, hasRecord }: { onLoaded: (r: DemoRecord) => void; 
   async function run() {
     setError(null);
     try {
-      const r = await seedDemo({ signed: signed === "signed", disputeWindowDays: windowDays, withheld: kind === "withheld" }, setStep);
+      const r = await seedDemo({ source, signed: signed === "signed", disputeWindowDays: windowDays, withheld: kind === "withheld" }, setStep);
       qc.clear();
       clearToasts();
       onLoaded(r.record);
-      toast("Demo grant ready", { body: "You're the funder. Switch people below or from the account menu." });
+      toast("Demo grant ready", {
+        body: r.record.extraction
+          ? `${r.record.extraction.tranches} tranches and ${r.record.extraction.criteria} criteria proposed from the agreement document. You're the funder.`
+          : "You're the funder. Switch people below or from the account menu.",
+      });
       navigate(paths.agreement(r.orgId, r.agreementId));
     } catch (e) {
       setError(errorMessage(e));
@@ -102,8 +108,17 @@ function LoadDemo({ onLoaded, hasRecord }: { onLoaded: (r: DemoRecord) => void; 
   return (
     <Sheet title={hasRecord ? "Load a fresh demo grant" : "Load the demo grant"}>
       <div className={layout.stack}>
-        <p>Creates Harbor Foundation (funder), Riverside Reads (grantee) and Sponsor Audit Partners (reviewer), a two-tranche USD 30,000 grant between them, and signs all three people into this browser. No email involved: the people are the demo's own.</p>
+        <p>Creates Harbor Foundation (funder), Riverside Reads (grantee) and Sponsor Audit Partners (reviewer), the USD 30,000 Riverside literacy grant between them, and signs all three people into this browser. No email involved: the people are the demo's own.</p>
         <div className={layout.grid2}>
+          <RadioGroup
+            label="The grant comes from"
+            value={source}
+            onChange={setSource}
+            options={[
+              { id: "document", label: "The agreement document", description: "The real grant agreement PDF goes through extraction: the model proposes the tranches and criteria, with lint and open questions. Up to a minute." },
+              { id: "ready", label: "Ready-made", description: "The same grant typed in, with clean criteria. Instant." },
+            ]}
+          />
           <RadioGroup
             label="Start"
             value={signed}
@@ -289,11 +304,12 @@ function Shortcuts({ record }: { record: DemoRecord }) {
 
 function Script() {
   const steps = [
+    ["Ingest", "Load the demo from the agreement document: the engine proposes the tranches, lints the criteria and raises the vague clause as an open question. Or upload the PDF yourself under New agreement."],
     ["Sign", "Load “Before signing”. As each person, open Criteria and sign. The agreement goes live when all three have."],
     ["Fund", "As the funder, open tranche 1 and fund it. PayPal's sandbox opens: sign in with the payer account below and approve the hold."],
     ["Pre-check", "As the grantee, upload the thin note and pre-check it: the verifier lists what's missing, and nothing is recorded."],
-    ["Submit", "Upload the sign-in sheet and the budget, and submit. The checks count 214 rows and total the budget."],
-    ["Review", "As the funder or reviewer, read the verdict and its citations, then approve. The hold is captured."],
+    ["Submit", "Upload the signed sign-in sheets, their register and the budget report, dated 2027-05-22, and submit. The checks count 214 rows and total USD 9,800.50."],
+    ["Review", "As the funder or reviewer, read the verdict and its citations, then approve. The hold is captured. For tranche 2, the finished report is met and cited; the draft with its TODOs lands in review."],
     ["Window", "With a dispute window, the payment waits there: contest it as the reviewer, or pay now as the funder."],
     ["Record", "Open the ledger, the activity log and the compliance packet: every step, cited and timestamped."],
   ];
@@ -344,35 +360,92 @@ function Account({ label, email, password }: { label: string; email: string; pas
   );
 }
 
-function Samples() {
-  const items: { key: keyof typeof SAMPLES; what: string }[] = [
-    { key: "signIn", what: "214 attendees: passes the ≥ 200 check" },
-    { key: "budget", what: "USD 9,800.50 spent: passes the ≤ 10,000 check" },
-    { key: "report", what: "Tranche 2: final report dated before the deadline" },
-    { key: "unfinished", what: "SOW-style demo, tranche 2: fund it, upload with evidence date 2027-09-12; the verifier finds it met, the second opinion spots the TODO and sends it to review" },
-    { key: "thin", what: "Thin evidence: lands in review" },
-  ];
-  function save(key: keyof typeof SAMPLES) {
-    const f = sampleFile(key);
-    const url = URL.createObjectURL(f);
-    const el = document.createElement("a");
-    el.href = url;
-    el.download = f.name;
-    el.click();
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
-  }
+/** What the engine made of the agreement document: the model's proposal, as the funder would see it on the draft. */
+function Proposed({ record }: { record: DemoRecord }) {
+  const x = record.extraction!;
+  const errors = x.lint.filter((i) => i.level === "error");
+  const warnings = x.lint.filter((i) => i.level !== "error");
   return (
-    <Sheet title="Sample evidence" titleLevel={2} tight>
-      <p className={s.muted}>Download these, then upload them on a tranche as the grantee.</p>
-      <ul className={s.samples}>
-        {items.map((i) => (
-          <li key={i.key}>
-            <Button size="sm" variant="quiet" icon="download" onPress={() => save(i.key)}>{SAMPLES[i.key].title}</Button>
-            <span className={s.muted}>{i.what}</span>
-          </li>
-        ))}
-      </ul>
-      <p className={s.muted}><Glyph name="info" size={12} style={{ display: "inline" }} /> Sample text is plain data; the verifier treats evidence as untrusted.</p>
+    <Sheet title="What the engine proposed from the agreement">
+      <div className={layout.stack}>
+        <Facts items={[["Document", x.file], ["Model", x.model], ["Proposed", `${x.tranches} tranches, ${x.criteria} criteria`], ["Lint", errors.length ? `${errors.length} errors, ${warnings.length} warnings` : warnings.length ? `${warnings.length} warnings` : "Clean"]]} />
+        {x.open_questions.length > 0 && (
+          <div>
+            <p className={s.muted}>Open questions the model raised for a person to settle before signing (the agreement's vaguer clauses end up here, not as criteria):</p>
+            <ul className={s.questions}>
+              {x.open_questions.map((q) => (
+                <li key={q}>{q}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {x.lint.length > 0 && (
+          <ul className={s.questions} aria-label="Lint findings">
+            {x.lint.map((i) => (
+              <li key={i.path + i.code}><strong>{i.level}</strong> {i.message}{i.suggestion ? ` ${i.suggestion}` : ""}</li>
+            ))}
+          </ul>
+        )}
+        {x.problems.length > 0 && (
+          <Callout tone="note" title="Left out of the draft">
+            <ul className={s.questions}>{x.problems.map((m) => <li key={m}>{m}</li>)}</ul>
+          </Callout>
+        )}
+      </div>
+    </Sheet>
+  );
+}
+
+/** The demo's documents, served by the API from demo/: download, then upload as the grantee (or as the agreement). */
+function Documents() {
+  const files = useDemoFiles(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  async function save(f: DemoFile) {
+    setBusy(f.key);
+    try {
+      const file = await fetchDemoFile(f);
+      const url = URL.createObjectURL(file);
+      const el = document.createElement("a");
+      el.href = url;
+      el.download = file.name;
+      el.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (e) {
+      toast("Couldn't download it", { body: errorMessage(e), tone: "error" });
+    } finally {
+      setBusy(null);
+    }
+  }
+  const agreement = files.data?.filter((f) => f.role === "agreement") ?? [];
+  const evidence = files.data?.filter((f) => f.role === "evidence") ?? [];
+  return (
+    <Sheet title="The documents" titleLevel={2} tight>
+      <p className={s.muted}>Real files, not stand-ins: a grant agreement for the engine to read, and the grantee's evidence for it to check. Download them here, then upload them in the product like anyone would.</p>
+      {files.isPending && <Busy label="Loading the documents" />}
+      {files.data && (
+        <>
+          <h3 className={s.docsHead}>The agreement</h3>
+          <ul className={s.samples}>
+            {agreement.map((f) => (
+              <li key={f.key}>
+                <Button size="sm" variant="quiet" icon="download" isPending={busy === f.key} onPress={() => save(f)}>{f.name}</Button>
+                <span className={s.muted}>{f.what} Upload it under New agreement as the funder to watch the extraction.</span>
+              </li>
+            ))}
+          </ul>
+          <h3 className={s.docsHead}>The grantee's evidence</h3>
+          <ul className={s.samples}>
+            {evidence.map((f) => (
+              <li key={f.key}>
+                <Button size="sm" variant="quiet" icon="download" isPending={busy === f.key} onPress={() => save(f)}>{f.name}</Button>
+                <span className={s.muted}>{f.what}</span>
+              </li>
+            ))}
+          </ul>
+          <p className={s.muted}>The PDFs carry their own date. For the two sheets, enter {SIGN_IN_DATE} (the last workshop) as the evidence date when a criterion asks for one.</p>
+        </>
+      )}
+      <p className={s.muted}><Glyph name="info" size={12} style={{ display: "inline" }} /> The verifier treats every document as untrusted data; nothing in them is an instruction.</p>
     </Sheet>
   );
 }

@@ -1,9 +1,16 @@
-/** The demo page's sample evidence, as files for setInputFiles (mirrors src/features/demo/seed.ts). */
-const csv = (name: string, content: string) => ({ name, mimeType: "text/csv", buffer: Buffer.from(content) });
-const txt = (name: string, content: string) => ({ name, mimeType: "text/plain", buffer: Buffer.from(content) });
+/** The demo's documents (demo/, served by GET /api/demo/files), as files for setInputFiles. */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const DEMO = fileURLToPath(new URL("../../demo/", import.meta.url));
+const file = (name: string, mimeType: string) => ({ name, mimeType, buffer: readFileSync(DEMO + name) });
 
 export const SAMPLES = {
-  signIn: csv("Spring sign-in sheets.csv", "name,session\n" + Array.from({ length: 214 }, (_, i) => `Person ${i},S${i % 4}`).join("\n")),
-  budget: csv("Q2 budget actuals.csv", 'line,actual\nVenue,"$4,200.00"\nBooks,3100\nFacilitators,2500.50\n'),
-  thin: txt("Workshop photos note.txt", "The workshops went really well and lots of people came. Everyone was engaged."),
+  agreement: file("Riverside Literacy Grant Agreement.pdf", "application/pdf"),
+  signInPdf: file("Spring workshop sign-in sheets (signed).pdf", "application/pdf"),
+  signIn: file("Spring workshop sign-in sheets (register).csv", "text/csv"),
+  budget: file("Spring workshop budget report.csv", "text/csv"),
+  report: file("Riverside Reads final outcomes report.pdf", "application/pdf"),
+  reportDraft: file("Riverside Reads final outcomes report (draft).pdf", "application/pdf"),
+  thin: file("Workshop photos note.txt", "text/plain"),
 };

@@ -53,7 +53,7 @@ GOOD_DRAFT = {
                 {
                     "statement": "Final report shows pre and post reading scores for every enrolled student",
                     "measure": {"metric": "students with pre and post scores", "comparator": "exists"},
-                    "evidence_required": ["document", "dataset"],
+                    "evidence_required": ["document"],
                     "evidence_description": "Final outcomes report PDF with the anonymized score table",
                     "verification": "model",
                 },

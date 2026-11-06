@@ -1,0 +1,8 @@
+line_item,category,budgeted_usd,actual_spend_usd,vendor,notes
+Venue rental,Facilities,1500.00,1450.00,Riverside Community Center,Two Saturday sessions
+Books for participants,Materials,3200.00,3148.75,Porter Square Books,"4 titles, 240 copies"
+Facilitator fees,Personnel,2800.00,2800.00,Program staff,2 facilitators x 4 sessions
+Reading assessments,Materials,900.00,875.00,Literacy Assessment Co.,Pre/post kits
+Workshop supplies,Materials,600.00,612.30,Staples,"Name tags, paper, markers"
+Family snacks,Hospitality,400.00,389.45,Market Basket,4 sessions
+Program administration,Admin,600.00,525.00,Program staff,Within the 10% cap
