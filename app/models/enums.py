@@ -2,6 +2,8 @@ from enum import StrEnum
 
 
 class SettlementMode(StrEnum):
+    """How a verified tranche is paid: escrow_release captures a PayPal hold placed when funding; invoice_on_verify asks the payer to pay once it's verified."""
+
     escrow_release = "escrow_release"
     invoice_on_verify = "invoice_on_verify"
 
@@ -35,6 +37,8 @@ class PayoutRoute(StrEnum):
 
 
 class DisbursementKind(StrEnum):
+    """After a capture: referenced_payout releases a delayed capture to the connected payee, payout sends PayPal Payouts to the payee's email (platform route), refund returns the capture to the payer."""
+
     referenced_payout = "referenced_payout"  # release a delayed-disbursement capture to the connected payee
     payout = "payout"  # PayPal Payouts to the payee's email (platform route)
     refund = "refund"  # return a capture to the payer after a contest
@@ -49,6 +53,8 @@ class Role(StrEnum):
 
 
 class AgreementStatus(StrEnum):
+    """draft (being edited), awaiting_confirmation (sent; parties signing), active (all signed), completed (every tranche settled), cancelled."""
+
     draft = "draft"
     awaiting_confirmation = "awaiting_confirmation"
     active = "active"
@@ -57,6 +63,8 @@ class AgreementStatus(StrEnum):
 
 
 class MilestoneStatus(StrEnum):
+    """A tranche's life: pending, funded (hold placed), evidence_received, verifying, needs_review, verified, settling, held (captured, in the dispute window), contested, settled (paid), refunded, settlement_failed, payout_failed, disputed (payee contests a rejection), overdue."""
+
     pending = "pending"
     funded = "funded"
     evidence_received = "evidence_received"
@@ -75,6 +83,8 @@ class MilestoneStatus(StrEnum):
 
 
 class SettlementStatus(StrEnum):
+    """submitted (sent to PayPal), succeeded, failed, unclaimed (payout to an email with no PayPal account), expired (hold lapsed or invoice timed out)."""
+
     submitted = "submitted"
     succeeded = "succeeded"
     failed = "failed"
@@ -83,6 +93,8 @@ class SettlementStatus(StrEnum):
 
 
 class EvidenceType(StrEnum):
+    """document, spreadsheet, photo, link, code_change (commit or PR), ci_run, dataset, attestation (signed statement from a named third party)."""
+
     document = "document"  # report, memo, PDF
     spreadsheet = "spreadsheet"  # budget, sign-in sheet, data table
     photo = "photo"
@@ -94,6 +106,8 @@ class EvidenceType(StrEnum):
 
 
 class Comparator(StrEnum):
+    """How the observed value is compared to the target: at_least, at_most, equals, exists (no target), on_or_before (a date)."""
+
     at_least = "at_least"
     at_most = "at_most"
     equals = "equals"
@@ -102,17 +116,23 @@ class Comparator(StrEnum):
 
 
 class VerificationMethod(StrEnum):
+    """check: a deterministic check from the registry decides it; model: the verifier reads the evidence; human: a named person must sign off."""
+
     check = "check"  # deterministic check from the registry decides it
     model = "model"  # the model judges it, citing evidence
     human = "human"  # always goes to a person; never auto-releases
 
 
 class LintLevel(StrEnum):
+    """error blocks signing; warning is shown but doesn't."""
+
     error = "error"  # blocks confirm
     warning = "warning"  # shown, does not block
 
 
 class OrgRole(StrEnum):
+    """owner, admin, member, viewer: what a person may do inside their organization (admins sign and release; members submit evidence; viewers read)."""
+
     owner = "owner"
     admin = "admin"
     member = "member"
@@ -127,6 +147,8 @@ class OrgRole(StrEnum):
 
 
 class InvitationKind(StrEnum):
+    """counterparty (join as the payee), reviewer (join as a reviewer), member (join an organization)."""
+
     counterparty = "counterparty"  # join an agreement as its payee
     reviewer = "reviewer"  # join an agreement as a third-party reviewer
     member = "member"  # join an organization

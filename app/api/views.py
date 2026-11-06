@@ -24,9 +24,9 @@ from app.models import (
 class EvidenceAccepted(SQLModel):
     """Result of an intake call (not an entity)."""
 
-    evidence_id: str
+    evidence_id: str = Field(description="The stored evidence item (the existing one when duplicate).")
     duplicate: bool = Field(description="True when identical evidence was already on file.")
-    milestone_status: MilestoneStatus
+    milestone_status: MilestoneStatus = Field(description="The tranche's status after intake, before verification.")
 
 
 def funding_summary(row: Agreement) -> FundingSummary:

@@ -16,20 +16,20 @@ class Provenance(SQLModel):
 
 
 class ExtractionProblem(SQLModel):
-    path: str
-    message: str
+    path: str = Field(description="Where the proposal would have landed, e.g. 'milestones[1].criteria[0]'.")
+    message: str = Field(description="Why it was left out.")
 
 
 class ExtractionResult(SQLModel):
-    title: str
-    total_amount: Decimal | None
-    currency: str
+    title: str = Field(description="The agreement's name as the model read it.")
+    total_amount: Decimal | None = Field(description="The agreement total; null when the document gives none.")
+    currency: str = Field(description="ISO 4217, from the document (USD when unstated).")
     milestones: list[MilestoneCreate] = Field(..., description="Proposed tranches; edit, then POST /agreements.")
     open_questions: list[str] = Field(..., description="Ambiguities a person must resolve before confirming.")
     problems: list[ExtractionProblem] = Field(..., description="Proposals that failed validation and were left out.")
-    provenance: list[Provenance]
-    lint: LintReport
-    model: str
+    provenance: list[Provenance] = Field(description="The agreement sentence each criterion was drawn from.")
+    lint: LintReport = Field(description="The same lint that gates signing, run on the proposal.")
+    model: str = Field(description="Which model produced it ('mock' on a stand-in).")
 
 
 def _decimal(text: str | None) -> Decimal | None:

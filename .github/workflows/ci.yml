@@ -18,6 +18,11 @@ jobs:
       - run: uv run ruff format --check .
       - name: Core SDK spec is up to date
         run: uv run python -m app.sdk_spec --check
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Core SDK spec lints clean (what an SDK generator sees)
+        run: npx --yes @redocly/cli@1.34.3 lint sdk/openapi-core.json
       - run: uv run pytest -q
 
   sdk-typescript:

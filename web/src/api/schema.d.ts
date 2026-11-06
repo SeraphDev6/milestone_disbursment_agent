@@ -1129,7 +1129,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Unsubscribe */
+        /** Remove a subscription; deliveries to it stop */
         delete: operations["unsubscribe_agreements__agreement_id__subscriptions__subscription_id__delete"];
         options?: never;
         head?: never;
@@ -1409,8 +1409,12 @@ export interface components {
         };
         /** AgreementCreated */
         AgreementCreated: {
+            /** @description The draft as stored, with its lint. */
             agreement: components["schemas"]["AgreementRead"];
-            /** Invitations */
+            /**
+             * Invitations
+             * @description Invitations sent to the counterparty and reviewers.
+             */
             invitations: components["schemas"]["InvitationRead"][];
         };
         /** AgreementRead */
@@ -1472,10 +1476,17 @@ export interface components {
              * @default hash_only
              */
             min_evidence_visibility?: components["schemas"]["EvidenceVisibility"];
-            /** Id */
+            /**
+             * Id
+             * @description Agreement id.
+             */
             id: string;
+            /** @description draft, awaiting_confirmation, active, completed or cancelled. */
             status: components["schemas"]["AgreementStatus"];
-            /** Auto Release Enabled */
+            /**
+             * Auto Release Enabled
+             * @description Set by the payer when signing: a funded tranche settles itself on a confident verdict.
+             */
             auto_release_enabled: boolean;
             /**
              * Criteria Hash
@@ -1487,20 +1498,27 @@ export interface components {
              * @description True once every party signed and criteria can no longer change.
              */
             locked: boolean;
-            /** Parties */
+            /**
+             * Parties
+             * @description Payer, payee and any reviewers that have joined.
+             */
             parties: components["schemas"]["PartyRead"][];
             /**
              * Pending Invitations
              * @description Emails invited (as counterparty or reviewer) who haven't joined yet.
              */
             pending_invitations?: string[];
-            /** Milestones */
+            /**
+             * Milestones
+             * @description Tranches in payment order.
+             */
             milestones: components["schemas"]["MilestoneRead"][];
             funding: components["schemas"]["FundingSummary"];
             lint: components["schemas"]["LintReport"];
         };
         /**
          * AgreementStatus
+         * @description draft (being edited), awaiting_confirmation (sent; parties signing), active (all signed), completed (every tranche settled), cancelled.
          * @enum {string}
          */
         AgreementStatus: "draft" | "awaiting_confirmation" | "active" | "completed" | "cancelled";
@@ -1640,7 +1658,10 @@ export interface components {
         };
         /** Body_extract_agreement_agreements_extract_post */
         Body_extract_agreement_agreements_extract_post: {
-            /** File */
+            /**
+             * File
+             * @description The agreement: PDF, plain text or Markdown, up to 20 MB.
+             */
             file: string;
         };
         /** Body_upload_evidence_milestones__milestone_id__uploads_post */
@@ -1678,6 +1699,7 @@ export interface components {
         };
         /**
          * Comparator
+         * @description How the observed value is compared to the target: at_least, at_most, equals, exists (no target), on_or_before (a date).
          * @enum {string}
          */
         Comparator: "at_least" | "at_most" | "equals" | "exists" | "on_or_before";
@@ -1910,41 +1932,66 @@ export interface components {
         };
         /** DisbursementAttempt */
         DisbursementAttempt: {
-            /** Id */
+            /**
+             * Id
+             * @description Disbursement attempt id.
+             */
             id: string;
-            /** Milestone Id */
+            /**
+             * Milestone Id
+             * @description The tranche whose captured money moves.
+             */
             milestone_id: string;
             /** @description referenced_payout or payout (to the payee), refund (to the payer). */
             kind: components["schemas"]["DisbursementKind"];
-            /** Attempt */
+            /**
+             * Attempt
+             * @description 1 for the first try; a failed payout retries with the next number.
+             */
             attempt: number;
-            /** Idempotency Key */
+            /**
+             * Idempotency Key
+             * @description Sent to PayPal as PayPal-Request-Id, so a retry can't double-pay.
+             */
             idempotency_key: string;
-            /** Paypal Ref */
+            /**
+             * Paypal Ref
+             * @description Payout item id, referenced payout id or refund id from PayPal.
+             */
             paypal_ref: string | null;
+            /** @description submitted, succeeded, failed or unclaimed. */
             status: components["schemas"]["SettlementStatus"];
-            /** Error */
+            /**
+             * Error
+             * @description PayPal's error when the attempt failed.
+             */
             error: string | null;
             /**
              * Created At
              * Format: date-time
+             * @description When the attempt started.
              */
             created_at: string;
             /**
              * Updated At
              * Format: date-time
+             * @description Last change.
              */
             updated_at: string;
         };
         /**
          * DisbursementKind
+         * @description After a capture: referenced_payout releases a delayed capture to the connected payee, payout sends PayPal Payouts to the payee's email (platform route), refund returns the capture to the payer.
          * @enum {string}
          */
         DisbursementKind: "referenced_payout" | "payout" | "refund";
         /** DisbursementRead */
         DisbursementRead: {
             kind: components["schemas"]["DisbursementKind"];
-            /** Attempt */
+            /**
+             * Attempt
+             * @description 1 for the first try; a failed payout retries with the next number.
+             */
             attempt: number;
             /**
              * Idempotency Key
@@ -1957,8 +2004,12 @@ export interface components {
              */
             paypal_ref?: string | null;
             status: components["schemas"]["SettlementStatus"];
-            /** Id */
+            /**
+             * Id
+             * @description Disbursement attempt id.
+             */
             id: string;
+            /** @description The tranche's status after this call. */
             milestone_status: components["schemas"]["MilestoneStatus"];
         };
         /** DisputeIn */
@@ -1987,13 +2038,17 @@ export interface components {
          * @description Result of an intake call (not an entity).
          */
         EvidenceAccepted: {
-            /** Evidence Id */
+            /**
+             * Evidence Id
+             * @description The stored evidence item (the existing one when duplicate).
+             */
             evidence_id: string;
             /**
              * Duplicate
              * @description True when identical evidence was already on file.
              */
             duplicate: boolean;
+            /** @description The tranche's status after intake, before verification. */
             milestone_status: components["schemas"]["MilestoneStatus"];
         };
         /**
@@ -2107,6 +2162,7 @@ export interface components {
         };
         /**
          * EvidenceType
+         * @description document, spreadsheet, photo, link, code_change (commit or PR), ci_run, dataset, attestation (signed statement from a named third party).
          * @enum {string}
          */
         EvidenceType: "document" | "spreadsheet" | "photo" | "link" | "code_change" | "ci_run" | "dataset" | "attestation";
@@ -2119,18 +2175,33 @@ export interface components {
         EvidenceVisibility: "hash_only" | "verdict_only" | "excerpt" | "preview";
         /** ExtractionProblem */
         ExtractionProblem: {
-            /** Path */
+            /**
+             * Path
+             * @description Where the proposal would have landed, e.g. 'milestones[1].criteria[0]'.
+             */
             path: string;
-            /** Message */
+            /**
+             * Message
+             * @description Why it was left out.
+             */
             message: string;
         };
         /** ExtractionResult */
         ExtractionResult: {
-            /** Title */
+            /**
+             * Title
+             * @description The agreement's name as the model read it.
+             */
             title: string;
-            /** Total Amount */
+            /**
+             * Total Amount
+             * @description The agreement total; null when the document gives none.
+             */
             total_amount: string | null;
-            /** Currency */
+            /**
+             * Currency
+             * @description ISO 4217, from the document (USD when unstated).
+             */
             currency: string;
             /**
              * Milestones
@@ -2147,15 +2218,25 @@ export interface components {
              * @description Proposals that failed validation and were left out.
              */
             problems: components["schemas"]["ExtractionProblem"][];
-            /** Provenance */
+            /**
+             * Provenance
+             * @description The agreement sentence each criterion was drawn from.
+             */
             provenance: components["schemas"]["Provenance"][];
+            /** @description The same lint that gates signing, run on the proposal. */
             lint: components["schemas"]["LintReport"];
-            /** Model */
+            /**
+             * Model
+             * @description Which model produced it ('mock' on a stand-in).
+             */
             model: string;
         };
         /** FundingStarted */
         FundingStarted: {
-            /** Order Id */
+            /**
+             * Order Id
+             * @description The PayPal order holding the authorization; the approve_url refers to it.
+             */
             order_id: string;
             /**
              * Approve Url
@@ -2443,31 +2524,56 @@ export interface components {
         };
         /**
          * InvitationKind
+         * @description counterparty (join as the payee), reviewer (join as a reviewer), member (join an organization).
          * @enum {string}
          */
         InvitationKind: "counterparty" | "reviewer" | "member";
         /** InvitationRead */
         InvitationRead: {
-            /** Id */
+            /**
+             * Id
+             * @description Invitation id; POST /invitations/{id}/accept takes it.
+             */
             id: string;
+            /** @description counterparty or reviewer (join an agreement), member (join an org). */
             kind: components["schemas"]["InvitationKind"];
-            /** Email */
+            /**
+             * Email
+             * @description The address invited; only a person signed in with it can accept.
+             */
             email: string;
-            /** Agreement Id */
+            /**
+             * Agreement Id
+             * @description For counterparty and reviewer invitations.
+             */
             agreement_id: string | null;
-            /** Agreement Title */
+            /**
+             * Agreement Title
+             * @description Its title, for display.
+             */
             agreement_title?: string | null;
-            /** Org Id */
+            /**
+             * Org Id
+             * @description For member invitations: the organization to join.
+             */
             org_id: string | null;
+            /** @description For member invitations: the role offered. */
             org_role: components["schemas"]["OrgRole"] | null;
             /**
              * Expires At
              * Format: date-time
+             * @description After this the invitation can't be accepted.
              */
             expires_at: string;
-            /** Accepted At */
+            /**
+             * Accepted At
+             * @description Set once accepted.
+             */
             accepted_at: string | null;
-            /** Revoked At */
+            /**
+             * Revoked At
+             * @description Set when withdrawn by the inviter.
+             */
             revoked_at: string | null;
         };
         /** InvitationSent */
@@ -2476,10 +2582,14 @@ export interface components {
         };
         /** InviteToAgreement */
         InviteToAgreement: {
-            /** Email */
+            /**
+             * Email
+             * @description Who to invite.
+             */
             email: string;
             /**
              * Kind
+             * @description counterparty: the payee (replaces a pending payee invitation); reviewer.
              * @default reviewer
              * @enum {string}
              */
@@ -2487,28 +2597,44 @@ export interface components {
         };
         /** LedgerEntryRead */
         LedgerEntryRead: {
-            /** Id */
+            /**
+             * Id
+             * @description Ledger entry id.
+             */
             id: string;
-            /** Milestone Id */
+            /**
+             * Milestone Id
+             * @description The tranche the money belongs to; null for agreement-level.
+             */
             milestone_id: string | null;
             /**
              * Kind
              * @description authorized, captured, voided, expired, invoiced, paid or invoice_cancelled.
              */
             kind: string;
-            /** Amount */
+            /**
+             * Amount
+             * @description In the agreement's currency.
+             */
             amount: string;
-            /** Paypal Ref */
+            /**
+             * Paypal Ref
+             * @description PayPal's id for the object: authorization, capture, invoice or order.
+             */
             paypal_ref: string;
             /**
              * At
              * Format: date-time
+             * @description When the engine recorded it.
              */
             at: string;
         };
         /** LedgerView */
         LedgerView: {
-            /** Currency */
+            /**
+             * Currency
+             * @description The agreement's ISO 4217 currency; every amount below is in it.
+             */
             currency: string;
             /**
              * Entries
@@ -2553,6 +2679,7 @@ export interface components {
         };
         /**
          * LintLevel
+         * @description error blocks signing; warning is shown but doesn't.
          * @enum {string}
          */
         LintLevel: "error" | "warning";
@@ -2745,19 +2872,32 @@ export interface components {
              * @description Checkable conditions; all must be met to release this tranche.
              */
             criteria: components["schemas"]["Criterion-Output"][];
-            /** Id */
+            /**
+             * Id
+             * @description Tranche (milestone) id.
+             */
             id: string;
-            /** Position */
+            /**
+             * Position
+             * @description 0-based order within the agreement.
+             */
             position: number;
+            /** @description Where the tranche is in its life, pending to settled. */
             status: components["schemas"]["MilestoneStatus"];
             /**
              * Paypal Authorization Id
              * @description Live PayPal hold for this tranche.
              */
             paypal_authorization_id?: string | null;
-            /** Payer Assignee Id */
+            /**
+             * Payer Assignee Id
+             * @description Payer-side user the tranche is assigned to.
+             */
             payer_assignee_id?: string | null;
-            /** Payee Assignee Id */
+            /**
+             * Payee Assignee Id
+             * @description Payee-side user the tranche is assigned to.
+             */
             payee_assignee_id?: string | null;
             /**
              * Funded At
@@ -2801,6 +2941,7 @@ export interface components {
         };
         /**
          * MilestoneStatus
+         * @description A tranche's life: pending, funded (hold placed), evidence_received, verifying, needs_review, verified, settling, held (captured, in the dispute window), contested, settled (paid), refunded, settlement_failed, payout_failed, disputed (payee contests a rejection), overdue.
          * @enum {string}
          */
         MilestoneStatus: "pending" | "funded" | "evidence_received" | "verifying" | "needs_review" | "verified" | "settling" | "held" | "contested" | "settled" | "refunded" | "settlement_failed" | "payout_failed" | "disputed" | "overdue";
@@ -2816,6 +2957,7 @@ export interface components {
         };
         /**
          * OrgRole
+         * @description owner, admin, member, viewer: what a person may do inside their organization (admins sign and release; members submit evidence; viewers read).
          * @enum {string}
          */
         OrgRole: "owner" | "admin" | "member" | "viewer";
@@ -2870,9 +3012,15 @@ export interface components {
              * @description Org name at joining; shown in the record.
              */
             display_name: string;
-            /** Id */
+            /**
+             * Id
+             * @description Party id.
+             */
             id: string;
-            /** Org Id */
+            /**
+             * Org Id
+             * @description The organization acting in this role.
+             */
             org_id: string;
             /**
              * Confirmed Current
@@ -3085,6 +3233,7 @@ export interface components {
         ReviewRequest: {
             /**
              * Decision
+             * @description approve releases the tranche (it settles when funded); reject sends it back with what's missing.
              * @enum {string}
              */
             decision: "approve" | "reject";
@@ -3209,33 +3358,56 @@ export interface components {
         };
         /** SettlementAttempt */
         SettlementAttempt: {
-            /** Id */
+            /**
+             * Id
+             * @description Settlement attempt id.
+             */
             id: string;
-            /** Milestone Id */
+            /**
+             * Milestone Id
+             * @description The tranche being settled.
+             */
             milestone_id: string;
-            /** Attempt */
+            /**
+             * Attempt
+             * @description 1 for the first try; a failed release retries with the next number.
+             */
             attempt: number;
+            /** @description escrow_release (capture a hold) or invoice_on_verify. */
             mode: components["schemas"]["SettlementMode"];
-            /** Idempotency Key */
+            /**
+             * Idempotency Key
+             * @description Sent to PayPal as PayPal-Request-Id, so a retry can't double-charge.
+             */
             idempotency_key: string;
-            /** Paypal Ref */
+            /**
+             * Paypal Ref
+             * @description Capture id, invoice id or pay-now order id once PayPal answered.
+             */
             paypal_ref: string | null;
+            /** @description submitted, succeeded, failed or expired. */
             status: components["schemas"]["SettlementStatus"];
-            /** Error */
+            /**
+             * Error
+             * @description PayPal's error when the attempt failed.
+             */
             error: string | null;
             /**
              * Created At
              * Format: date-time
+             * @description When the attempt started.
              */
             created_at: string;
             /**
              * Updated At
              * Format: date-time
+             * @description Last change.
              */
             updated_at: string;
         };
         /**
          * SettlementMode
+         * @description How a verified tranche is paid: escrow_release captures a PayPal hold placed when funding; invoice_on_verify asks the payer to pay once it's verified.
          * @enum {string}
          */
         SettlementMode: "escrow_release" | "invoice_on_verify";
@@ -3260,8 +3432,12 @@ export interface components {
             paypal_ref?: string | null;
             /** @description Mirrored from PayPal responses and webhooks. */
             status: components["schemas"]["SettlementStatus"];
-            /** Id */
+            /**
+             * Id
+             * @description Settlement attempt id.
+             */
             id: string;
+            /** @description The tranche's status after this call. */
             milestone_status: components["schemas"]["MilestoneStatus"];
             /**
              * Pay Url
@@ -3271,6 +3447,7 @@ export interface components {
         };
         /**
          * SettlementStatus
+         * @description submitted (sent to PayPal), succeeded, failed, unclaimed (payout to an email with no PayPal account), expired (hold lapsed or invoice timed out).
          * @enum {string}
          */
         SettlementStatus: "submitted" | "succeeded" | "failed" | "unclaimed" | "expired";
@@ -3341,13 +3518,20 @@ export interface components {
              * @description Event types (milestone.status_changed), prefixes ending in '.' (milestone.), or '*'.
              */
             events?: string[];
-            /** Id */
+            /**
+             * Id
+             * @description Subscription id.
+             */
             id: string;
-            /** Active */
+            /**
+             * Active
+             * @description False once deleted; deliveries stop.
+             */
             active: boolean;
             /**
              * Created At
              * Format: date-time
+             * @description When it was registered.
              */
             created_at: string;
             /**
@@ -3368,13 +3552,20 @@ export interface components {
              * @description Event types (milestone.status_changed), prefixes ending in '.' (milestone.), or '*'.
              */
             events?: string[];
-            /** Id */
+            /**
+             * Id
+             * @description Subscription id.
+             */
             id: string;
-            /** Active */
+            /**
+             * Active
+             * @description False once deleted; deliveries stop.
+             */
             active: boolean;
             /**
              * Created At
              * Format: date-time
+             * @description When it was registered.
              */
             created_at: string;
         };
@@ -3452,16 +3643,21 @@ export interface components {
             gate: string;
             /** @description Second opinion, run before an auto-release on deliverable_release=on_capture agreements. */
             skeptic?: components["schemas"]["SkepticPass"] | null;
-            /** Id */
+            /**
+             * Id
+             * @description Verdict id; review decisions refer to it in the audit log.
+             */
             id: string;
             /**
              * Created At
              * Format: date-time
+             * @description When the verifier finished.
              */
             created_at: string;
         };
         /**
          * VerificationMethod
+         * @description check: a deterministic check from the registry decides it; model: the verifier reads the evidence; human: a named person must sign off.
          * @enum {string}
          */
         VerificationMethod: "check" | "model" | "human";

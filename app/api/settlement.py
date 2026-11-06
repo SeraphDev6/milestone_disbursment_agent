@@ -18,13 +18,13 @@ router = APIRouter(tags=["settlement"])
 
 
 class FundingStarted(SQLModel):
-    order_id: str
+    order_id: str = Field(description="The PayPal order holding the authorization; the approve_url refers to it.")
     approve_url: str = Field(..., description="Send the payer here to approve the hold in PayPal.")
 
 
 @router.post(
     "/milestones/{milestone_id}/fund",
-    openapi_extra={"x-sdk-core": True},
+    openapi_extra={"x-sdk-core": "fundMilestone"},
     summary="Payer starts a PayPal hold for one tranche",
 )
 def fund(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep, request: Request) -> FundingStarted:
@@ -56,7 +56,7 @@ def paypal_cancel(session: SessionDep, token: str | None = None) -> HTMLResponse
 
 @router.post(
     "/milestones/{milestone_id}/release",
-    openapi_extra={"x-sdk-core": True},
+    openapi_extra={"x-sdk-core": "releaseMilestone"},
     summary="Settle a verified tranche: capture its hold or send its invoice (also resumes a failed release)",
 )
 def release(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep, request: Request) -> SettlementRead:
@@ -89,7 +89,7 @@ def pay(settlement_id: str, session: SessionDep, request: Request, t: str | None
 
 @router.post(
     "/milestones/{milestone_id}/pay-link",
-    openapi_extra={"x-sdk-core": True},
+    openapi_extra={"x-sdk-core": "resendPayLink"},
     summary="Invoice mode: email the payer side a fresh pay link and return it (links expire; this reissues one)",
 )
 def resend_pay_link(
@@ -132,7 +132,7 @@ def _disbursement_read(d, m) -> DisbursementRead:
 
 @router.post(
     "/milestones/{milestone_id}/payout",
-    openapi_extra={"x-sdk-core": True},
+    openapi_extra={"x-sdk-core": "payoutMilestone"},
     summary="Pay a captured tranche to the payee now (waives the rest of the dispute window; retries a failed payout)",
 )
 def payout(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep, request: Request) -> DisbursementRead:

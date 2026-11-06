@@ -51,7 +51,9 @@ class PrecheckRequest(SQLModel):
 
 
 class ReviewRequest(SQLModel):
-    decision: Literal["approve", "reject"]
+    decision: Literal["approve", "reject"] = Field(
+        description="approve releases the tranche (it settles when funded); reject sends it back with what's missing."
+    )
     note: str | None = Field(None, max_length=2000, description="Shown to the payee and kept in the audit log.")
 
 
@@ -101,7 +103,7 @@ def _verify_later(background: BackgroundTasks, request: Request, milestone_id: s
 @router.post(
     "/milestones/{milestone_id}/evidence",
     status_code=status.HTTP_202_ACCEPTED,
-    openapi_extra={"x-sdk-core": True, "x-mcp-tool": "submit_evidence"},
+    openapi_extra={"x-sdk-core": "submitEvidence", "x-mcp-tool": "submit_evidence"},
     summary="Payee submits evidence for a tranche; verification runs in the background",
 )
 def submit_evidence(
@@ -122,7 +124,7 @@ def submit_evidence(
 
 @router.post(
     "/milestones/{milestone_id}/uploads",
-    openapi_extra={"x-sdk-core": True},
+    openapi_extra={"x-sdk-core": "uploadEvidence"},
     status_code=status.HTTP_202_ACCEPTED,
     summary="Payee uploads evidence files (PDF, CSV, XLSX, TXT, MD, images); verification runs in the background",
 )
@@ -455,7 +457,7 @@ def download_handover(handover_id: str, auth: HandoverAccessDep, session: Sessio
 
 @router.post(
     "/milestones/{milestone_id}/precheck",
-    openapi_extra={"x-sdk-core": True, "x-mcp-tool": "precheck_evidence"},
+    openapi_extra={"x-sdk-core": "precheckEvidence", "x-mcp-tool": "precheck_evidence"},
     summary="Payee checks draft evidence against the criteria without submitting it",
 )
 def precheck(
@@ -481,7 +483,7 @@ def reverify(
 
 @router.get(
     "/milestones/{milestone_id}/verdict",
-    openapi_extra={"x-sdk-core": True, "x-mcp-tool": "get_verdict"},
+    openapi_extra={"x-sdk-core": "getVerdict", "x-mcp-tool": "get_verdict"},
     summary="Latest verdict for a tranche, with per-criterion results and citations",
 )
 def get_verdict(milestone_id: str, auth: MilestoneAccessDep) -> VerdictRead:
@@ -498,7 +500,7 @@ def get_verdict(milestone_id: str, auth: MilestoneAccessDep) -> VerdictRead:
 
 @router.post(
     "/milestones/{milestone_id}/review",
-    openapi_extra={"x-sdk-core": True},
+    openapi_extra={"x-sdk-core": "reviewMilestone"},
     summary="Payer (admin) or reviewer approves or rejects a verdict in review",
 )
 def review(
