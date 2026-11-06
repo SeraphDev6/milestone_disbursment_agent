@@ -186,6 +186,10 @@ Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
     nobody else.
   - **Every read is recorded:** which side viewed or downloaded which item, and whether it saw the withheld or
     the full view. That record is the payee's dispute pack.
+- **Reconciliation.** The daily job (and `python -m app.jobs reconcile` on demand) reads every PayPal object the
+  ledger refers to back from PayPal (live holds, captures, invoices, pay-now orders, Payouts batches) and compares it
+  with what we recorded. A disagreement becomes a `reconciliation_mismatch` audit event on the tranche, once per object
+  and PayPal status, and a line in the job's output; nothing is changed on either side.
   - **Storage:** encrypted at rest by the app (AES-256-GCM), in the database or, with `FILE_STORAGE=s3`, a
     Cloudflare R2 (or any S3-compatible) bucket that only ever holds ciphertext. Every download goes through the
     app, which checks access, records the read and checks the file's hash; there are no direct bucket links.
