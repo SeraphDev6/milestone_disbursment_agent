@@ -19,3 +19,6 @@ local.db
 # Never commit these to this public repo. Clone the private compliance repo here (see docs/policy-templates/README.md).
 /compliance-private/
 github-app.env
+
+# Marketing site build output (site/build.mjs)
+/_site/

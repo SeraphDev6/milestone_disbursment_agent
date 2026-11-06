@@ -1,0 +1,69 @@
+name: Marketing site
+
+# Builds site/ into _site/, checks every page against WCAG 2.2 AA with axe in all three themes, and deploys it to
+# GitHub Pages on pushes to main. Pull requests get the build and the check, not the deploy.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "web/src/design/themes.css"
+      - "web/src/design/tokens.css"
+      - "web/e2e-site/**"
+      - "web/playwright.site.config.ts"
+      - ".github/workflows/pages.yml"
+  pull_request:
+    paths:
+      - "site/**"
+      - "web/src/design/themes.css"
+      - "web/src/design/tokens.css"
+      - "web/e2e-site/**"
+      - "web/playwright.site.config.ts"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install the web app's packages (fonts and Playwright come from there)
+        run: npm ci
+        working-directory: web
+      - name: Build the site
+        run: node site/build.mjs _site
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: web
+      - name: Accessibility check (axe, WCAG 2.0–2.2 A/AA, three themes, 320px reflow)
+        run: npx playwright test -c playwright.site.config.ts
+        working-directory: web
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
