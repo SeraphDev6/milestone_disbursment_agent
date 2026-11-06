@@ -124,6 +124,7 @@ class Settings(BaseSettings):
     rate_limit_extract_per_hour: int = 30  # per caller
     rate_limit_precheck_per_hour: int = 60  # per caller
     rate_limit_pay_link_per_hour: int = 30  # per IP
+    pay_link_valid_days: int = 7  # a pay link's signature expires after this; the payer side can get a fresh one
     rate_limit_demo_per_hour: int = 10  # per IP: demo casts (three people and their sessions each)
     # Trust X-Forwarded-For from the reverse proxy in front of the app (Render, Docker behind a load balancer)
     # when attributing requests to a client for rate limits.

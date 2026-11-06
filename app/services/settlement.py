@@ -25,7 +25,7 @@ from typing import Literal
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
-from app.db import as_utc, record_audit
+from app.db import as_utc, record_audit, utcnow
 from app.integrations.paypal import CreatedOrder, PayPalError, PayPalGateway
 from app.models import (
     AgreementStatus,
@@ -46,6 +46,7 @@ from app.models import (
 )
 from app.services import ServiceError, handover, payee_accounts
 from app.services.notifications import notify_side, tranche_subject
+from app.services.paylinks import pay_links_for
 
 HONOR_PERIOD = timedelta(days=3)
 AUTH_VALIDITY = timedelta(days=29)
@@ -757,11 +758,15 @@ def _party(m: Milestone, role: Role) -> Party:
     return next(p for p in m.agreement.parties if p.role == role)
 
 
-def pay_path(s: Settlement) -> str | None:
-    """Where the payer pays an open invoice-mode request, relative to the API."""
-    if s.mode == SettlementMode.invoice_on_verify and s.status == SettlementStatus.submitted:
-        return f"/pay/{s.id}"
-    return None
+def pay_path(s: Settlement, now: datetime | None = None) -> str | None:
+    """Where the payer pays an open invoice-mode request, relative to the API: a link signed for the next
+    `pay_link_valid_days` (see app.services.paylinks). None when there is nothing open to pay."""
+    if s.mode != SettlementMode.invoice_on_verify or s.status != SettlementStatus.submitted:
+        return None
+    links = pay_links_for(Session.object_session(s)) if Session.object_session(s) is not None else None
+    if links is None:
+        raise ServiceError("pay links aren't configured on this session", 500)
+    return links.path(s.id, now or utcnow())
 
 
 def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: datetime) -> Settlement:
@@ -788,7 +793,7 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor
         session.commit()
         if route == PayoutRoute.direct:
             _ledger(session, m, "invoiced", f"request:{s.id}")
-            _note(session, m, actor, "payment_requested", settlement_id=s.id, pay_path=pay_path(s))
+            _note(session, m, actor, "payment_requested", settlement_id=s.id, pay_path=f"/pay/{s.id}")
             session.commit()
             _notify_payment_due(session, m, pay_path(s))
             return s
@@ -834,6 +839,19 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor
     return s
 
 
+def resend_pay_link(session: Session, m: Milestone, actor: str, now: datetime) -> Settlement:
+    """A payer-side person asks for a fresh pay link: emailed to the payer side again, and returned."""
+    last = m.settlements[-1] if m.settlements else None
+    if m.status != MilestoneStatus.settling or last is None or pay_path(last, now) is None:
+        raise ServiceError("no payment is open on this tranche", 409)
+    if m.payout_route != PayoutRoute.direct:
+        raise ServiceError("this tranche is paid through a PayPal invoice, which PayPal emailed to the payer", 409)
+    _note(session, m, actor, "pay_link_resent", settlement_id=last.id)
+    session.commit()
+    _notify_payment_due(session, m, pay_path(last, now))
+    return last
+
+
 def _notify_payment_due(session: Session, m: Milestone, path: str | None) -> None:
     from app.services.notifications import notifier_for
 
@@ -852,8 +870,19 @@ def _notify_payment_due(session: Session, m: Milestone, path: str | None) -> Non
     )
 
 
-def payment_link(session: Session, gw: PayPalGateway, settlement_id: str, base_url: str) -> str:
-    """The payer opened /pay/{id}: send them to a fresh PayPal order (direct) or the PayPal invoice (platform)."""
+def payment_link(
+    session: Session, gw: PayPalGateway, settlement_id: str, base_url: str, token: str | None, now: datetime
+) -> str:
+    """The payer opened a signed /pay/{id} link: send them to a fresh PayPal order (direct) or the PayPal invoice
+    (platform). The signature is checked before anything about the request is revealed."""
+    links = pay_links_for(session)
+    problem = links.check(settlement_id, token, now) if links else "invalid"
+    if problem == "expired":
+        raise ServiceError(
+            "this pay link has expired; open the tranche in the app for a fresh one, or ask the payee to resend it", 410
+        )
+    if problem:
+        raise ServiceError("this pay link is not valid", 404)
     s = session.get(Settlement, settlement_id)
     if s is None or s.mode != SettlementMode.invoice_on_verify:
         raise ServiceError("unknown payment request", 404)
