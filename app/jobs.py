@@ -28,10 +28,24 @@ from app.services.handover import run as run_handovers
 from app.services.notifications import NOTIFIER, Notifier
 from app.services.outbound import deliver_due
 from app.services.paylinks import PAY_LINKS, PayLinks
+from app.services.reconciliation import reconcile
 from app.services.settlement import disburse_due, expire_stale_holds, expire_stale_invoices
 from app.services.verification import mark_overdue
 
-JOBS = ("migrate", "daily", "payouts", "deliver-webhooks", "encrypt-files", "verify-audit", "seal-audit")
+JOBS = ("migrate", "daily", "payouts", "deliver-webhooks", "encrypt-files", "verify-audit", "seal-audit", "reconcile")
+
+
+def _summary(report) -> str:
+    head = (
+        f"reconciled {report.checked} PayPal object(s): {len(report.mismatches)} mismatch(es), "
+        f"{report.errors} unreachable, {report.unchecked} unchecked"
+    )
+    lines = [head]
+    lines += [
+        f"  {m.object} {m.paypal_ref} on tranche {m.milestone_id}: we say {m.ours}, PayPal says {m.paypal}"
+        for m in report.mismatches
+    ]
+    return "\n".join(lines)
 
 
 def main(argv: list[str]) -> int:
@@ -79,6 +93,11 @@ def main(argv: list[str]) -> int:
             kept = custody.run(session, settings, now)
             if kept:
                 print(", ".join(f"{k}: {v}" for k, v in kept.items()))
+            print(_summary(reconcile(session, make_gateway(settings), now)))
+        elif argv[0] == "reconcile":
+            report = reconcile(session, make_gateway(settings), now)
+            print(_summary(report))
+            return 1 if report.mismatches else 0
         elif argv[0] == "encrypt-files":
             print(f"updated {custody.encrypt_existing(session)} file(s)")
         elif argv[0] == "payouts":
