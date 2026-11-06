@@ -1,0 +1,160 @@
+<!--
+title: Privacy Policy
+description: What Milestone Ledger collects, why, who processes it, how long it is kept, and the choices you have.
+-->
+<div class="doc">
+  <header class="doc-head">
+    <p class="eyebrow">Privacy policy</p>
+    <h1>Privacy Policy</h1>
+    <p class="lede">What we collect, why, who processes it for us, how long we keep it, and the choices you have. Written to be read, not skimmed past.</p>
+    <p class="doc-meta"><span>Effective <time datetime="2026-11-06">November 6, 2026</time></span><span aria-hidden="true">·</span><span class="stamp stamp-review stamp-flat">Sandbox stage</span></p>
+  </header>
+
+  <div class="doc-body">
+    <div class="callout callout-warning">
+      <svg class="glyph" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" aria-hidden="true" focusable="false"><path d="M8 2.5l6 11H2zM8 6.5v3.5M8 11.5v.5"/></svg>
+      <div class="callout-body">
+        <p class="callout-title">Where this applies</p>
+        <p>The hosted service currently runs in PayPal's sandbox: no real money moves and PayPal accounts connected to it are sandbox accounts. This policy will be reviewed by counsel before any live deployment, and we will announce changes as described under <a href="#changes">changes</a>.</p>
+      </div>
+    </div>
+
+    <h2 id="who">Who we are and what this covers</h2>
+    <p>Milestone Ledger ("we", "us") is the hosted service at <a href="https://app.milestone-ledger.com/">app.milestone-ledger.com</a>, run by the maintainers of the open-source Milestone Disbursement Engine. This policy covers:</p>
+    <ul>
+      <li>this website (milestone-ledger.com, served from GitHub Pages),</li>
+      <li>the web application and API at app.milestone-ledger.com, including the MCP server for agents,</li>
+      <li>the emails we send from mail.milestone-ledger.com.</li>
+    </ul>
+    <p>It does not cover other people's deployments of the open-source engine, or the services of PayPal, GitHub or your identity provider, each of which has its own privacy policy.</p>
+
+    <h2 id="collect">What we collect</h2>
+    <div class="table-wrap">
+      <table>
+        <caption>Data we hold, with examples and why</caption>
+        <thead>
+          <tr><th scope="col">Category</th><th scope="col">Examples</th><th scope="col">Why</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Account</th><td>Your email address; sign-in and session tokens (stored as hashes); the name and email your organization's identity provider sends when you sign in with SSO</td><td>To sign you in and send you the links and notices the service depends on</td></tr>
+          <tr><th scope="row">Organization</th><td>Organization name; the PayPal email address and merchant id it connects; its members and their roles; API keys (stored as hashes); SSO configuration and verified domains</td><td>To know who may act for an organization, and where its money goes</td></tr>
+          <tr><th scope="row">Agreements</th><td>Titles, parties and their contact emails, tranches, amounts, acceptance criteria, the source document you upload for extraction, each party's confirmation of the criteria hash</td><td>To run the agreement: this is the product</td></tr>
+          <tr><th scope="row">Evidence and deliverables</th><td>Files and text you submit; previews; GitHub repository, pull request, commit and check data from repositories you connect; the pinned commit and handover records for withheld work</td><td>To verify tranches, hold deliverables until payment, and keep the record both sides rely on</td></tr>
+          <tr><th scope="row">Payments</th><td>PayPal order, authorization, capture, payout and invoice identifiers and statuses; amounts; dispute records PayPal sends us</td><td>To fund, settle and reconcile tranches. We never see card or bank details.</td></tr>
+          <tr><th scope="row">Verdicts and audit log</th><td>Each check result and verdict, with its citations, confidence, model and prompt version; an immutable log of every action, who took it and when; download records</td><td>So every decision can be explained and replayed, and so the compliance packet is complete</td></tr>
+          <tr><th scope="row">Technical</th><td>IP address, user agent and timestamps in server logs and rate-limit counters</td><td>Security, abuse prevention and debugging</td></tr>
+          <tr><th scope="row">Correspondence</th><td>Emails you send to our addresses; issues you open on GitHub</td><td>To answer you</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>We do not collect anything on this website beyond what GitHub Pages logs to serve it (see <a href="#cookies">cookies and local storage</a>). There are no analytics, advertising or tracking scripts on the website or in the application.</p>
+
+    <h2 id="use">How we use it</h2>
+    <ul>
+      <li>To provide the service: create and sign agreements, hold and settle tranches through PayPal, verify evidence, hand over deliverables, and show each party what its role allows.</li>
+      <li>To notify you: sign-in links, invitations, review requests, rejections with what is missing, pay links, overdue notices, payout and handover notices. These are part of the service, not marketing. We do not send marketing email.</li>
+      <li>To keep the record: the audit log and compliance packets that funders, finance teams and auditors depend on.</li>
+      <li>To keep the service safe: rate limiting, abuse prevention, debugging and security investigations.</li>
+      <li>To meet legal obligations, including those that attach to payment records.</li>
+    </ul>
+    <p>We do not sell personal data, and we do not use your data to train AI models.</p>
+
+    <h2 id="ai">AI processing</h2>
+    <p>Two parts of the service use a large language model, Claude, through Anthropic's API:</p>
+    <ul>
+      <li><strong>Extraction:</strong> when you upload a grant or statement of work, its text is sent to the model to propose tranches and criteria. You review and edit the proposal before anything is created.</li>
+      <li><strong>Verification:</strong> when evidence is submitted, the evidence text (and the text of uploaded documents) is sent to the model together with the criteria, and the model returns a structured verdict with citations. A second, skeptical pass may run before any automatic release.</li>
+    </ul>
+    <p>Anthropic processes this data as our service provider under its commercial terms, which do not permit it to train models on it. The verdict stores the model and prompt version so the decision can be replayed. Deterministic checks (file present, tests green, numbers in range) run without a model. Nothing moves money on a verdict alone unless your organization has turned on automatic release above a confidence threshold it chose.</p>
+
+    <h2 id="share">Who we share it with</h2>
+    <h3>The other parties to your agreement</h3>
+    <p>An agreement is between organizations. The payer, the payee and any reviewers see what their role allows: the criteria and confirmations, the evidence (withheld from the payer until capture when the agreement says so), the verdicts, the ledger and the audit log for that agreement. Member email addresses are visible to the other parties as the people who acted.</p>
+    <h3>Service providers</h3>
+    <div class="table-wrap">
+      <table>
+        <caption>Processors we use</caption>
+        <thead>
+          <tr><th scope="col">Provider</th><th scope="col">What for</th><th scope="col">What it receives</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">PayPal</th><td>Holds, captures, payouts, invoices and disputes</td><td>Amounts, descriptions, the payer's and payee's PayPal accounts. Your relationship with PayPal is governed by <a href="https://www.paypal.com/us/legalhub/privacy-full">PayPal's privacy statement</a>.</td></tr>
+          <tr><th scope="row">Anthropic</th><td>AI extraction and verification</td><td>Agreement text; evidence text and criteria (see <a href="#ai">AI processing</a>)</td></tr>
+          <tr><th scope="row">Resend</th><td>Sending email</td><td>Recipient address, subject and body of the notices we send</td></tr>
+          <tr><th scope="row">Render</th><td>Hosting the application and its Postgres database</td><td>Everything the application stores, in the United States</td></tr>
+          <tr><th scope="row">Cloudflare</th><td>DNS for our domains; R2 object storage for uploaded files</td><td>Uploaded files, encrypted by the application before they are stored; DNS queries for our names</td></tr>
+          <tr><th scope="row">GitHub</th><td>Hosting this website and the source code; the GitHub App for evidence from repositories</td><td>Requests to this website; for connected repositories, the installation and the pull requests, commits and checks it reads</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h3>Other disclosures</h3>
+    <ul>
+      <li>When the law requires it, or to respond to a valid legal request. We will tell you unless we are legally prevented from doing so.</li>
+      <li>To protect the service, its users or the public from fraud, abuse or security threats.</li>
+      <li>If the service changes hands, under this policy, with notice to you.</li>
+    </ul>
+
+    <h2 id="cookies">Cookies and local storage</h2>
+    <ul>
+      <li><strong>This website</strong> sets no cookies. If you pick a theme, the choice is stored in your browser's local storage under the key <code>mde.theme</code> and never sent to us. GitHub Pages, which serves the site, logs requests (including IP addresses) for security, as described in <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub's privacy statement</a>.</li>
+      <li><strong>The application</strong> keeps your session token in your browser's local storage when you choose "keep me signed in", and in session storage otherwise, so it ends when you close the tab. Sessions expire after 30 days in any case. Your theme is stored the same way as on this site.</li>
+      <li><strong>Sign-in and consent pages</strong> served by the API set one short-lived, same-site cookie so that a sign-in link opened in one browser cannot sign in a different one. It carries no tracking.</li>
+      <li>There are no third-party cookies, scripts or fonts anywhere.</li>
+    </ul>
+
+    <h2 id="retention">How long we keep it</h2>
+    <ul>
+      <li><strong>Accounts</strong> are kept while they are in use. You can ask us to delete yours at any time; see <a href="#rights">your rights</a>.</li>
+      <li><strong>Agreements, verdicts, the ledger and the audit log</strong> are kept for the life of the organizations party to them and as long as the law requires for payment records, because both sides and their auditors rely on them.</li>
+      <li><strong>Evidence files and deliverables</strong> are kept according to a retention setting on the deployment. The hosted service currently keeps them until the organization that owns the agreement asks us to remove them. Removal never happens within 180 days of a payment capture, PayPal's dispute window, and when files are removed their hashes and size are kept so the record stays verifiable. Every removal is recorded in the audit log and both sides are emailed.</li>
+      <li><strong>Sign-in links</strong> expire after 15 minutes, <strong>invitations</strong> after 14 days and <strong>sessions</strong> after 30 days; only hashes of the tokens are ever stored.</li>
+      <li><strong>Server logs and rate-limit counters</strong> are kept briefly for debugging and security.</li>
+      <li><strong>The demo</strong> uses sample people at a reserved domain that nothing is delivered to. Anything you do in the demo is sample data and may be cleared at any time. Please do not put real documents or personal information into the demo.</li>
+    </ul>
+
+    <h2 id="security">Security</h2>
+    <p>Uploaded files are encrypted at rest with AES-256-GCM before they are stored. Downloads are served by the application after an access check, recorded in the audit log and verified against the stored hash. Tokens and API keys are stored as hashes. Human-only steps, money movements and access between organizations are enforced by role. The <a href="./security.html">security page</a> describes this in detail, and says how to report a problem.</p>
+
+    <h2 id="rights">Your rights and choices</h2>
+    <p>Wherever you are, you can ask us to:</p>
+    <ul>
+      <li><strong>Access</strong> the personal data we hold about you, and <strong>export</strong> it. Much of it is already yours to export: the API, the audit log and the compliance packet contain the agreement record.</li>
+      <li><strong>Correct</strong> something that is wrong.</li>
+      <li><strong>Delete</strong> your account and the personal data that is only about you.</li>
+      <li><strong>Object to or restrict</strong> processing, where the law where you live gives you that right.</li>
+    </ul>
+    <p>Email <a href="mailto:privacy@milestone-ledger.com">privacy@milestone-ledger.com</a>. We will confirm the request by writing to the address on your account, and answer within 30 days.</p>
+    <p>One limit, stated plainly: an agreement's record belongs to every party to it. We cannot delete confirmations, verdicts, ledger entries or audit events that another organization relies on for a payment, a dispute or an audit, and we may have to keep payment records for as long as the law requires. In those cases we will remove or restrict what we can and tell you what we kept and why. If you believe we have not handled your data lawfully, you may also complain to the data protection authority where you live.</p>
+
+    <h2 id="transfers">Where data is processed</h2>
+    <p>The hosted service runs in the United States, and our providers process data there and wherever they operate. If you use the service from elsewhere, your data is transferred to the United States.</p>
+
+    <h2 id="children">Children</h2>
+    <p>The service is for organizations and the adults who act for them. It is not directed at anyone under 18, and we do not knowingly collect their data. If you think a child has given us data, please write to us and we will delete it.</p>
+
+    <h2 id="changes">Changes to this policy</h2>
+    <p>The effective date at the top changes whenever this policy does. For a material change we will email every account before it takes effect and say what changed. The history is in the <a href="https://github.com/SeraphDev6/milestone_disbursment_agent/commits/main/site/pages/privacy.html" rel="noopener">repository</a>.</p>
+
+    <h2 id="contact">Contact</h2>
+    <p>Privacy questions and requests: <a href="mailto:privacy@milestone-ledger.com">privacy@milestone-ledger.com</a>. Anything else: <a href="mailto:support@milestone-ledger.com">support@milestone-ledger.com</a>.</p>
+  </div>
+
+  <nav class="doc-toc" aria-labelledby="toc-title">
+    <h2 id="toc-title">On this page</h2>
+    <ol>
+      <li><a href="#who">Who we are</a></li>
+      <li><a href="#collect">What we collect</a></li>
+      <li><a href="#use">How we use it</a></li>
+      <li><a href="#ai">AI processing</a></li>
+      <li><a href="#share">Who we share it with</a></li>
+      <li><a href="#cookies">Cookies and local storage</a></li>
+      <li><a href="#retention">How long we keep it</a></li>
+      <li><a href="#security">Security</a></li>
+      <li><a href="#rights">Your rights and choices</a></li>
+      <li><a href="#transfers">Where data is processed</a></li>
+      <li><a href="#children">Children</a></li>
+      <li><a href="#changes">Changes</a></li>
+      <li><a href="#contact">Contact</a></li>
+    </ol>
+  </nav>
+</div>
