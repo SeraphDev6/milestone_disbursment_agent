@@ -51,7 +51,7 @@ def test_health_and_info_describe_the_demo(client):
 
 
 def test_published_sandbox_accounts_show_on_the_demo():
-    app = hermetic_app(demo_paypal_payer_email="buyer@personal.example.com", demo_paypal_payer_password="pw-1")
+    app = hermetic_app(paypal_test_payer_email="buyer@personal.example.com", paypal_test_payer_password="pw-1")
     with TestClient(app) as c:
         info = c.get("/demo").json()
         assert info["paypal_payer"] == {"email": "buyer@personal.example.com", "password": "pw-1"}

@@ -99,10 +99,10 @@ def mark_verified(session, access: Access, m: Milestone, action: str) -> Agreeme
 def info(request: Request) -> DemoInfo:
     s = request.app.state.settings
     payer = payee = None
-    if s.demo_paypal_payer_email and s.demo_paypal_payer_password:
-        payer = PayPalAccount(email=s.demo_paypal_payer_email, password=s.demo_paypal_payer_password.get_secret_value())
-    if s.demo_paypal_payee_email and s.demo_paypal_payee_password:
-        payee = PayPalAccount(email=s.demo_paypal_payee_email, password=s.demo_paypal_payee_password.get_secret_value())
+    if s.paypal_test_payer_email and s.paypal_test_payer_password:
+        payer = PayPalAccount(email=s.paypal_test_payer_email, password=s.paypal_test_payer_password.get_secret_value())
+    if s.paypal_test_payee_email and s.paypal_test_payee_password:
+        payee = PayPalAccount(email=s.paypal_test_payee_email, password=s.paypal_test_payee_password.get_secret_value())
     return DemoInfo(mode=s.mode.value, paypal_web_url=s.paypal_web_url, paypal_payer=payer, paypal_payee=payee)
 
 

@@ -40,13 +40,13 @@ class Settings(BaseSettings):
     # The demo at /demo: a ready-made grant with its three people signed in, for judges and anyone trying the
     # product. Sandbox only; a live deployment never has it. DEMO=false turns it off on a sandbox deployment.
     demo: bool = True
-    # Sandbox PayPal test accounts shown on the demo page, so a visitor can approve holds (payer, a personal or
-    # business account) and connect the grantee's PayPal (payee, a business account). Shown to anyone who opens
-    # /demo, so use throwaway sandbox accounts made for the demo.
-    demo_paypal_payer_email: str | None = None
-    demo_paypal_payer_password: SecretStr | None = None
-    demo_paypal_payee_email: str | None = None
-    demo_paypal_payee_password: SecretStr | None = None
+    # Sandbox PayPal test accounts: a payer (personal or business, not the app owner) who approves holds and a payee
+    # (business, not the app owner) who connects as the grantee. scripts/sandbox_walkthrough.py uses them, and the
+    # demo page shows them (email and password) to anyone who opens /demo, so make them throwaway accounts.
+    paypal_test_payer_email: str | None = None
+    paypal_test_payer_password: SecretStr | None = None
+    paypal_test_payee_email: str | None = None
+    paypal_test_payee_password: SecretStr | None = None
     # Encrypts secrets stored for later use (orgs' SSO client secrets) and signs browser CSRF tokens. Required;
     # keep it stable.
     secret_key: SecretStr = SecretStr("dev-only-insecure-secret-key")

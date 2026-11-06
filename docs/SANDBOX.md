@@ -16,6 +16,8 @@ In the [PayPal developer dashboard](https://developer.paypal.com/dashboard/), sa
 
 The passwords are optional. With both set, the script signs in to PayPal as each account in a Chrome window and approves each page (`scripts/paypal_browser.py`). Without them, you sign in as each account yourself during the run.
 
+The same four settings feed the demo page: a sandbox deployment with them set shows the funder's and grantee's accounts, passwords included, to anyone who opens `/demo`. Use throwaway accounts.
+
 ## Environment
 
 In `.env`:

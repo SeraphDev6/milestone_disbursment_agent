@@ -41,13 +41,13 @@ services:
         sync: false
       # Throwaway PayPal sandbox accounts the demo page shows visitors (payer approves holds; payee, a business
       # account, connects as the grantee). Leave blank to make visitors bring their own.
-      - key: DEMO_PAYPAL_PAYER_EMAIL
+      - key: PAYPAL_TEST_PAYER_EMAIL
         sync: false
-      - key: DEMO_PAYPAL_PAYER_PASSWORD
+      - key: PAYPAL_TEST_PAYER_PASSWORD
         sync: false
-      - key: DEMO_PAYPAL_PAYEE_EMAIL
+      - key: PAYPAL_TEST_PAYEE_EMAIL
         sync: false
-      - key: DEMO_PAYPAL_PAYEE_PASSWORD
+      - key: PAYPAL_TEST_PAYEE_PASSWORD
         sync: false
       - key: S3_ENDPOINT_URL
         sync: false # R2: https://<account id>.r2.cloudflarestorage.com
