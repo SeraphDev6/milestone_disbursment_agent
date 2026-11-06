@@ -131,6 +131,13 @@ uv run ruff check . && uv run ruff format .
 uv run python -m app.sdk_spec   # after changing a core operation: rewrites sdk/openapi-core.json
 ```
 
+### SDK helpers
+
+`sdk/python` and `sdk/typescript` are small dependency-free packages (`milestone-ledger`) with `verify_webhook` /
+`verifyWebhook`: signature and timestamp checks for outbound webhooks, constant-time, with stable error codes and a
+typed event. Both are tested against deliveries signed by the engine's own signer (`sdk/fixtures/webhooks.json`, from
+`scripts/sdk_fixtures.py`), so they can't drift from `app/services/outbound.py`. See `sdk/README.md`.
+
 ### SDK core spec
 
 Operations tagged `x-sdk-core` (in `openapi_extra`) make up the SDK's API: drafting and confirming an agreement, funding, evidence, verdicts, review, release, the ledger and subscriptions. `python -m app.sdk_spec` writes just those, with the schemas they use, to `sdk/openapi-core.json`. CI (and `tests/test_sdk_spec.py`) fails when the committed file is stale, so SDK-facing changes are always deliberate. The core spec has its own semver (`CORE_VERSION` in `app/sdk_spec.py`); a breaking change to a core operation bumps the major version.

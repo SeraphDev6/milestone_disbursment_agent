@@ -1,0 +1,239 @@
+{
+  "about": "Deliveries signed by the engine (app/services/outbound.py). Verify each with secret and now; expect 'ok' (then compare event and delivery_id) or the error code.",
+  "secret": "whsec_demo_0123456789abcdef",
+  "now": 1800000000,
+  "tolerance_seconds": 300,
+  "cases": [
+    {
+      "name": "settled: fresh delivery verifies",
+      "body": "{\"agreement_id\":\"ag_1\",\"created_at\":\"2027-06-01T12:00:00+00:00\",\"data\":{\"action\":\"captured\",\"actor\":\"system:gate\",\"detail\":{\"capture_id\":\"CAP-1\"},\"from_status\":\"settling\",\"to_status\":\"settled\"},\"id\":\"ev_1\",\"milestone_id\":\"ms_1\",\"type\":\"milestone.status_changed\"}",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-MDE-Event": "milestone.status_changed",
+        "X-MDE-Delivery": "dl_1",
+        "X-MDE-Timestamp": "1799999990",
+        "X-MDE-Signature": "sha256=1ddcea134a867653322d998ce07516a362bec58c090c9eb25dddc82cd82c944c"
+      },
+      "expect": "ok",
+      "event": {
+        "id": "ev_1",
+        "type": "milestone.status_changed",
+        "created_at": "2027-06-01T12:00:00+00:00",
+        "agreement_id": "ag_1",
+        "milestone_id": "ms_1",
+        "data": {
+          "action": "captured",
+          "actor": "system:gate",
+          "from_status": "settling",
+          "to_status": "settled",
+          "detail": {
+            "capture_id": "CAP-1"
+          }
+        }
+      },
+      "delivery_id": "dl_1"
+    },
+    {
+      "name": "verified: just inside the 300 s tolerance",
+      "body": "{\"agreement_id\":\"ag_1\",\"created_at\":\"2027-06-01T12:00:00+00:00\",\"data\":{\"action\":\"auto_verified\",\"actor\":\"system:gate\",\"detail\":{\"confidence\":0.9},\"from_status\":\"verifying\",\"to_status\":\"verified\"},\"id\":\"ev_1\",\"milestone_id\":\"ms_1\",\"type\":\"milestone.status_changed\"}",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-MDE-Event": "milestone.status_changed",
+        "X-MDE-Delivery": "dl_1",
+        "X-MDE-Timestamp": "1799999701",
+        "X-MDE-Signature": "sha256=b97eeb8240baef0bf15da9a01d063082e32050d3cec0fe0ce18241008cbdaa4d"
+      },
+      "expect": "ok",
+      "event": {
+        "id": "ev_1",
+        "type": "milestone.status_changed",
+        "created_at": "2027-06-01T12:00:00+00:00",
+        "agreement_id": "ag_1",
+        "milestone_id": "ms_1",
+        "data": {
+          "action": "auto_verified",
+          "actor": "system:gate",
+          "from_status": "verifying",
+          "to_status": "verified",
+          "detail": {
+            "confidence": 0.9
+          }
+        }
+      },
+      "delivery_id": "dl_1"
+    },
+    {
+      "name": "agreement event, receiver clock 30 s behind",
+      "body": "{\"agreement_id\":\"ag_1\",\"created_at\":\"2027-06-01T12:00:00+00:00\",\"data\":{\"action\":\"confirmed\",\"actor\":\"system:gate\",\"detail\":{\"by\":\"payer\"},\"from_status\":null,\"to_status\":null},\"id\":\"ev_1\",\"milestone_id\":null,\"type\":\"agreement.confirmed\"}",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-MDE-Event": "agreement.confirmed",
+        "X-MDE-Delivery": "dl_1",
+        "X-MDE-Timestamp": "1800000030",
+        "X-MDE-Signature": "sha256=67030e023fca09c2ffdb270e07a227dbe1a6f4c04aad3f604b36d0f291ff5d47"
+      },
+      "expect": "ok",
+      "event": {
+        "id": "ev_1",
+        "type": "agreement.confirmed",
+        "created_at": "2027-06-01T12:00:00+00:00",
+        "agreement_id": "ag_1",
+        "milestone_id": null,
+        "data": {
+          "action": "confirmed",
+          "actor": "system:gate",
+          "from_status": null,
+          "to_status": null,
+          "detail": {
+            "by": "payer"
+          }
+        }
+      },
+      "delivery_id": "dl_1"
+    },
+    {
+      "name": "lower-case header names (Node, WSGI)",
+      "body": "{\"agreement_id\":\"ag_1\",\"created_at\":\"2027-06-01T12:00:00+00:00\",\"data\":{\"action\":\"captured\",\"actor\":\"system:gate\",\"detail\":{\"capture_id\":\"CAP-1\"},\"from_status\":\"settling\",\"to_status\":\"settled\"},\"id\":\"ev_1\",\"milestone_id\":\"ms_1\",\"type\":\"milestone.status_changed\"}",
+      "headers": {
+        "content-type": "application/json",
+        "x-mde-event": "milestone.status_changed",
+        "x-mde-delivery": "dl_1",
+        "x-mde-timestamp": "1799999990",
+        "x-mde-signature": "sha256=1ddcea134a867653322d998ce07516a362bec58c090c9eb25dddc82cd82c944c"
+      },
+      "expect": "ok",
+      "event": {
+        "id": "ev_1",
+        "type": "milestone.status_changed",
+        "created_at": "2027-06-01T12:00:00+00:00",
+        "agreement_id": "ag_1",
+        "milestone_id": "ms_1",
+        "data": {
+          "action": "captured",
+          "actor": "system:gate",
+          "from_status": "settling",
+          "to_status": "settled",
+          "detail": {
+            "capture_id": "CAP-1"
+          }
+        }
+      },
+      "delivery_id": "dl_1"
+    },
+    {
+      "name": "replay: signed 301 s ago",
+      "body": "{\"agreement_id\":\"ag_1\",\"created_at\":\"2027-06-01T12:00:00+00:00\",\"data\":{\"action\":\"captured\",\"actor\":\"system:gate\",\"detail\":{\"capture_id\":\"CAP-1\"},\"from_status\":\"settling\",\"to_status\":\"settled\"},\"id\":\"ev_1\",\"milestone_id\":\"ms_1\",\"type\":\"milestone.status_changed\"}",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-MDE-Event": "milestone.status_changed",
+        "X-MDE-Delivery": "dl_1",
+        "X-MDE-Timestamp": "1799999699",
+        "X-MDE-Signature": "sha256=eed5a2b5003e123e15be1f6505776dc9347fcb6de7691cf0af9bad3cea050a3d"
+      },
+      "expect": "timestamp_out_of_tolerance"
+    },
+    {
+      "name": "timestamp 301 s in the future",
+      "body": "{\"agreement_id\":\"ag_1\",\"created_at\":\"2027-06-01T12:00:00+00:00\",\"data\":{\"action\":\"captured\",\"actor\":\"system:gate\",\"detail\":{\"capture_id\":\"CAP-1\"},\"from_status\":\"settling\",\"to_status\":\"settled\"},\"id\":\"ev_1\",\"milestone_id\":\"ms_1\",\"type\":\"milestone.status_changed\"}",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-MDE-Event": "milestone.status_changed",
+        "X-MDE-Delivery": "dl_1",
+        "X-MDE-Timestamp": "1800000301",
+        "X-MDE-Signature": "sha256=8852be70b87a5cb9d00c29421b48a8f6492b7dd84f1b644945c0e5e84e6fc9bb"
+      },
+      "expect": "timestamp_out_of_tolerance"
+    },
+    {
+      "name": "signed with another subscription's secret",
+      "body": "{\"agreement_id\":\"ag_1\",\"created_at\":\"2027-06-01T12:00:00+00:00\",\"data\":{\"action\":\"captured\",\"actor\":\"system:gate\",\"detail\":{\"capture_id\":\"CAP-1\"},\"from_status\":\"settling\",\"to_status\":\"settled\"},\"id\":\"ev_1\",\"milestone_id\":\"ms_1\",\"type\":\"milestone.status_changed\"}",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-MDE-Event": "milestone.status_changed",
+        "X-MDE-Delivery": "dl_1",
+        "X-MDE-Timestamp": "1799999990",
+        "X-MDE-Signature": "sha256=9a43055a2164f110e67c9c75b6b4cc558b5c53f2a495ee5f0e0f66d51ee26fb7"
+      },
+      "expect": "signature_mismatch"
+    },
+    {
+      "name": "body changed after signing",
+      "body": "{\"agreement_id\":\"ag_1\",\"created_at\":\"2027-06-01T12:00:00+00:00\",\"data\":{\"action\":\"captured\",\"actor\":\"system:gate\",\"detail\":{\"capture_id\":\"CAP-1\"},\"from_status\":\"settling\",\"to_status\":\"refunded\"},\"id\":\"ev_1\",\"milestone_id\":\"ms_1\",\"type\":\"milestone.status_changed\"}",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-MDE-Event": "milestone.status_changed",
+        "X-MDE-Delivery": "dl_1",
+        "X-MDE-Timestamp": "1799999990",
+        "X-MDE-Signature": "sha256=1ddcea134a867653322d998ce07516a362bec58c090c9eb25dddc82cd82c944c"
+      },
+      "expect": "signature_mismatch"
+    },
+    {
+      "name": "body re-serialised with spaces",
+      "body": "{\n \"agreement_id\": \"ag_1\",\n \"created_at\": \"2027-06-01T12:00:00+00:00\",\n \"data\": {\n  \"action\": \"captured\",\n  \"actor\": \"system:gate\",\n  \"detail\": {\n   \"capture_id\": \"CAP-1\"\n  },\n  \"from_status\": \"settling\",\n  \"to_status\": \"settled\"\n },\n \"id\": \"ev_1\",\n \"milestone_id\": \"ms_1\",\n \"type\": \"milestone.status_changed\"\n}",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-MDE-Event": "milestone.status_changed",
+        "X-MDE-Delivery": "dl_1",
+        "X-MDE-Timestamp": "1799999990",
+        "X-MDE-Signature": "sha256=1ddcea134a867653322d998ce07516a362bec58c090c9eb25dddc82cd82c944c"
+      },
+      "expect": "signature_mismatch"
+    },
+    {
+      "name": "no signature header",
+      "body": "{\"agreement_id\":\"ag_1\",\"created_at\":\"2027-06-01T12:00:00+00:00\",\"data\":{\"action\":\"captured\",\"actor\":\"system:gate\",\"detail\":{\"capture_id\":\"CAP-1\"},\"from_status\":\"settling\",\"to_status\":\"settled\"},\"id\":\"ev_1\",\"milestone_id\":\"ms_1\",\"type\":\"milestone.status_changed\"}",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-MDE-Event": "milestone.status_changed",
+        "X-MDE-Delivery": "dl_1",
+        "X-MDE-Timestamp": "1799999990"
+      },
+      "expect": "missing_signature"
+    },
+    {
+      "name": "no timestamp header",
+      "body": "{\"agreement_id\":\"ag_1\",\"created_at\":\"2027-06-01T12:00:00+00:00\",\"data\":{\"action\":\"captured\",\"actor\":\"system:gate\",\"detail\":{\"capture_id\":\"CAP-1\"},\"from_status\":\"settling\",\"to_status\":\"settled\"},\"id\":\"ev_1\",\"milestone_id\":\"ms_1\",\"type\":\"milestone.status_changed\"}",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-MDE-Event": "milestone.status_changed",
+        "X-MDE-Delivery": "dl_1",
+        "X-MDE-Signature": "sha256=1ddcea134a867653322d998ce07516a362bec58c090c9eb25dddc82cd82c944c"
+      },
+      "expect": "missing_timestamp"
+    },
+    {
+      "name": "timestamp is not a number",
+      "body": "{\"agreement_id\":\"ag_1\",\"created_at\":\"2027-06-01T12:00:00+00:00\",\"data\":{\"action\":\"captured\",\"actor\":\"system:gate\",\"detail\":{\"capture_id\":\"CAP-1\"},\"from_status\":\"settling\",\"to_status\":\"settled\"},\"id\":\"ev_1\",\"milestone_id\":\"ms_1\",\"type\":\"milestone.status_changed\"}",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-MDE-Event": "milestone.status_changed",
+        "X-MDE-Delivery": "dl_1",
+        "X-MDE-Timestamp": "2027-06-01",
+        "X-MDE-Signature": "sha256=1ddcea134a867653322d998ce07516a362bec58c090c9eb25dddc82cd82c944c"
+      },
+      "expect": "bad_timestamp"
+    },
+    {
+      "name": "event header disagrees with the body",
+      "body": "{\"agreement_id\":\"ag_1\",\"created_at\":\"2027-06-01T12:00:00+00:00\",\"data\":{\"action\":\"captured\",\"actor\":\"system:gate\",\"detail\":{\"capture_id\":\"CAP-1\"},\"from_status\":\"settling\",\"to_status\":\"settled\"},\"id\":\"ev_1\",\"milestone_id\":\"ms_1\",\"type\":\"milestone.status_changed\"}",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-MDE-Event": "milestone.refunded",
+        "X-MDE-Delivery": "dl_1",
+        "X-MDE-Timestamp": "1799999990",
+        "X-MDE-Signature": "sha256=1ddcea134a867653322d998ce07516a362bec58c090c9eb25dddc82cd82c944c"
+      },
+      "expect": "event_type_mismatch"
+    },
+    {
+      "name": "signed, but not JSON",
+      "body": "not json",
+      "headers": {
+        "X-MDE-Timestamp": "1799999990",
+        "X-MDE-Signature": "sha256=7436f5b37650faaf0638d5e268c923faa7fccb4f7c02d434fce156b6c29012ff"
+      },
+      "expect": "bad_json"
+    }
+  ]
+}
