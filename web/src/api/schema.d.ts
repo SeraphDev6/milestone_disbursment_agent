@@ -353,6 +353,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/orgs/{org_id}/access-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Access review: members, API keys and MCP clients (admin) */
+        get: operations["access_review_orgs__org_id__access_review_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orgs/{org_id}/open-work": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Tranches this org can earn as payee: open for evidence, with their criteria and any rejection
+         * @description For an agent (or a person) working as the payee: everything that can be submitted against right now.
+         *     A tranche is open while it is pending, funded or overdue; one in review, verifying or paid is not.
+         */
+        get: operations["open_work_orgs__org_id__open_work_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/orgs/{org_id}/portfolio": {
         parameters: {
             query?: never;
@@ -1330,6 +1368,96 @@ export interface components {
             new_org?: components["schemas"]["OrganizationCreate"] | null;
         };
         /**
+         * AccessReview
+         * @description Who can act for this org, for a periodic access review: people, API keys and connected MCP clients.
+         */
+        AccessReview: {
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Org Id */
+            org_id: string;
+            /** Org Name */
+            org_name: string;
+            /** Members */
+            members: components["schemas"]["AccessReviewMember"][];
+            /**
+             * Pending Invitations
+             * @description Emails invited to join who haven't yet.
+             */
+            pending_invitations: string[];
+            /**
+             * Api Keys
+             * @description Including revoked ones, so removals are on record.
+             */
+            api_keys: components["schemas"]["AccessReviewKey"][];
+            /** Mcp Clients */
+            mcp_clients: components["schemas"]["AccessReviewClient"][];
+        };
+        /** AccessReviewClient */
+        AccessReviewClient: {
+            /** Client Id */
+            client_id: string;
+            /**
+             * Client Name
+             * @description From the client's registration, when it gave one.
+             */
+            client_name: string | null;
+            /**
+             * User Id
+             * @description The person who consented; the client acts with their rights here.
+             */
+            user_id: string | null;
+            /**
+             * Consents
+             * @description Token families issued (one per consent).
+             */
+            consents: number;
+            /**
+             * First Used At
+             * Format: date-time
+             */
+            first_used_at: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /**
+             * Active
+             * @description At least one token not revoked or expired.
+             */
+            active: boolean;
+        };
+        /** AccessReviewKey */
+        AccessReviewKey: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string | null;
+            role: components["schemas"]["OrgRole"] | null;
+            /** Created By */
+            created_by: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Revoked At */
+            revoked_at: string | null;
+        };
+        /** AccessReviewMember */
+        AccessReviewMember: {
+            /** User Id */
+            user_id: string;
+            /** Email */
+            email: string;
+            /** Name */
+            name: string | null;
+            role: components["schemas"]["OrgRole"];
+        };
+        /**
          * AgreementCreate
          * @description Created by the payer org. The payee and any reviewers are invited by email and join with their own org.
          */
@@ -1655,6 +1783,11 @@ export interface components {
              * Format: date-time
              */
             at?: string;
+            /**
+             * Hash
+             * @description SHA-256 over this event and the previous one's hash (the agreement's chain).
+             */
+            hash?: string | null;
         };
         /** Body_extract_agreement_agreements_extract_post */
         Body_extract_agreement_agreements_extract_post: {
@@ -3164,6 +3297,21 @@ export interface components {
              */
             source_quote: string;
         };
+        /** Rejection */
+        Rejection: {
+            /**
+             * Note
+             * @description What the reviewer wrote.
+             */
+            note: string | null;
+            /**
+             * Missing
+             * @description Per unmet criterion: criterion_id and what to send instead.
+             */
+            missing: {
+                [key: string]: unknown;
+            }[];
+        };
         /** RepoRead */
         RepoRead: {
             /**
@@ -3666,6 +3814,45 @@ export interface components {
          * @enum {string}
          */
         VerificationMethod: "check" | "model" | "human";
+        /**
+         * WorkItem
+         * @description A tranche open to this org as payee: what it pays, what it needs, and what was missing last time.
+         */
+        WorkItem: {
+            /** Agreement Id */
+            agreement_id: string;
+            /** Agreement Title */
+            agreement_title: string;
+            /** Milestone Id */
+            milestone_id: string;
+            /** Milestone Title */
+            milestone_title: string;
+            /** Amount */
+            amount: string;
+            /** Currency */
+            currency: string;
+            /** Due Date */
+            due_date: string | null;
+            status: components["schemas"]["MilestoneStatus"];
+            /**
+             * Funded
+             * @description Escrow: the payer's hold is in place, so a verified tranche pays at once.
+             */
+            funded: boolean;
+            settlement_mode: components["schemas"]["SettlementMode"];
+            /**
+             * Criteria
+             * @description What the evidence must show; precheck_evidence tests a draft.
+             */
+            criteria: components["schemas"]["Criterion-Output"][];
+            /** @description Set when the last submission was rejected. */
+            last_rejection: components["schemas"]["Rejection"] | null;
+            /**
+             * Submit With
+             * @description The tool to use: submit_evidence (text, links, data) or the uploads endpoint for files.
+             */
+            submit_with: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -4534,6 +4721,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    access_review_orgs__org_id__access_review_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessReview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    open_work_orgs__org_id__open_work_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkItem"][];
                 };
             };
             /** @description Validation Error */

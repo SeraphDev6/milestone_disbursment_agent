@@ -7,6 +7,7 @@ on:
     branches: [main]
     paths:
       - "site/**"
+      - "sdk/openapi-core.json"
       - "web/src/design/themes.css"
       - "web/src/design/tokens.css"
       - "web/e2e-site/**"
@@ -15,6 +16,7 @@ on:
   pull_request:
     paths:
       - "site/**"
+      - "sdk/openapi-core.json"
       - "web/src/design/themes.css"
       - "web/src/design/tokens.css"
       - "web/e2e-site/**"
@@ -44,6 +46,11 @@ jobs:
         working-directory: web
       - name: Build the site
         run: node site/build.mjs _site
+      - name: Build the SDK reference from the core spec (sdk/reference.html)
+        run: |
+          mkdir -p _site/sdk
+          npx --yes @redocly/cli@1.34.3 build-docs sdk/openapi-core.json -o _site/sdk/reference.html --title "Milestone Ledger SDK reference"
+          cp sdk/openapi-core.json _site/sdk/openapi-core.json
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
         working-directory: web

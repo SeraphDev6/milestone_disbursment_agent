@@ -187,6 +187,7 @@ def test_oauth_flow_gives_org_bound_tools(client):
         "list_evidence",
         "precheck_evidence",
         "review_queue",
+        "open_work",
         "submit_evidence",
     }
 
@@ -386,3 +387,53 @@ def test_payer_agent_gets_the_withheld_view_over_mcp(client):
         assert not is_error and "SECRET-77" not in json.dumps(body), tool
     is_error, body = call(client, key["token"], "list_evidence", milestone_id=m2)
     assert body[0]["withheld"] is True
+
+
+# --- an agent as the payee (#43) -----------------------------------------------------------
+
+
+def test_open_work_lists_what_a_payee_agent_can_earn_and_what_was_missing(client):
+    _aid, (m1, m2), ctx = create_active(client, GOOD_DRAFT)
+    key = client.post(
+        f"/orgs/{ctx['payee_org']}/api-keys", json={"name": "contractor agent"}, headers=h(ctx["payee"])
+    ).json()["token"]
+    tools = {t["name"]: t for t in rpc(client, key, "tools/list").json()["result"]["tools"]}
+    assert tools["open_work"]["annotations"]["readOnlyHint"] is True
+
+    err, work = call(client, key, "open_work", org_id=ctx["payee_org"])
+    assert not err and [w["milestone_id"] for w in work] == [m1, m2]
+    first = work[0]
+    assert first["status"] == "pending" and first["funded"] is False and first["last_rejection"] is None
+    assert [c["check_id"] for c in first["criteria"]] == ["row_count", "sheet_total"]
+    assert first["submit_with"] == "submit_evidence"
+
+    # Thin evidence is rejected by the payer; the next open_work says exactly what to send.
+    err, _ = call(
+        client, key, "submit_evidence", milestone_id=m1, evidence_type="document", title="note.txt", content="went well"
+    )
+    assert not err
+    r = client.post(
+        f"/milestones/{m1}/review", json={"decision": "reject", "note": "Send the sheets."}, headers=h(ctx["payer"])
+    )
+    assert r.status_code == 200
+    err, work = call(client, key, "open_work", org_id=ctx["payee_org"])
+    assert work[0]["milestone_id"] == m1 and work[0]["last_rejection"]["note"] == "Send the sheets."
+    assert {x["criterion_id"] for x in work[0]["last_rejection"]["missing"]} == {"c1", "c2"}
+
+    # Submit what it asked for: the tranche leaves the open list (in review), and the payer org has no open work.
+    err, _ = call(
+        client,
+        key,
+        "submit_evidence",
+        milestone_id=m1,
+        evidence_type="spreadsheet",
+        title="sign-in.csv",
+        content=SIGN_IN,
+    )
+    assert not err
+    err, work = call(client, key, "open_work", org_id=ctx["payee_org"])
+    assert [w["milestone_id"] for w in work] == [m2]
+    payer_key = client.post(
+        f"/orgs/{ctx['payer_org']}/api-keys", json={"name": "funder agent"}, headers=h(ctx["payer"])
+    ).json()["token"]
+    assert call(client, payer_key, "open_work", org_id=ctx["payer_org"]) == (False, [])

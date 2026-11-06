@@ -21,16 +21,21 @@ class AuditEventBase(SQLModel):
 
 
 class AuditEvent(AuditEventBase, table=True):
-    """Append-only. Never updated or deleted."""
+    """Append-only. Never updated or deleted. Hash-chained per agreement: `hash` covers this event and the
+    previous event's hash, so an edited or removed row shows up when the chain is verified (app.db.audit)."""
 
     __tablename__ = "audit_events"
 
     id: str = id_field()
     agreement_id: str | None = fk("agreements.id")
+    prev_hash: str | None = Field(default=None, max_length=64)
+    hash: str | None = Field(default=None, max_length=64, index=True)
 
 
 class AuditEventRead(AuditEventBase):
-    pass
+    hash: str | None = Field(
+        default=None, description="SHA-256 over this event and the previous one's hash (the agreement's chain)."
+    )
 
 
 class WebhookEvent(SQLModel, table=True):

@@ -198,6 +198,8 @@ class PayPalGateway(Protocol):
 
     def capture_status(self, capture_id: str) -> Capture: ...  # where a capture stands now (follows PENDING)
 
+    def authorization_status(self, authorization_id: str) -> Authorization: ...  # CREATED, CAPTURED, VOIDED, ...
+
     def void_authorization(self, authorization_id: str, *, payee_merchant_id: str | None, request_id: str) -> None: ...
 
     def refund_capture(
@@ -461,6 +463,13 @@ class MockPayPal:
         if c is None:
             raise PayPalError("RESOURCE_NOT_FOUND: capture", status=404)
         return Capture(capture_id, c["status"])
+
+    def authorization_status(self, authorization_id) -> Authorization:
+        self._maybe_fail()
+        a = self.authorizations.get(authorization_id)
+        if a is None:
+            raise PayPalError("RESOURCE_NOT_FOUND: authorization", status=404)
+        return Authorization(authorization_id, a["status"])
 
     def finish_capture(self, capture_id: str, status: str = "COMPLETED") -> None:
         """Tests: PayPal finishes a PENDING capture (COMPLETED or DECLINED) without telling us."""
@@ -889,6 +898,10 @@ class SandboxPayPal:
     def capture_status(self, capture_id) -> Capture:
         capture = self._sdk_call(self._sdk.payments.get_captured_payment, {"capture_id": capture_id})
         return Capture(capture.id, capture.status)
+
+    def authorization_status(self, authorization_id) -> Authorization:
+        auth = self._sdk_call(self._sdk.payments.get_authorized_payment, {"authorization_id": authorization_id})
+        return Authorization(auth.id, auth.status)
 
     def void_authorization(self, authorization_id, *, payee_merchant_id, request_id) -> None:
         self._sdk_call(
