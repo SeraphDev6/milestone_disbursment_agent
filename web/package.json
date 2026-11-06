@@ -14,7 +14,7 @@
     "test:watch": "vitest",
     "e2e": "playwright test",
     "tokens:check": "tsx scripts/tokens.ts --check",
-    "api:types": "cd .. && uv run python -c \"import json; from app.main import create_app; print(json.dumps(create_app().openapi()))\" > web/openapi.json && cd web && openapi-typescript openapi.json --default-non-nullable false -o src/api/schema.d.ts",
+    "api:types": "cd .. && uv run python scripts/openapi.py > web/openapi.json && cd web && openapi-typescript openapi.json --default-non-nullable false -o src/api/schema.d.ts",
     "check": "npm run typecheck && npm run lint && npm run tokens:check && npm test",
     "tokens": "tsx scripts/tokens.ts"
   },

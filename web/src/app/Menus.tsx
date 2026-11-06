@@ -68,7 +68,7 @@ export function OrgMenu({ me, orgId }: { me: Me; orgId?: string }) {
   );
 }
 
-export function PersonMenu({ me, mock }: { me: Me; mock: boolean }) {
+export function PersonMenu({ me, demo }: { me: Me; demo: boolean }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { sessions: all, activeId } = useSessions();
@@ -110,7 +110,7 @@ export function PersonMenu({ me, mock }: { me: Me; mock: boolean }) {
               <Text slot="description" className={s.itemHint}>Account and appearance</Text>
             </MenuItem>
           </MenuSection>
-          {(others.length > 0 || mock) && (
+          {(others.length > 0 || demo) && (
             <>
               <Separator className={s.separator} />
               <MenuSection>
@@ -124,7 +124,7 @@ export function PersonMenu({ me, mock }: { me: Me; mock: boolean }) {
                 <MenuItem id="__add" className={s.menuItem} textValue="Sign in another person">
                   <Glyph name="plus" />
                   <Text slot="label">Sign in another person</Text>
-                  {mock && <Text slot="description" className={s.itemHint}>Mock mode: play every side in one browser</Text>}
+                  {demo && <Text slot="description" className={s.itemHint}>Demo: play every side in one browser</Text>}
                 </MenuItem>
               </MenuSection>
             </>

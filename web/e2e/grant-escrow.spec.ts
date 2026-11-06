@@ -7,7 +7,7 @@ test("grant escrow: fund, pre-check, submit, review, release, settle", async ({ 
   await loadDemo(page);
   await expect(page.getByText("Agreement status: Active")).toBeVisible();
 
-  // Funder funds tranche 1 through the mock PayPal approval page.
+  // Funder funds tranche 1 through the stand-in PayPal approval page.
   await page.getByRole("link", { name: /Tranche 1: Tranche 1: spring workshops/ }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Tranche 1: spring workshops" })).toBeVisible();
   await page.getByRole("button", { name: "Fund USD 10,000.00" }).click();
@@ -20,7 +20,7 @@ test("grant escrow: fund, pre-check, submit, review, release, settle", async ({ 
   await expect(page.getByText("Tranche status: Held")).toBeVisible({ timeout: 10_000 }); // no reload: the page polls
 
   // Grantee pre-checks thin evidence, then submits what the criteria ask for.
-  await switchPerson(page, /director\+/);
+  await switchPerson(page, /^director-/);
   await page.getByRole("link", { name: "Riverside Literacy Grant 2027" }).first().click();
   await page.getByRole("link", { name: /spring workshops/ }).click();
   await addFiles(page, [SAMPLES.thin]);
@@ -31,8 +31,8 @@ test("grant escrow: fund, pre-check, submit, review, release, settle", async ({ 
   await page.getByRole("button", { name: "Submit evidence" }).click();
   await expect(page.getByText(/Tranche status: (Verified|In review)/)).toBeVisible({ timeout: 20_000 });
 
-  // Funder approves if needed, then releases; mock PayPal confirms by webhook.
-  await switchPerson(page, /officer\+/);
+  // Funder approves if needed, then releases; stand-in PayPal confirms by webhook.
+  await switchPerson(page, /^officer-/);
   await page.getByRole("link", { name: "Riverside Literacy Grant 2027" }).first().click();
   await page.getByRole("link", { name: /spring workshops/ }).click();
   await expect(page.getByText(/Tranche status: (Verified|In review)/)).toBeVisible();

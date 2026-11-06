@@ -1,5 +1,5 @@
-"""scripts/sandbox_walkthrough.py runs every flow end to end against mock mode, so the script that proves the
-sandbox wallet flow (issue #33) can't drift from the API. The "browser" steps follow PayPal's mock pages."""
+"""scripts/sandbox_walkthrough.py runs every flow end to end against the stand-in PayPal, so the script that proves
+the sandbox wallet flow (issue #33) can't drift from the API. The "browser" steps follow the stand-in's pages."""
 
 import importlib.util
 from pathlib import Path
@@ -13,17 +13,22 @@ spec.loader.exec_module(walkthrough)
 
 
 class MockWalk(walkthrough.Walk):
-    """No person at the keyboard: links come back in mock responses, and each PayPal page is 'approved' by
+    """No person at the keyboard: links are read from the test mailer, and each PayPal page is 'approved' by
     following it, the way a browser would."""
 
     def __init__(self, client):
-        super().__init__("http://localhost:8000", timeout=5, http=client, mode="mock")
+        super().__init__("http://localhost:8000", timeout=5, http=client)
         self.poll_seconds = 0
         self.visited: list[str] = []
 
     def ask(self, text: str) -> str:
-        assert "Paste" not in text, f"mock mode should return the link instead of asking: {text}"
-        return ""
+        raise AssertionError(f"nothing should need a person: {text}")
+
+    def emailed_link(self, to: str, path: str, prompt: str) -> str:
+        for mail in reversed(self.http.app.state.mailer.sent):
+            if mail.to == to.lower() and path in mail.link:
+                return mail.link
+        raise AssertionError(f"no email to {to} with a {path} link")
 
     def open_in_browser(self, url: str, who: str, account: str | None = None) -> bool:
         r = self.http.get(url)  # PayPal approval, onboarding or pay link, then back to the app
@@ -44,6 +49,6 @@ def test_walkthrough_runs_every_flow(client, flows):
 
 def test_walkthrough_refuses_the_wrong_mode(client):
     w = MockWalk(client)
-    w.mode = "sandbox"
+    w.mode = "live"
     with pytest.raises(SystemExit):
         w.preflight()

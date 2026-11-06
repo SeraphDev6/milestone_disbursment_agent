@@ -52,7 +52,7 @@ Closed modules talk to the engine over the REST API and are never linked into it
 
 ## From hackathon to live
 
-1. **Hackathon (Nov 12, 2026):** sandbox end to end, with mock mode for judges.
+1. **Hackathon (Nov 12, 2026):** sandbox end to end, with `/demo` on the sandbox deployment for judges.
 2. **Verified delivery** ([epic #1](https://github.com/SeraphDev6/milestone_disbursment_agent/issues/1)): withheld work, reveal at capture, hash commitments, a contractor-owned code mode, and the skeptic pass.
 3. **SDK** ([epic #12](https://github.com/SeraphDev6/milestone_disbursment_agent/issues/12)): the core flow on npm and PyPI, so other products can embed verified delivery.
 4. **Go live on PayPal:** partner approval and BN code, direct route only (the platform never holds funds), and the platform fee on captures.

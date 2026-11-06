@@ -59,12 +59,11 @@ def core_spec(full: dict) -> dict:
 
 
 def render() -> str:
-    from app.config import Settings
+    from app.config import hermetic_settings
     from app.main import create_app
 
     # Ignore .env so the output doesn't depend on whoever runs it.
-    settings = Settings(_env_file=None, mode="mock", llm="mock", database_url="sqlite://", web_app_built=False)
-    full = create_app(settings).openapi()
+    full = create_app(hermetic_settings()).openapi()
     return json.dumps(core_spec(full), indent=2, sort_keys=True) + "\n"
 
 

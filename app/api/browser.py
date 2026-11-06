@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from mcp.server.auth.provider import AuthorizationParams, construct_redirect_uri
 from sqlmodel import select
 
-from app.api.deps import SessionDep, client_ip, mailer, rate_limit, show_links
+from app.api.deps import SessionDep, client_ip, mailer, rate_limit
 from app.db import as_utc, utcnow
 from app.models import Membership, OrgRole
 from app.models.oauth import OAuthClient, OAuthPendingAuthorization
@@ -154,13 +154,12 @@ def oauth_sign_in(
         bind_browser(response, request, SSO_COOKIE, sso_binding(request, sso.state_of(url)))
         return response
     try:
-        link = identity.request_magic_link(
+        identity.request_magic_link(
             session, mailer(request), email, request.app.state.settings.api_base_url, next_path=target
         )
     except identity.IdentityError as e:
         return page("Can't sign in this way", f"<p>{escape(e.message)}</p>", e.status_code)
-    dev = f"<p><a href='{escape(link)}'>Dev link (mock mode)</a></p>" if show_links(request) else ""
-    return page("Check your email", f"<p>We sent a sign-in link to {escape(email)}.</p>{dev}")
+    return page("Check your email", f"<p>We sent a sign-in link to {escape(email)}.</p>")
 
 
 # --- consent ---------------------------------------------------------------------------

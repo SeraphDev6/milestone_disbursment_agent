@@ -14,9 +14,9 @@ Flows (all by default):
 
 With PAYPAL_TEST_PAYER_PASSWORD and PAYPAL_TEST_PAYEE_PASSWORD set, the PayPal pages are done for you in a Chrome
 window (scripts/paypal_browser.py; run with `uv run --group sandbox`). Without them, or with --manual-paypal, the
-script prints each link for you to open. The app's own sign-in and invitation links still need pasting unless the
-server is in mock mode, or RESEND_INBOX_API_KEY and RESEND_INBOX_DOMAIN are set: then the funder and grantee get fresh
-addresses at that receiving domain and the script reads their emails from Resend.
+script prints each link for you to open. The app's own sign-in and invitation links still need pasting unless
+RESEND_INBOX_API_KEY and RESEND_INBOX_DOMAIN are set: then the funder and grantee get fresh addresses at that
+receiving domain and the script reads their emails from Resend.
 
 PayPal's return pages are browser redirects, not calls from PayPal, so localhost works and no webhooks are needed.
 The platform flow's payout finishes on the app's payouts loop (PAYOUTS_INTERVAL_SECONDS) or `python -m app.jobs
@@ -129,7 +129,7 @@ class Walk:
         self.base = base.rstrip("/")
         self.http = http or httpx.Client(base_url=f"{self.base}/api", timeout=30)
         self.timeout = timeout
-        self.mode = mode  # tests run the same walk against mock mode
+        self.mode = mode  # tests run the same walk with a stand-in PayPal
         self.poll_seconds = 3.0
         self.tokens: dict[str, str] = {}
         self.browser = None  # a paypal_browser.PayPalBrowser when PayPal pages are done automatically
@@ -195,7 +195,8 @@ class Walk:
 
     def sign_in(self, who: str, email: str) -> None:
         sent = self.call("POST", "/auth/magic-link", json={"email": email})
-        link = sent.get("dev_link") or self.emailed_link(
+        assert sent.get("sent"), sent
+        link = self.emailed_link(
             email, "/auth/", f"Paste the sign-in link emailed to {email} (server log with console)"
         )
         self.tokens[who] = self.call("POST", "/auth/magic-link/verify", json={"token": self.token_from(link)})["token"]
@@ -244,7 +245,7 @@ class Walk:
         self.ok(f"agreement {aid}")
         if "payee" not in self.tokens:
             self.sign_in("payee", payee_email)
-        link = (created.get("dev_links") or {}).get(payee_email) or self.emailed_link(
+        link = self.emailed_link(
             payee_email,
             "/invitations/accept",
             f"Paste the invitation link emailed to {payee_email} for '{body['title']}'",
@@ -333,7 +334,7 @@ class Walk:
 def run(
     w: Walk, flows: list[str], payer_email: str, payee_email: str, payer_paypal: str, payee_paypal: str, run_id: str
 ) -> None:
-    """The walk itself, separate from argument parsing so tests can run it against mock mode."""
+    """The walk itself, separate from argument parsing so tests can run it with a stand-in PayPal."""
     w.preflight()
     payer_org = w.orgs(payer_email, payer_paypal)
     payee_org = None

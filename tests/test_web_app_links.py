@@ -6,7 +6,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 from tests.conftest import GOOD_DRAFT
-from tests.helpers import PAYEE_EMAIL, create_active, h, new_org, sign_in
+from tests.helpers import PAYEE_EMAIL, create_active, emailed_link, h, new_org, sign_in
 from tests.test_sso import idp, setup_sso  # noqa: F401
 
 APP = "http://web.test/app"
@@ -19,7 +19,8 @@ def app_client(client):
 
 
 def test_magic_link_opens_the_web_app(app_client):
-    link = app_client.post("/auth/magic-link", json={"email": "pat@example.org"}).json()["dev_link"]
+    app_client.post("/auth/magic-link", json={"email": "pat@example.org"})
+    link = emailed_link(app_client, "pat@example.org", "/auth/")
     assert link.startswith(f"{APP}/auth/verify?token=")
     token = parse_qs(urlsplit(link).query)["token"][0]
     assert app_client.post("/auth/magic-link/verify", json={"token": token}).status_code == 200
@@ -27,21 +28,27 @@ def test_magic_link_opens_the_web_app(app_client):
 
 def test_mcp_consent_sign_in_still_uses_the_api_page(app_client):
     r = app_client.post("/oauth/sign-in", data={"email": "pat@example.org", "next": "/oauth/consent?request=x"})
-    assert "/auth/magic-link/verify?token=" in r.text and APP not in r.text
+    assert r.status_code == 200 and "token=" not in r.text  # the link is emailed, never shown
+    link = emailed_link(app_client, "pat@example.org", "/auth/magic-link/verify")
+    assert "/auth/magic-link/verify?token=" in link and APP not in link
 
 
 def test_invitations_open_the_web_app(app_client, draft):
     payer = sign_in(app_client, "officer@harbor.example.org")
     org = new_org(app_client, payer, "Harbor Foundation", "funder@example.org")
     r = app_client.post(f"/orgs/{org}/agreements", json={**draft, "counterparty_email": PAYEE_EMAIL}, headers=h(payer))
-    assert r.json()["dev_links"][PAYEE_EMAIL].startswith(f"{APP}/invitations/accept?token=")
+    assert r.status_code == 201 and "dev_links" not in r.json()  # links are emailed, never returned
+    assert emailed_link(app_client, PAYEE_EMAIL, "/invitations").startswith(f"{APP}/invitations/accept?token=")
     r = app_client.post(f"/orgs/{org}/invitations", json={"email": "colleague@harbor.example.org"}, headers=h(payer))
-    assert r.json()["dev_link"].startswith(f"{APP}/invitations/accept?token=")
+    assert r.status_code == 201 and "dev_link" not in r.json()
+    assert emailed_link(app_client, "colleague@harbor.example.org", "/invitations").startswith(
+        f"{APP}/invitations/accept?token="
+    )
 
 
 def test_without_an_app_links_use_the_api(client):
-    link = client.post("/auth/magic-link", json={"email": "pat@example.org"}).json()["dev_link"]
-    assert "/auth/magic-link/verify?token=" in link
+    assert client.post("/auth/magic-link", json={"email": "pat@example.org"}).json() == {"sent": True}
+    assert "/auth/magic-link/verify?token=" in emailed_link(client, "pat@example.org", "/auth/")
 
 
 def test_accept_invitation_by_id_from_the_inbox(client, draft):

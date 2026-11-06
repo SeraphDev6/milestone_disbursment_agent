@@ -1,4 +1,5 @@
-"""Mock mode only: stand-ins for PayPal's pages, so the whole flow runs without keys."""
+"""Pages of the stand-in integrations (MockPayPal, MockGitHubApp), mounted only when create_app is given one: tests,
+and the walkthrough's dry run. A deployment never has these."""
 
 import uuid
 from html import escape
@@ -8,14 +9,14 @@ from fastapi import APIRouter, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.api.browser import api_path
+from app.api.demo import mark_verified
 from app.api.deps import MilestoneAccessDep, SessionDep
-from app.api.views import agreement_read, html_page
+from app.api.views import html_page
 from app.db import utcnow
 from app.integrations.github_app import MockGitHubApp
 from app.integrations.paypal import MockPayPal
-from app.models import AgreementRead, MilestoneStatus
+from app.models import AgreementRead
 from app.services import settlement
-from app.services.access import Action
 
 router = APIRouter(prefix="/mock", tags=["mock"])
 
@@ -70,22 +71,11 @@ def pay_invoice(invoice_id: str, request: Request, session: SessionDep) -> Redir
     return RedirectResponse(api_path(request, f"/mock/paypal/invoices/{invoice_id}"), status_code=303)
 
 
-@router.post("/milestones/{milestone_id}/mark-verified", summary="Mock mode only: mark a tranche verified")
-def mark_verified(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep) -> AgreementRead:
+@router.post("/milestones/{milestone_id}/mark-verified", summary="Stand-in only: mark any tranche verified")
+def mark_verified_any(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep) -> AgreementRead:
+    """Tests' shortcut past evidence and the verifier (the demo has the same for demo agreements)."""
     access, m = auth
-    access.require(Action.release)
-    allowed = {
-        MilestoneStatus.pending,
-        MilestoneStatus.funded,
-        MilestoneStatus.overdue,
-        MilestoneStatus.evidence_received,
-        MilestoneStatus.needs_review,
-    }
-    if MilestoneStatus(m.status) not in allowed:
-        raise HTTPException(status.HTTP_409_CONFLICT, f"tranche is {m.status}")
-    settlement.transition(session, m, MilestoneStatus.verified, access.actor, "mock_mark_verified")
-    session.commit()
-    return agreement_read(m.agreement)
+    return mark_verified(session, access, m, "mock_mark_verified")
 
 
 @router.get("/github/install", include_in_schema=False)

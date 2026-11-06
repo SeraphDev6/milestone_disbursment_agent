@@ -2,8 +2,8 @@
 #
 #   docker compose up --build          -> http://localhost:8000/   (API docs at /api/docs, MCP at /mcp)
 #
-# Mock mode by default: no keys needed, PayPal and email are stand-ins, and /demo loads a ready-made grant.
-# For PayPal sandbox and Claude, put MODE=sandbox and the keys in .env (see .env.example); compose reads it.
+# Sandbox mode: put a PayPal sandbox app's keys, SECRET_KEY and ANTHROPIC_API_KEY (or LLM=mock) in .env (see
+# .env.example); compose reads it. /demo then loads a ready-made grant against PayPal's sandbox.
 # Change the host port with APP_PORT=8080 docker compose up.
 #
 # Just the database (for `uv run uvicorn` on the host): docker compose up -d db
@@ -34,7 +34,7 @@ services:
       - path: .env
         required: false
     environment:
-      MODE: ${MODE:-mock}
+      MODE: ${MODE:-sandbox}
       DATABASE_URL: postgresql://milestone:milestone@db:5432/milestone
       # Browser-facing URL: PayPal returns the payer here, and emailed links open the app.
       PUBLIC_BASE_URL: http://localhost:${APP_PORT:-8000}

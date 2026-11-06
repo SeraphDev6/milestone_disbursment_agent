@@ -12,7 +12,7 @@ Include what you found, how to reproduce it (requests, accounts or agreement set
 aim to acknowledge reports within 3 business days and to tell you what we'll do within 10. We'll credit you in the
 fix unless you'd rather we didn't.
 
-Test against your own local or mock-mode instance (`MODE=mock`, see the README). Don't test against
+Test against your own instance in sandbox mode (the default; see the README), or `scripts/dev_server.py`. Don't test against
 https://app.milestone-ledger.com or other people's data, and don't run load or denial-of-service tests against it.
 
 ## Supported versions
@@ -38,4 +38,4 @@ Out of scope:
 - PayPal's, Anthropic's, GitHub's or Render's own services (report to them).
 - Findings that need a compromised device, browser or org admin account.
 - Missing best-practice headers or rate limits with no demonstrated impact.
-- Mock mode's stand-ins (`MockPayPal`, the mock verifier), which are for local use only.
+- The test stand-ins (`MockPayPal`, the mock verifier, `scripts/dev_server.py`), which never run on a deployment.

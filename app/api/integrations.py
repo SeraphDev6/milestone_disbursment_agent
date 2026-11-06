@@ -365,7 +365,7 @@ def subscribe(
     access.require(Action.manage_subscriptions)
     state = request.app.state
     try:
-        check_destination(body.url, allow_http=state.settings.is_mock, resolve=state.resolve)
+        check_destination(body.url, allow_http=state.settings.local, resolve=state.resolve)
     except DestinationError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
     sub = Subscription.model_validate(

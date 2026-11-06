@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { addFiles, loadDemo, signIn, switchPerson, watchErrors } from "./helpers";
+import { addFiles, loadDemo, signIn, switchPerson, actAsPerson, watchErrors } from "./helpers";
 import { SAMPLES } from "./samples";
 
 async function openTranche(page: Page, name: RegExp) {
@@ -11,12 +11,11 @@ async function openTranche(page: Page, name: RegExp) {
 test("SOW in invoice mode, built in the wizard: invite, accept, sign, verify, invoice, pay", async ({ page, context }) => {
   test.setTimeout(120_000);
   const errors = watchErrors(page);
-  const code = Date.now().toString(36);
-  const client = `client+${code}@acme.example.org`;
-  const contractor = `dev+${code}@studio.example.org`;
+  // The client and the contractor are two of the demo's people (the only way to sign in without email).
+  const cast = await signIn(page, "funder");
+  const contractor = cast.grantee.email;
 
-  // Client signs in and creates their org.
-  await signIn(page, client);
+  // Client creates their org.
   await page.getByLabel("Organization name").fill("Acme Client Co");
   await page.getByLabel("PayPal account email").fill("acme@example.org");
   await page.getByRole("button", { name: "Create organization" }).click();
@@ -35,12 +34,9 @@ test("SOW in invoice mode, built in the wizard: invite, accept, sign, verify, in
   await page.getByRole("button", { name: "Create and send invitations" }).click();
   await expect(page.getByRole("heading", { name: "Invitations sent" })).toBeVisible();
 
-  // Contractor opens the invitation, signs in as themselves, accepts with a new org.
-  await page.getByRole("link", { name: `Open as ${contractor}` }).click();
-  await page.getByRole("link", { name: `Sign in as ${contractor}` }).click();
-  await expect(page.getByLabel("Email")).toHaveValue(contractor);
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: "Open the sign-in link" }).click();
+  // Contractor signs in, finds the invitation waiting on their home page, accepts with a new org.
+  await actAsPerson(page, cast.grantee);
+  await page.getByRole("link", { name: /Review and accept/ }).click();
   await expect(page.getByRole("heading", { level: 1, name: /receive payments under “Website rebuild SOW”/ })).toBeVisible();
   await page.getByLabel("Organization name").fill("Pixel Studio");
   await page.getByLabel("PayPal account email").fill("studio@example.org");
@@ -48,7 +44,7 @@ test("SOW in invoice mode, built in the wizard: invite, accept, sign, verify, in
   await expect(page.getByRole("heading", { level: 1, name: "Website rebuild SOW" })).toBeVisible();
 
   // Both sign.
-  for (const who of [null, /client\+/]) {
+  for (const who of [null, /^officer-/]) {
     if (who) {
       await switchPerson(page, who);
       await page.getByRole("link", { name: "Website rebuild SOW" }).first().click();
@@ -61,14 +57,14 @@ test("SOW in invoice mode, built in the wizard: invite, accept, sign, verify, in
   }
   await expect(page.getByText("Agreement status: Active")).toBeVisible();
 
-  // The contractor submits evidence for tranche 1; the client approves it, sends the invoice, pays it on the mock PayPal page.
-  await switchPerson(page, /dev\+/);
+  // The contractor submits evidence for tranche 1; the client approves it, sends the invoice, pays it on the stand-in PayPal page.
+  await switchPerson(page, /^director-/);
   await page.getByRole("link", { name: "Website rebuild SOW" }).first().click();
   await page.getByRole("link", { name: /spring workshops/ }).click();
   await addFiles(page, [SAMPLES.signIn, SAMPLES.budget]);
   await page.getByRole("button", { name: "Submit evidence" }).click();
   await expect(page.getByText(/Tranche status: (In review|Verified)/)).toBeVisible({ timeout: 20_000 });
-  await switchPerson(page, /client\+/);
+  await switchPerson(page, /^officer-/);
   await page.getByRole("link", { name: "Website rebuild SOW" }).first().click();
   await page.getByRole("link", { name: /spring workshops/ }).click();
   await expect(page.getByText(/Tranche status: (In review|Verified)/)).toBeVisible();
@@ -101,7 +97,7 @@ test("SOW in invoice mode, built in the wizard: invite, accept, sign, verify, in
 test("rejection tells the payee what's missing; the payee disputes", async ({ page }) => {
   const errors = watchErrors(page);
   await loadDemo(page);
-  await switchPerson(page, /director\+/);
+  await switchPerson(page, /^director-/);
   await openTranche(page, /spring workshops/);
   await addFiles(page, [SAMPLES.thin]);
   await page.getByRole("button", { name: "Submit evidence" }).click();
@@ -110,7 +106,7 @@ test("rejection tells the payee what's missing; the payee disputes", async ({ pa
   // The payee can see the review buttons aren't theirs.
   await expect(page.getByRole("button", { name: "Approve" })).toHaveCount(0);
 
-  await switchPerson(page, /officer\+/);
+  await switchPerson(page, /^officer-/);
   await expect(page.getByRole("heading", { name: /Waiting on you/ })).toBeVisible();
   await page.getByRole("link", { name: "Tranche 1: spring workshops" }).click();
   await page.getByRole("button", { name: "Reject" }).click();
@@ -118,7 +114,7 @@ test("rejection tells the payee what's missing; the payee disputes", async ({ pa
   await page.getByRole("alertdialog").getByRole("button", { name: "Reject" }).click();
   await expect(page.getByText(/Tranche status: (Pending|Held)/)).toBeVisible();
 
-  await switchPerson(page, /director\+/);
+  await switchPerson(page, /^director-/);
   await openTranche(page, /spring workshops/);
   await expect(page.getByText("The last submission was rejected")).toBeVisible();
   await expect(page.getByRole("paragraph").filter({ hasText: "“Attach the signed sign-in sheets and the budget.”" })).toBeVisible();
@@ -133,13 +129,13 @@ test("rejection tells the payee what's missing; the payee disputes", async ({ pa
 test("a stale signature is refused and the new criteria are shown", async ({ page }) => {
   await loadDemo(page, "Before signing");
   const agreement = page.url();
-  await switchPerson(page, /director\+/);
+  await switchPerson(page, /^director-/);
   await page.getByRole("link", { name: "Riverside Literacy Grant 2027" }).first().click();
   await page.getByRole("link", { name: "Criteria", exact: true }).click();
   await page.getByText(/I've read every criterion/).click();
 
   // Meanwhile the funder edits the criteria (straight through the API, with the funder's session).
-  const funder = await page.evaluate(() => JSON.parse(localStorage.getItem("mde.sessions")!).find((s: { user: { email: string } }) => s.user.email.startsWith("officer+")).token);
+  const funder = await page.evaluate(() => JSON.parse(localStorage.getItem("mde.sessions")!).find((s: { user: { email: string } }) => s.user.email.startsWith("officer-")).token);
   const aid = agreement.split("/a/")[1]!.split("/")[0]!;
   const org = agreement.split("/o/")[1]!.split("/")[0]!;
   const a = await (await page.request.get(`/api/agreements/${aid}`, { headers: { Authorization: `Bearer ${funder}`, "X-Org-Id": org } })).json();

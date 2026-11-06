@@ -375,7 +375,13 @@ def test_setup_credentials_load_into_settings(tmp_path):
     out = tmp_path / "github-app.env"
     setup.write_private(out, setup.env_lines(conversion))
     assert oct(out.stat().st_mode & 0o777) == "0o600"
-    settings = Settings(_env_file=str(out), mode="mock", database_url="sqlite://")
+    settings = Settings(
+        _env_file=str(out),
+        paypal_client_id="id",
+        paypal_client_secret="s",
+        secret_key="k" * 32,
+        database_url="sqlite://",
+    )
     assert settings.github_app_configured
     app = make_github_app(settings)
     assert isinstance(app, RealGitHubApp) and app.slug == "milestone-ledger"

@@ -17,10 +17,9 @@ from app.ai.agents import (
     claude_runtime,
 )
 from app.ai.extraction import convert
-from app.main import create_app
 from app.models import Criterion, Evidence
 from app.services.verification import judge
-from tests.conftest import hermetic_settings
+from tests.conftest import hermetic_app
 from tests.helpers import create_active, h, sign_in
 
 SIGN_IN = "name,session\n" + "\n".join(f"Person {i},S{i % 4}" for i in range(214))
@@ -71,7 +70,7 @@ def test_extract_requires_sign_in_and_text_or_pdf(client):
 
 
 def test_org_key_guards_spend():
-    app = create_app(hermetic_settings(org_api_key="org-secret"))
+    app = hermetic_app(org_api_key="org-secret")
     with TestClient(app) as c:
         files = {"file": ("grant.txt", b"text", "text/plain")}
         signed_in = h(sign_in(c, "drafter@harbor.example.org"))

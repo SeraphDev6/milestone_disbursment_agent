@@ -11,10 +11,9 @@ from sqlmodel import col, select
 from app.config import Settings
 from app.db import utcnow
 from app.integrations.paypal import PayPalError, SandboxPayPal
-from app.main import create_app
 from app.models import AuditEvent
 from app.services.verification import mark_overdue
-from tests.conftest import hermetic_settings
+from tests.conftest import hermetic_app, hermetic_settings
 from tests.helpers import PAYEE_EMAIL, PAYER_EMAIL, connect_paypal, create_active, h, sign_in
 from tests.test_escrow import agreement, fund, gw, release, verify, webhook
 from tests.test_payouts import captured, run_payouts, tranche
@@ -90,7 +89,7 @@ def test_rejection_emails_the_payee_whats_missing(client, draft):
 
 
 def test_links_open_the_web_app_when_configured(draft):
-    app = create_app(hermetic_settings(public_app_url="https://host/app"))
+    app = hermetic_app(public_app_url="https://host/app")
     with TestClient(app) as client:
         aid, (m1, _), ctx = create_active(client, draft)
         fund(client, m1, ctx)
@@ -149,7 +148,7 @@ def test_pay_link_is_emailed_to_the_payer(client, draft):
 
 
 def test_magic_link_rate_limit_per_ip_and_per_email():
-    app = create_app(hermetic_settings(rate_limit_magic_link_per_hour=2))
+    app = hermetic_app(rate_limit_magic_link_per_hour=2)
     with TestClient(app) as client:
         for _ in range(2):
             assert client.post("/auth/magic-link", json={"email": "a@x.example"}).status_code == 200
@@ -163,7 +162,7 @@ def test_magic_link_rate_limit_per_ip_and_per_email():
 
 
 def test_proxy_headers_are_ignored_when_not_trusted():
-    app = create_app(hermetic_settings(rate_limit_magic_link_per_hour=1, trust_proxy_headers=False))
+    app = hermetic_app(rate_limit_magic_link_per_hour=1, trust_proxy_headers=False)
     with TestClient(app) as client:
         assert client.post("/auth/magic-link", json={"email": "a@x.example"}).status_code == 200
         headers = {"X-Forwarded-For": "203.0.113.9"}
@@ -171,7 +170,7 @@ def test_proxy_headers_are_ignored_when_not_trusted():
 
 
 def test_extraction_and_precheck_limits_are_per_caller(draft):
-    app = create_app(hermetic_settings(rate_limit_extract_per_hour=1, rate_limit_precheck_per_hour=1))
+    app = hermetic_app(rate_limit_extract_per_hour=1, rate_limit_precheck_per_hour=1)
     with TestClient(app) as client:
         token = sign_in(client, "drafter@harbor.example.org")
         body = {"text": "Grant agreement text..."}
@@ -187,7 +186,7 @@ def test_extraction_and_precheck_limits_are_per_caller(draft):
 
 
 def test_pay_link_rate_limit(draft):
-    app = create_app(hermetic_settings(rate_limit_pay_link_per_hour=1))
+    app = hermetic_app(rate_limit_pay_link_per_hour=1)
     with TestClient(app) as client:
         _, (m1, _), ctx = create_active(client, {**draft, "settlement_mode": "invoice_on_verify"})
         connect_paypal(client, ctx)
@@ -416,7 +415,7 @@ def test_reused_sender_batch_id_is_recognised_from_paypals_body():
 def test_mcp_access_token_cannot_take_human_steps_over_rest(draft):
     from tests.test_mcp import connect
 
-    app = create_app(hermetic_settings(PUBLIC_BASE_URL="http://localhost"))  # the MCP SDK wants localhost or https
+    app = hermetic_app(PUBLIC_BASE_URL="http://localhost")  # the MCP SDK wants localhost or https
     with TestClient(app, base_url="http://localhost") as client:
         aid, (m1, _), ctx = create_active(client, draft)
         tokens = connect(client, PAYER_EMAIL, ctx["payer_org"])
@@ -450,24 +449,39 @@ def test_security_headers(client):
 
 
 def test_hsts_on_https_deployments():
-    app = create_app(hermetic_settings(public_base_url="https://engine.example"))
+    app = hermetic_app(public_base_url="https://engine.example")
     with TestClient(app) as client:
         assert client.get("/health").headers["strict-transport-security"].startswith("max-age=")
 
 
-def test_live_mode_settings():
+def test_two_modes_each_bound_to_their_paypal():
     base = {"_env_file": None, "paypal_client_id": "id", "paypal_client_secret": "s", "secret_key": "k" * 32}
     with pytest.raises(ValueError, match="https"):
         Settings(mode="live", **base)
     with pytest.raises(ValueError, match="PAYPAL_WEBHOOK_ID"):
         Settings(mode="live", public_base_url="https://engine.example", **base)
     live = Settings(mode="live", public_base_url="https://engine.example", paypal_webhook_id="w", **base)
-    assert live.paypal_api_url == "https://api-m.paypal.com"
-    assert Settings(mode="sandbox", **base).paypal_api_url == "https://api-m.sandbox.paypal.com"
+    assert live.paypal_api_url == "https://api-m.paypal.com" and live.paypal_web_url == "https://www.paypal.com"
+    assert live.demo_enabled is False  # never on the live service, whatever DEMO says
+    assert (
+        Settings(
+            mode="live", public_base_url="https://engine.example", paypal_webhook_id="w", demo=True, **base
+        ).demo_enabled
+        is False
+    )
+    sandbox = Settings(**base)  # the default mode
+    assert sandbox.mode.value == "sandbox" and sandbox.paypal_api_url == "https://api-m.sandbox.paypal.com"
+    assert sandbox.paypal_web_url == "https://www.sandbox.paypal.com" and sandbox.demo_enabled is True
+    assert Settings(demo=False, **base).demo_enabled is False
+    assert not hasattr(sandbox, "paypal_base_url")  # the API host can't be pointed at the other environment
+    with pytest.raises(ValueError, match="mock"):
+        Settings(mode="mock", **base)  # there is no keyless mode
+    with pytest.raises(ValueError, match="PAYPAL_CLIENT_ID"):
+        Settings(_env_file=None, secret_key="k" * 32)
     with pytest.raises(ValueError, match="RESEND_API_KEY"):
-        Settings(mode="sandbox", email_provider="resend", **base)
+        Settings(email_provider="resend", **base)
     with pytest.raises(ValueError, match="SECRET_KEY"):
-        Settings(mode="sandbox", _env_file=None, paypal_client_id="id", paypal_client_secret="s")
+        Settings(_env_file=None, paypal_client_id="id", paypal_client_secret="s")
 
 
 def test_email_senders_render_text_and_html():

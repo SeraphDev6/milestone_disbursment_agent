@@ -1,8 +1,8 @@
 /**
  * Signed-in sessions. A session is a bearer token from the magic link (valid 30 days on the server).
  *
- * Several sessions can be held at once ("switch person"): handy in mock mode, where one browser plays the
- * funder, the grantee and the reviewer. "Keep me signed in" decides localStorage vs sessionStorage.
+ * Several sessions can be held at once ("switch person"): the demo uses this to play the funder, the grantee
+ * and the reviewer from one browser. "Keep me signed in" decides localStorage vs sessionStorage.
  *
  * Tokens in web storage are readable by any script on the page, so the app ships no third-party scripts
  * and a strict CSP is recommended in production (see DESIGN.md, "Security notes").

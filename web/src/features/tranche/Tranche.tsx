@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useParams } from "react-router";
-import { isMock, useEvidence, useGitHubRepos, useHandovers, useHealth, useMilestoneAudit, usePayerView, useRetryHandover, useTrancheActions, useVerdict } from "@/api/queries";
+import { hasDemo, useEvidence, useGitHubRepos, useHandovers, useHealth, useMilestoneAudit, usePayerView, useRetryHandover, useTrancheActions, useVerdict } from "@/api/queries";
 import { useAgreementCtx, useOrgCtx, paths } from "@/app/context";
 import { useTitle } from "@/app/RouteAnnouncer";
 import { useSessions } from "@/auth/session";
@@ -22,7 +22,7 @@ export function Tranche() {
   const { agreement: a, seat, base } = useAgreementCtx();
   const org = useOrgCtx();
   const health = useHealth();
-  const mock = isMock(health.data);
+  const demo = hasDemo(health.data);
   const { sessions } = useSessions();
   const index = a.milestones.findIndex((x) => x.id === milestoneId);
   const m = a.milestones[index];
@@ -144,7 +144,7 @@ export function Tranche() {
           {isPayee && (
             <AddEvidence
               criteria={m.criteria}
-              mock={mock}
+              demo={demo}
               canSubmit={submit.ok}
               submitReason={submit.ok ? undefined : submit.reason}
               onSubmitted={() => document.getElementById("main")?.scrollIntoView({ behavior: "smooth" })}

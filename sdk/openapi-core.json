@@ -121,14 +121,6 @@
           "agreement": {
             "$ref": "#/components/schemas/AgreementRead"
           },
-          "dev_links": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "description": "Mock mode only: invitee email -> the link that would have been emailed.",
-            "title": "Dev Links",
-            "type": "object"
-          },
           "invitations": {
             "items": {
               "$ref": "#/components/schemas/InvitationRead"
@@ -1259,6 +1251,18 @@
           "revoked_at"
         ],
         "title": "InvitationRead",
+        "type": "object"
+      },
+      "InvitationSent": {
+        "properties": {
+          "invitation": {
+            "$ref": "#/components/schemas/InvitationRead"
+          }
+        },
+        "required": [
+          "invitation"
+        ],
+        "title": "InvitationSent",
         "type": "object"
       },
       "InviteToAgreement": {
@@ -2491,29 +2495,6 @@
         ],
         "title": "VerificationMethod",
         "type": "string"
-      },
-      "app__api__agreements__InvitationSent": {
-        "properties": {
-          "dev_link": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dev Link"
-          },
-          "invitation": {
-            "$ref": "#/components/schemas/InvitationRead"
-          }
-        },
-        "required": [
-          "invitation"
-        ],
-        "title": "InvitationSent",
-        "type": "object"
       }
     }
   },
@@ -2913,7 +2894,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__api__agreements__InvitationSent"
+                  "$ref": "#/components/schemas/InvitationSent"
                 }
               }
             },

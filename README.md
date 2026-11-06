@@ -4,20 +4,31 @@ Turns a grant or statement of work into tranches with checkable acceptance crite
 
 **PayPal:** sandbox and live calls go through the APIMatic-generated [PayPal Server SDK](https://pypi.org/project/paypal-server-sdk/) for everything it covers (Orders v2 and Payments v2: create, authorize and capture orders; reauthorize, capture, void, refund) and through plain REST for what it doesn't (Payouts, referenced payouts, Partner Referrals, Invoicing, webhook verification). One httpx client serves both, so tests mock PayPal with a single transport.
 
-**Status (Nov 4):** built and tested in mock mode: agreements, structured criteria and lint, two-party confirmation, PayPal escrow (per-tranche hold, reauthorize, capture, void, expiry, webhooks), direct payment to connected payees with a dispute window and a Payouts fallback, invoice mode, agreement extraction, evidence intake (upload and GitHub), deterministic checks, the AI verifier, the release gate, pre-check, human review, outbound webhooks, audit log and compliance packets, organizations with SSO, the MCP server and the web app. Extraction and verification have run live against Claude. Each PayPal call has been checked in sandbox on its own; the full wallet flow through the app and live webhooks have not yet run. What's left is tracked in [issues](https://github.com/SeraphDev6/milestone_disbursment_agent/issues), starting with the P0s: the sandbox wallet flow ([#33](https://github.com/SeraphDev6/milestone_disbursment_agent/issues/33)) and live webhooks ([#34](https://github.com/SeraphDev6/milestone_disbursment_agent/issues/34)).
+**Status (Nov 4):** built and tested against a stand-in PayPal in the test suite: agreements, structured criteria and lint, two-party confirmation, PayPal escrow (per-tranche hold, reauthorize, capture, void, expiry, webhooks), direct payment to connected payees with a dispute window and a Payouts fallback, invoice mode, agreement extraction, evidence intake (upload and GitHub), deterministic checks, the AI verifier, the release gate, pre-check, human review, outbound webhooks, audit log and compliance packets, organizations with SSO, the MCP server and the web app. Extraction and verification have run live against Claude. Each PayPal call has been checked in sandbox on its own; the full wallet flow through the app and live webhooks have not yet run. What's left is tracked in [issues](https://github.com/SeraphDev6/milestone_disbursment_agent/issues), starting with the P0s: the sandbox wallet flow ([#33](https://github.com/SeraphDev6/milestone_disbursment_agent/issues/33)) and live webhooks ([#34](https://github.com/SeraphDev6/milestone_disbursment_agent/issues/34)).
 
-AI parts (extraction, verification) use [Pydantic AI](https://ai.pydantic.dev) with Claude (`claude-opus-5-5`, server-side refusal fallbacks on). Mock mode swaps in a deterministic `FunctionModel`, so both paths run the same agents.
+AI parts (extraction, verification) use [Pydantic AI](https://ai.pydantic.dev) with Claude (`claude-opus-5-5`, server-side refusal fallbacks on). The test suite (and `LLM=mock`) swaps in a deterministic `FunctionModel`, so both paths run the same agents.
 
 ## Run it
 
-The whole app (Postgres, the API and the web app) with Docker. Mock mode needs no keys:
+The whole app (Postgres, the API and the web app) with Docker. It needs a PayPal sandbox REST app's credentials and a `SECRET_KEY` in `.env` (copy `.env.example`; `ANTHROPIC_API_KEY` for the model, or `LLM=mock` for the stand-in):
 
 ```sh
 docker compose up --build
-# open http://localhost:8000/  (try /demo; API docs at /api/docs; MCP server at /mcp)
+# open http://localhost:8000/  (the demo at /demo; API docs at /api/docs; MCP server at /mcp)
 ```
 
-Compose reads `.env` if there is one: set `MODE=sandbox` plus the PayPal keys and `SECRET_KEY` there for the PayPal sandbox and Claude. Use `APP_PORT=8080 docker compose up` if port 8000 is taken. Data lives in the `pgdata` volume (`docker compose down -v` resets it).
+Use `APP_PORT=8080 docker compose up` if port 8000 is taken. Data lives in the `pgdata` volume (`docker compose down -v` resets it).
+
+## Modes and the demo
+
+The product is the same everywhere; `MODE` only says which PayPal it is connected to.
+
+- **`sandbox`** (the default): PayPal's sandbox API. Payees connect sandbox business accounts, payers approve holds and pay links with sandbox accounts, and no real money moves. Every PayPal call goes to the sandbox host, so a live account can't be connected or charged here. This is what [app.milestone-ledger.com](https://app.milestone-ledger.com) runs.
+- **`live`**: PayPal's production API, direct route only (payer pays the connected payee; the platform never holds funds). It needs PayPal partner approval and a BN code, an https `PUBLIC_BASE_URL` and `PAYPAL_WEBHOOK_ID`. A live deployment never accepts a sandbox account.
+
+**The demo** lives at **`/demo`** on sandbox deployments (off with `DEMO=false`, never on a live one). It loads a ready-made grant with a funder, a grantee and a reviewer already signed in so a visitor can play every side, offers sample evidence files, and has two shortcuts the product doesn't (mark a tranche verified, connect the grantee's PayPal). The money part is PayPal's real sandbox: set `DEMO_PAYPAL_PAYER_EMAIL`/`_PASSWORD` (and `DEMO_PAYPAL_PAYEE_*`) to throwaway sandbox accounts and the demo page shows them to visitors, so they can approve a hold without a PayPal developer account of their own. The demo's people have addresses at a reserved domain nothing is delivered to; the server signs them in itself (`POST /demo/cast`, rate-limited) and drops any mail to them. Everything else they do is the ordinary API.
+
+There is no keyless mode. Tests, and `scripts/dev_server.py` for working on the web app, build the sandbox-mode app with a stand-in PayPal, an in-memory mailer and a stand-in GitHub App instead (`create_app(settings, paypal=..., mailer=..., github_app=...)`).
 
 To develop on the host instead, you need [uv](https://docs.astral.sh/uv/):
 
@@ -34,7 +45,7 @@ docker compose up -d db
 DATABASE_URL=postgresql://milestone:milestone@localhost:5433/milestone uv run uvicorn app.main:app --reload
 ```
 
-Copy `.env.example` to `.env` to set `MODE=sandbox` and PayPal sandbox credentials.
+Copy `.env.example` to `.env` for the PayPal sandbox credentials and `SECRET_KEY`.
 
 ## Web app
 
@@ -44,18 +55,18 @@ A React app for every side of an agreement (funder, grantee, reviewer) lives in 
 cd web && npm install && MDE_API=http://localhost:8000 npm run dev   # http://localhost:5173/
 ```
 
-Run the API with `PUBLIC_BASE_URL=http://localhost:5173` so mock PayPal redirects return through the dev server (it proxies `/api` and the MCP paths). After `npm run build`, the server serves the app itself at `/`, the API under `/api` and the MCP server at `/mcp`.
+Run the API with `PUBLIC_BASE_URL=http://localhost:5173` so PayPal's redirects return through the dev server (it proxies `/api` and the MCP paths). Without PayPal credentials, `uv run python scripts/dev_server.py --port 8000` runs it with stand-in PayPal, email and GitHub; sign-in links print in its terminal. After `npm run build`, the server serves the app itself at `/`, the API under `/api` and the MCP server at `/mcp`.
 
 ## Try the flow
 
 Everything is done as a signed-in person acting for an organization (see "Organizations, people and access" in the spec).
 
-1. **Sign in:** `POST /auth/magic-link {"email": ...}` then `POST /auth/magic-link/verify {"token": ...}` returns a session token; send `Authorization: Bearer <token>`. In mock mode the link comes back in the response (`dev_link`) instead of being emailed. Orgs can add OIDC single sign-on for domains they own (`PUT /orgs/{id}/sso`, verify each domain via DNS TXT, then people sign in with `POST /auth/sso/start`).
+1. **Sign in:** `POST /auth/magic-link {"email": ...}` then `POST /auth/magic-link/verify {"token": ...}` returns a session token; send `Authorization: Bearer <token>`. The link is emailed (with `EMAIL_PROVIDER=console` it is in the server log). Orgs can add OIDC single sign-on for domains they own (`PUT /orgs/{id}/sso`, verify each domain via DNS TXT, then people sign in with `POST /auth/sso/start`).
 2. **Payer org:** `POST /orgs {"name", "paypal_email"}`. Invite colleagues with `POST /orgs/{id}/invitations {"email", "role"}` (owner, admin, member, viewer); integrations and agents use `POST /orgs/{id}/api-keys`.
 3. **Draft:** `POST /agreements/extract` (PDF or text) proposes tranches and criteria, or `POST /criteria/lint` checks ones you wrote. Then `POST /orgs/{id}/agreements` with `counterparty_email` (and optional `reviewer_emails`) creates it and sends invitations.
 4. **Payee and reviewers** sign in with the invited email and `POST /invitations/accept` for one of their orgs (or a new one). Pending invitations show in `GET /me`.
 5. **Confirm:** each party's admin `POST /agreements/{id}/confirm` with the `criteria_hash` they reviewed. The agreement goes live when the payee has joined, every party (reviewers included) has signed, and no invitation is pending.
-6. **Fund** (escrow): payer `POST /milestones/{id}/fund` returns an `approve_url` for the PayPal hold (mock mode simulates PayPal's page). Invoice mode skips this.
+6. **Fund** (escrow): payer `POST /milestones/{id}/fund` returns an `approve_url` for the PayPal hold. Invoice mode skips this.
 7. **Evidence:** payee members pre-check (`/precheck`), then submit (`/evidence`, `/uploads`, or merged GitHub PRs). Checks run first, then the AI verifier; `GET /milestones/{id}/verdict` shows results with citations.
 8. **Decide:** with auto-release on and a confident verdict, a funded tranche settles itself. Otherwise it waits in each side's `GET /orgs/{id}/review-queue` for a payer admin or reviewer to `POST /milestones/{id}/review` (with `require_reviewer_approval`, only a reviewer can approve). Rejections return what's missing; the payee can `/dispute`.
 9. **Agents (MCP):** point an MCP client (Claude Desktop, Claude Code, etc.) at `<base>/mcp`. It discovers the OAuth endpoints, opens a consent page where you sign in and pick the org it acts for, then gets org-bound tools (list agreements, status, evidence, verdicts, pre-check, submit evidence, review queue, portfolio, compliance packet, drafting). Headless agents use an org API key as the bearer token. Confirming, approving, releasing, funding and disputes stay with people.
@@ -65,7 +76,7 @@ A complete example draft is in [`tests/conftest.py`](tests/conftest.py), and [`t
 
 ## Running it for real
 
-Two scheduled jobs and a few settings turn the mock demo into a deployment (all in `.env.example`):
+Two scheduled jobs and a few settings turn a local run into a deployment (all in `.env.example`):
 
 - `python -m app.jobs daily` once a day: clears expired PayPal holds (29 days), cancels invoices left unpaid for 30 days, and marks tranches whose due date passed with no evidence `overdue` (both sides are emailed; evidence and funding are still accepted).
 - `python -m app.jobs payouts` hourly: asks PayPal about captures, pay-now payments and invoices still in flight (so a missed webhook never strands a tranche), pays tranches whose dispute window closed, follows Payouts still in flight, polls the PayPal Disputes API for disputes no webhook announced (before paying anything), and ends contests nobody resolved within 28 days of capture the way PayPal does (paid to the payee). The app also runs this in-process every `PAYOUTS_INTERVAL_SECONDS`; with more than one instance set that to 0 and schedule the job once.
@@ -78,9 +89,9 @@ Two scheduled jobs and a few settings turn the mock demo into a deployment (all 
   - Reads use each installation's short-lived token, so the handover check can read a client's private repo.
   - Contractor-owned repos (agreements that withhold work until capture): the work stays in the payee's private repo, a release or tag named for a tranche pins the commit, and once the tranche is paid the code goes to the client as a PR into their repo (they install the app on it), a source archive, or the contractor transferring the repo to the client, which the app watches for (by repo id, with the verified commit on the default branch). PRs and archives are checked against the verified commit's git tree first; a transfer completes any of the three. Handovers are worked by an in-process loop, or by the `deliver-webhooks` job.
   - Each PR's merge commit gets a "Milestone Ledger" check run that follows the tranche. It's posted by an in-process loop, or by the `deliver-webhooks` job when that loop is off.
-  - The per-repo webhook still works without the app. Mock mode has a stand-in app with a mock install page.
+  - The per-repo webhook still works without the app.
 - **Custody of held work:** uploaded files are encrypted at rest (AES-256-GCM) with `FILE_ENCRYPTION_KEY`, or a key derived from `SECRET_KEY` when that isn't set. To turn on a dedicated key or rotate it, set the new key, list the previous ones in `FILE_ENCRYPTION_OLD_KEYS`, and run `python -m app.jobs encrypt-files` once (it also encrypts files stored before encryption existed). `RETENTION_DAYS` (off by default) has the `daily` job end custody of a closed tranche's originals that many days after its last activity, never within 180 days of capture (PayPal's chargeback window): `RETENTION_ACTION=delete` removes the files and evidence text and keeps their hashes, `payee_only` keeps them for the payee side alone.
-- **Live mode:** `MODE=live` uses PayPal's production API, pays connected payees only (never the platform route), and requires an https `PUBLIC_BASE_URL` and `PAYPAL_WEBHOOK_ID`. It also needs PayPal's partner approval and a BN code.
+- **Live mode:** `MODE=live` uses PayPal's production API, pays connected payees only (never the platform route), and requires an https `PUBLIC_BASE_URL` and `PAYPAL_WEBHOOK_ID`. It also needs PayPal's partner approval and a BN code. The demo is off on a live deployment.
 - `uv run python scripts/paypal_sandbox_check.py` checks the PayPal credentials, the platform merchant id and the webhook subscription from `.env` without running the app (`--order` also creates a $1 hold link).
 - `uv run python scripts/sandbox_walkthrough.py` walks the whole wallet flow through a running sandbox-mode app (escrow, pay-now and Payouts), pausing wherever you act in PayPal: see [`docs/SANDBOX.md`](docs/SANDBOX.md).
 

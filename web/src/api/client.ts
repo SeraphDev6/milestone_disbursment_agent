@@ -92,13 +92,3 @@ export async function download(path: string, fallbackName: string, orgId?: strin
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
   return { sha256, matches };
 }
-
-/** Pull the token out of a magic-link or invitation link (mock mode returns these as dev_link). */
-export function tokenFromLink(link: string): string | null {
-  try {
-    return new URL(link, window.location.origin).searchParams.get("token");
-  } catch {
-    return null;
-  }
-}
-

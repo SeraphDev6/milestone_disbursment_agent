@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from sqlmodel import Field, SQLModel, col, select
 
 from app.api.auth import invitation_read
-from app.api.deps import PrincipalDep, SessionDep, mailer, show_links
+from app.api.deps import PrincipalDep, SessionDep, mailer
 from app.api.views import funding_summary
 from app.db import utcnow
 from app.models import (
@@ -53,7 +53,6 @@ class MemberUpdate(SQLModel):
 
 class InvitationSent(SQLModel):
     invitation: InvitationRead
-    dev_link: str | None = Field(default=None, description="Mock mode only: the link that would have been emailed.")
 
 
 class AgreementSummary(SQLModel):
@@ -144,7 +143,7 @@ def invite_member(
     org = _org(session, principal, org_id, OrgRole.admin)
     if body.role == OrgRole.owner and principal.role_in(org_id) != OrgRole.owner:
         raise AccessError("only an owner can invite another owner", 403)
-    inv, link = identity.invite(
+    inv, _ = identity.invite(
         session,
         mailer(request),
         kind=InvitationKind.member,
@@ -155,7 +154,7 @@ def invite_member(
         org=org,
         org_role=body.role,
     )
-    return InvitationSent(invitation=invitation_read(session, inv), dev_link=link if show_links(request) else None)
+    return InvitationSent(invitation=invitation_read(session, inv))
 
 
 @router.patch("/orgs/{org_id}/members/{user_id}", summary="Change a member's role (admin; owners by owners)")

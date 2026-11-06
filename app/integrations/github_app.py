@@ -409,6 +409,4 @@ def make_github_app(settings) -> GitHubApp | None:
             private_key=settings.github_app_private_key.get_secret_value(),
             webhook_secret=settings.github_app_webhook_secret.get_secret_value(),
         )
-    if settings.is_mock:
-        return MockGitHubApp(base_url=settings.api_base_url)
-    return None
+    return None  # per-repo webhooks only (tests pass a MockGitHubApp to create_app)

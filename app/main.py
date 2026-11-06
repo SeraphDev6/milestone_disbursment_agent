@@ -7,18 +7,18 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.ai.agents import claude_runtime, mock_runtime
-from app.api import api_router, browser, mock_router
+from app.api import api_router, browser, demo_router, mock_router
 from app.api.mcp import build_mcp
 from app.api.spa import DIST, has_build, make_spa
-from app.config import API_PREFIX, Mode, Settings, get_settings, use_claude
+from app.config import API_PREFIX, DEMO_EMAIL_DOMAIN, Settings, get_settings, use_claude
 from app.db import make_engine, make_sessionmaker, migrate
 from app.integrations import filecrypt, filestore
 from app.integrations.crypto import SecretBox
-from app.integrations.email import make_mailer
+from app.integrations.email import Mailer, SkipUndeliverable, make_mailer
 from app.integrations.github import GitHubClient
-from app.integrations.github_app import make_github_app
+from app.integrations.github_app import GitHubApp, MockGitHubApp, make_github_app
 from app.integrations.oidc import OIDCClient, lookup_txt
-from app.integrations.paypal import make_gateway
+from app.integrations.paypal import MockPayPal, PayPalGateway, make_gateway
 from app.services import ServiceError
 from app.services.github_app import publish_checks
 from app.services.handover import run as run_handovers
@@ -83,7 +83,16 @@ class Site:
         return await self.spa(scope, receive, send)
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    paypal: PayPalGateway | None = None,
+    mailer: Mailer | None = None,
+    github_app: GitHubApp | None = None,
+) -> FastAPI:
+    """The REST API and the MCP server. `paypal`, `mailer` and `github_app` replace the real integrations with
+    stand-ins (tests, and the walkthrough's dry run); the deployment never passes them. When the PayPal or GitHub
+    stand-in is in use, its pages (approval, onboarding, invoices, app install) are mounted under /mock."""
     settings = settings or get_settings()
 
     @asynccontextmanager
@@ -97,7 +106,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if settings.outbound_interval_seconds > 0:
             stops.append(
                 start_delivery_loop(
-                    app.state.sessionmaker, settings.outbound_interval_seconds, allow_http=settings.is_mock
+                    app.state.sessionmaker, settings.outbound_interval_seconds, allow_http=settings.local
                 )
             )
         if settings.outbound_interval_seconds > 0 and app.state.github_app is not None:  # check runs, handovers
@@ -159,18 +168,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_age=600,
     )
     app.add_middleware(SecurityHeadersMiddleware, https=settings.public_base_url.startswith("https://"))
-    app.state.paypal = make_gateway(settings)
+    app.state.paypal = paypal or make_gateway(settings)
     key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
     app.state.ai = claude_runtime(key) if use_claude(settings) else mock_runtime()
     app.state.github = GitHubClient(token=settings.github_token)
-    app.state.github_app = make_github_app(settings)
+    app.state.github_app = github_app or make_github_app(settings)
     app.state.resolve = resolve_host
-    app.state.mailer = make_mailer(settings)
+    app.state.mailer = mailer or make_mailer(settings)
+    if settings.demo_enabled:  # the demo's people can't receive mail; don't ask the provider to try
+        app.state.mailer = SkipUndeliverable(app.state.mailer, DEMO_EMAIL_DOMAIN)
     # Emailed links open the web app when there is one (or PUBLIC_APP_URL names a separate one), else the API's pages.
     app.state.app_url = settings.public_app_url or (settings.public_base_url if _web_built(settings) else None)
     app.state.notifier = Notifier(app.state.mailer, settings.api_base_url, app.state.app_url)
     app.state.ratelimiter = RateLimiter()
-    app.state.oidc = OIDCClient(allow_local=settings.is_mock, resolve=resolve_host)
+    app.state.oidc = OIDCClient(allow_local=settings.local, resolve=resolve_host)
     app.state.txt_lookup = lookup_txt
     app.state.secrets = SecretBox(settings.secret_key.get_secret_value())
     filecrypt.configure(filecrypt.FileCipher.from_settings(settings))
@@ -183,7 +194,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(api_router)
     app.include_router(browser.router)
-    if settings.mode is Mode.mock:
+    if settings.demo_enabled:
+        app.include_router(demo_router)
+    if isinstance(app.state.paypal, MockPayPal) or isinstance(app.state.github_app, MockGitHubApp):
         app.include_router(mock_router)
 
     # MCP (tools generated from the routes above) and its OAuth endpoints. Mounted last at "/" so every
@@ -207,9 +220,13 @@ def _web_built(settings: Settings) -> bool:
 
 
 def _startup_warnings(settings: Settings) -> None:
-    """Things a deployment outside mock mode usually wants, logged once so they're visible in the host's logs."""
-    if settings.is_mock:
-        return
+    """Things a deployment usually wants, logged once so they're visible in the host's logs."""
+    log.info(
+        "MODE=%s: PayPal %s%s",
+        settings.mode.value,
+        settings.paypal_api_url,
+        "; demo at /demo" if settings.demo_enabled else "",
+    )
     if not settings.paypal_webhook_id:
         log.warning(
             "PAYPAL_WEBHOOK_ID is unset: PayPal webhooks are rejected, so captures and payouts only settle "

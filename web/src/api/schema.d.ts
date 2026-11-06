@@ -11,7 +11,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Health */
+        /**
+         * Health
+         * @description Liveness, which PayPal this deployment is connected to (sandbox or live), and whether /demo is on.
+         */
         get: operations["health_health_get"];
         put?: never;
         post?: never;
@@ -1187,7 +1190,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/mock/milestones/{milestone_id}/mark-verified": {
+    "/demo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What the demo page needs: which PayPal, and the sandbox accounts to use, if published */
+        get: operations["info_demo_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/demo/cast": {
         parameters: {
             query?: never;
             header?: never;
@@ -1196,8 +1216,33 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Mock mode only: mark a tranche verified */
-        post: operations["mark_verified_mock_milestones__milestone_id__mark_verified_post"];
+        /**
+         * Sign in the demo's three people (funder, grantee, reviewer) without email
+         * @description Three fresh people at the demo domain, each with a session. They then use the API like anyone else: the
+         *     funder creates an organization and the grant, the others accept their invitations from GET /me.
+         */
+        post: operations["cast_demo_cast_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/demo/milestones/{milestone_id}/mark-verified": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Demo only: mark a demo tranche verified
+         * @description Skips evidence and the verifier so a visitor can get to funding and release. Only on agreements whose
+         *     every participant is a demo person.
+         */
+        post: operations["mark_verified_demo_demo_milestones__milestone_id__mark_verified_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1310,13 +1355,6 @@ export interface components {
             agreement: components["schemas"]["AgreementRead"];
             /** Invitations */
             invitations: components["schemas"]["InvitationRead"][];
-            /**
-             * Dev Links
-             * @description Mock mode only: invitee email -> the link that would have been emailed.
-             */
-            dev_links?: {
-                [key: string]: string;
-            };
         };
         /** AgreementRead */
         AgreementRead: {
@@ -1743,6 +1781,43 @@ export interface components {
          * @enum {string}
          */
         DeliverableRelease: "on_submit" | "on_capture";
+        /** DemoCast */
+        DemoCast: {
+            /** Code */
+            code: string;
+            /** People */
+            people: components["schemas"]["DemoPerson"][];
+        };
+        /** DemoInfo */
+        DemoInfo: {
+            /** Mode */
+            mode: string;
+            /**
+             * Paypal Web Url
+             * @description Where the demo's PayPal pages are: PayPal's sandbox.
+             */
+            paypal_web_url: string;
+            /** @description A sandbox account to approve holds and pay links with, when the deployment publishes one. */
+            paypal_payer?: components["schemas"]["PayPalAccount"] | null;
+            /** @description A sandbox business account to connect as the grantee's PayPal, when published. */
+            paypal_payee?: components["schemas"]["PayPalAccount"] | null;
+        };
+        /** DemoPerson */
+        DemoPerson: {
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "funder" | "grantee" | "reviewer";
+            /** Email */
+            email: string;
+            /**
+             * Token
+             * @description A session for this person: 'Authorization: Bearer <token>'.
+             */
+            token: string;
+            user: components["schemas"]["UserRead"];
+        };
         /** DisbursementAttempt */
         DisbursementAttempt: {
             /** Id */
@@ -2305,6 +2380,10 @@ export interface components {
             /** Revoked At */
             revoked_at: string | null;
         };
+        /** InvitationSent */
+        InvitationSent: {
+            invitation: components["schemas"]["InvitationRead"];
+        };
         /** InviteToAgreement */
         InviteToAgreement: {
             /** Email */
@@ -2412,11 +2491,6 @@ export interface components {
              * @default true
              */
             sent?: boolean;
-            /**
-             * Dev Link
-             * @description Mock mode only: the link that would have been emailed.
-             */
-            dev_link?: string | null;
         };
         /** MagicLinkVerify */
         MagicLinkVerify: {
@@ -2720,6 +2794,13 @@ export interface components {
              * @description Payee only: PayPal account connected and able to receive. False means tranches are paid through the platform with PayPal Payouts.
              */
             paypal_connected?: boolean | null;
+        };
+        /** PayPalAccount */
+        PayPalAccount: {
+            /** Email */
+            email: string;
+            /** Password */
+            password: string;
         };
         /** PayPalAccountRead */
         PayPalAccountRead: {
@@ -3287,21 +3368,6 @@ export interface components {
          * @enum {string}
          */
         VerificationMethod: "check" | "model" | "human";
-        /** InvitationSent */
-        app__api__agreements__InvitationSent: {
-            invitation: components["schemas"]["InvitationRead"];
-            /** Dev Link */
-            dev_link?: string | null;
-        };
-        /** InvitationSent */
-        app__api__orgs__InvitationSent: {
-            invitation: components["schemas"]["InvitationRead"];
-            /**
-             * Dev Link
-             * @description Mock mode only: the link that would have been emailed.
-             */
-            dev_link?: string | null;
-        };
     };
     responses: never;
     parameters: never;
@@ -3327,7 +3393,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        [key: string]: string;
+                        [key: string]: string | boolean;
                     };
                 };
             };
@@ -3892,7 +3958,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__api__orgs__InvitationSent"];
+                    "application/json": components["schemas"]["InvitationSent"];
                 };
             };
             /** @description Validation Error */
@@ -4720,7 +4786,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__api__agreements__InvitationSent"];
+                    "application/json": components["schemas"]["InvitationSent"];
                 };
             };
             /** @description Validation Error */
@@ -5994,7 +6060,47 @@ export interface operations {
             };
         };
     };
-    mark_verified_mock_milestones__milestone_id__mark_verified_post: {
+    info_demo_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoInfo"];
+                };
+            };
+        };
+    };
+    cast_demo_cast_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoCast"];
+                };
+            };
+        };
+    };
+    mark_verified_demo_demo_milestones__milestone_id__mark_verified_post: {
         parameters: {
             query?: never;
             header?: {

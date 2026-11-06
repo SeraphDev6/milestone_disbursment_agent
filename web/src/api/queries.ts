@@ -62,7 +62,15 @@ export function useHealth() {
   });
 }
 
-export const isMock = (h: { mode?: string } | undefined) => h?.mode === "mock";
+export type Health = { status?: string; mode?: string; demo?: boolean };
+/** Connected to PayPal's sandbox, so no real money moves. The only other mode is live. */
+export const isSandbox = (h: Health | undefined) => h?.mode === "sandbox";
+/** The server runs the demo (/demo): sandbox deployments, unless turned off. Never on a live one. */
+export const hasDemo = (h: Health | undefined) => h?.demo === true;
+
+export function useDemoInfo(enabled: boolean) {
+  return useQuery({ queryKey: ["demo"], queryFn: () => call(api.GET("/demo")), enabled, staleTime: Infinity });
+}
 
 export function useMe(enabled = true) {
   return useQuery({ queryKey: keys.me, queryFn: () => call(api.GET("/me")), enabled, staleTime: 30_000 });

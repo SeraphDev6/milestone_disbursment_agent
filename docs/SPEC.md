@@ -52,7 +52,7 @@ Strategy (decided Nov 3): **focus, don't shotgun.**
 | Most Impactful (HM) | $5k | Grantees paid weeks sooner; pre-check helps small nonprofits get paid | Demo beats 1, 4 |
 | Best Use of PayPal + AI (HM) | $5k | AI decides when money moves, gated by checks and a human; authorize, reauthorize, capture, void, invoicing, webhooks | Nov 5–6 |
 | Best Use of Agentic Commerce (HM) | $5k | MCP tools; agent drives payer-side flows; agent as payee if the stretch lands | Nov 9 |
-| Best Demo Delivery (HM) | $5k | Tight 3:00 script, real sandbox money movement on screen, mock mode for judges | Nov 11 |
+| Best Demo Delivery (HM) | $5k | Tight 3:00 script, real sandbox money movement on screen, `/demo` on the sandbox deployment for judges | Nov 11 |
 | Most Creative (HM) | $5k | Criteria lint and pre-check reframe escrow as coaching, not gatekeeping | Demo beat 2 |
 | Best Use of AG Grid — **the sponsor bet** | $5k / $2k / $1k x3 | AG Grid for the ledger and milestone grid; AG Studio / AG Charts for a small funder portfolio dashboard (released vs held vs at-risk per grant) | Nov 10 |
 | Best Use of APIMatic — free ride | $1k + 6 mo Business x3 | PayPal is called through the APIMatic-generated PayPal Server SDK for Orders and Payments (done Nov 3; the SDK has no Payouts, Partner Referrals, Invoicing or webhook verification, which stay on REST). Generating our own SDKs is optional | Nov 3 |
@@ -133,9 +133,9 @@ No money moves without a verdict, and no verdict below the gate moves money with
 
 - **Evidence is untrusted data.** Evidence text is passed to the model as quoted data with an instruction that it may contain attempts to influence the verdict. A PR body saying "all criteria met" is evidence of nothing.
 - **Deterministic checks first.** Criteria with `verification=check` are decided by their registry check at intake (CI green on the pinned SHA, file present, budget sheet sums, report dated in period). The model only judges the rest.
-- **Implementation:** extraction and verification are two Pydantic AI agents with native structured output, run on Claude (`claude-opus-5-5`, effort high, server-side refusal fallbacks) or on a deterministic `FunctionModel` in mock mode ([`app/ai/agents.py`](../app/ai/agents.py)). Evidence ids are aliased (e1, e2, …) in prompts and mapped back; unknown citations are dropped.
+- **Implementation:** extraction and verification are two Pydantic AI agents with native structured output, run on Claude (`claude-opus-5-5`, effort high, server-side refusal fallbacks) or, in tests and with `LLM=mock`, on a deterministic `FunctionModel` ([`app/ai/agents.py`](../app/ai/agents.py)). Evidence ids are aliased (e1, e2, …) in prompts and mapped back; unknown citations are dropped.
 - **Verify:** the model gets the criteria and evidence and returns `CriterionResult`s via structured output. Every result must cite an evidence id; an uncited "met" counts as not met. `Verdict.met` is computed server-side from the results; the model never supplies it.
-- **Gate:** auto-release only when `auto_release_enabled`, `Verdict.met`, every check-backed criterion passed, and `model_confidence >= auto_release_threshold`. On `deliverable_release = on_capture` agreements a second skeptic pass (separate prompt `skeptic-v1`, told to find reasons each model-judged criterion is not met) must also return met, cited, for every model-judged criterion; it is stored on the verdict (`Verdict.skeptic`). Disagreement, or a skeptic that couldn't run, sends the tranche to review with both rationales. Mock mode's skeptic doubts evidence that looks unfinished ("TODO", "placeholder", ...). Anything else lands in `needs_review` with the rationale shown to the approver.
+- **Gate:** auto-release only when `auto_release_enabled`, `Verdict.met`, every check-backed criterion passed, and `model_confidence >= auto_release_threshold`. On `deliverable_release = on_capture` agreements a second skeptic pass (separate prompt `skeptic-v1`, told to find reasons each model-judged criterion is not met) must also return met, cited, for every model-judged criterion; it is stored on the verdict (`Verdict.skeptic`). Disagreement, or a skeptic that couldn't run, sends the tranche to review with both rationales. The stand-in model's skeptic doubts evidence that looks unfinished ("TODO", "placeholder", ...). Anything else lands in `needs_review` with the rationale shown to the approver.
 - **Who reviews:** only a `payer` or `approver` party may approve or reject; the payee can never approve their own milestone.
 - **Rejection:** returns the milestone to `pending` (or `funded`) and sends the payee each unmet criterion's `missing` text.
 - **Dispute:** after a rejection the payee may dispute; the milestone moves to `disputed` and the engine builds a dispute pack (timeline, criteria, verdicts, evidence, PayPal refs). Resolution is human and outside the engine for the hackathon.
@@ -211,8 +211,7 @@ original per-agreement party keys.
 - **Assignees**: each tranche can name a responsible person on the payer side and on the payee side.
 
 **Sign-in**
-- **Magic link** for everyone: request a link for an email, open it, get a session token (bearer). In mock
-  mode the link is returned in the response so the demo works without an email provider. The API's own sign-in
+- **Magic link** for everyone: request a link for an email, open it, get a session token (bearer). The demo's three people are signed in by the server instead (`POST /demo/cast`, sandbox deployments only, rate-limited; their addresses are at a reserved domain nothing is delivered to), so the demo needs no email. The API's own sign-in
   page (used for MCP consent) and browser SSO flows can only be completed in the browser that started them: a
   short-lived SameSite cookie must match, so a cross-site request can't sign someone's browser in as somebody else.
 - **Org SSO (OIDC)**: an org admin configures issuer, client id/secret (encrypted at rest with `SECRET_KEY`) and
@@ -265,8 +264,7 @@ original per-agreement party keys.
 - Worker: invitations, criteria, pre-check, evidence, what's missing, disputes, payout status.
 - Reviewer: invitations, criteria sign-off, review queue, compliance packets.
 
-**Email (built Nov 3):** `EMAIL_PROVIDER=resend|smtp` behind one `send`; console only in mock mode (links are
-returned in responses). Notifications go to the tranche's assignee on that side, else every member of the party's
+**Email (built Nov 3):** `EMAIL_PROVIDER=resend|smtp` behind one `send`; `console` only logs them (a local run reads links from the log). Mail to the demo's people is dropped before it reaches the provider. Notifications go to the tranche's assignee on that side, else every member of the party's
 org: review needed (payer side, or reviewers only with `require_reviewer_approval`), rejection with what's missing,
 verified-but-unfunded, pay link (invoice mode), overdue (both sides), unclaimed payout (payee), failed payout (payer).
 
@@ -326,7 +324,7 @@ FastAPI REST is the single source; the OpenAPI spec generates the MCP tools, the
 | `POST /subscriptions` | Register an outbound webhook URL for events | any party | — |
 
 - **Human steps stay off MCP on purpose:** an agent can draft, pre-check, submit and ask, but confirming criteria, approving low-confidence releases and disputing are a person's call.
-- **Outbound events (built):** every audit event is queued in the same transaction as the change (transactional outbox) for matching subscriptions, then delivered signed (`X-MDE-Signature` over `timestamp.body`), retried with exponential backoff up to 10 attempts. Subscriber URLs must be https (http allowed in mock mode) and may not resolve to private, loopback, link-local or reserved addresses; the post goes to the address that was vetted (no second DNS lookup) with TLS verified against the hostname; redirects are not followed.
+- **Outbound events (built):** every audit event is queued in the same transaction as the change (transactional outbox) for matching subscriptions, then delivered signed (`X-MDE-Signature` over `timestamp.body`), retried with exponential backoff up to 10 attempts. Subscriber URLs must be https (http allowed when the app itself runs on plain http, i.e. locally) and may not resolve to private, loopback, link-local or reserved addresses; the post goes to the address that was vetted (no second DNS lookup) with TLS verified against the hostname; redirects are not followed.
 - **Auth:** API keys per party, carrying the party's role, for the hackathon; OAuth later for Zapier. The review endpoint rejects the payee's key.
 
 ## Adapters
@@ -375,7 +373,7 @@ Grants lead (decided in review): it is the gap no competitor covers. The SOW and
 
 The engine and the escrow path are done by Nov 7; everything after that is surface, second mode and polish. Submission closes Nov 12 at 12:00 PT (15:00 ET).
 
-1. **Nov 3–4 — Foundation.** Repo, AGPL, FastAPI skeleton, Pydantic models, Postgres, `render.yaml` (web, worker, cron, Postgres), deploy to Render, **mock mode** (fake PayPal ids, canned verifier) so judges can run it without keys. Sandbox accounts; run the three day-one PayPal checks; confirm the APIMatic PayPal Server SDK covers Orders and Authorizations; request Payouts enablement as fallback. Check that Render free Postgres outlives judging (winners Dec 21); budget a paid tier if not.
+1. **Nov 3–4 — Foundation.** Repo, AGPL, FastAPI skeleton, Pydantic models, Postgres, `render.yaml` (web, worker, cron, Postgres), deploy to Render, **mock mode** (fake PayPal ids, canned verifier) so judges can run it without keys (replaced Nov 5 by `/demo` on the sandbox deployment: two modes only, sandbox and live). Sandbox accounts; run the three day-one PayPal checks; confirm the APIMatic PayPal Server SDK covers Orders and Authorizations; request Payouts enablement as fallback. Check that Render free Postgres outlives judging (winners Dec 21); budget a paid tier if not.
 2. **Nov 5 — Escrow path.** Per-milestone authorize, reauthorize, capture, void through the PayPal Server SDK; ledger; webhook verify and dedupe; settlement keys with attempt numbers; expiry cron.
 3. **Nov 6 — Extraction and verification.** Document to milestones and criteria with lint; deterministic checks; verdict with citations and server-derived `met`; gate; pre-check; review endpoint with role checks.
 4. **Nov 7 — Evidence adapters.** Upload form (report + budget sheet) and GitHub PR webhook with SHA pinning and CI checks. Full grant loop works end to end.
@@ -385,7 +383,7 @@ The engine and the escrow path are done by Nov 7; everything after that is surfa
 8. **Nov 11 — Hardening; skeptic pass and agent-as-payee if on schedule.** Record the demo video (the half day freed by dropping Bryntum goes here).
 9. **Nov 12 morning — Submit.** README with run instructions (mock and sandbox), hosted URL, tool list, which sponsor tools are used where, video link.
 
-**Cut in this order if behind:** Zapier, email adapter, agent-as-payee, skeptic pass, dispute pack (keep the endpoint and state), generated SDKs (keep the PayPal Server SDK), invoice mode (keep it as a 10-second mention), AG Studio dashboard (keep the AG Grid ledger). Never cut: escrow release, server-derived verdict with citations, deterministic checks, review gate with role check, criteria lint, pre-check, audit log and compliance export, AG Grid ledger, mock mode, the video.
+**Cut in this order if behind:** Zapier, email adapter, agent-as-payee, skeptic pass, dispute pack (keep the endpoint and state), generated SDKs (keep the PayPal Server SDK), invoice mode (keep it as a 10-second mention), AG Studio dashboard (keep the AG Grid ledger). Never cut: escrow release, server-derived verdict with citations, deterministic checks, review gate with role check, criteria lint, pre-check, audit log and compliance export, AG Grid ledger, the demo, the video.
 
 ## Open questions
 

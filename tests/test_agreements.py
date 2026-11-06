@@ -10,6 +10,7 @@ from tests.helpers import (
     confirm,
     create_active,
     create_draft,
+    emailed_link,
     h,
     new_org,
     sign_in,
@@ -20,8 +21,8 @@ def get(client, aid, token):
     return client.get(f"/agreements/{aid}", headers=h(token))
 
 
-def test_health_reports_mock_mode(client):
-    assert client.get("/health").json() == {"status": "ok", "mode": "mock"}
+def test_health_reports_the_mode_and_the_demo(client):
+    assert client.get("/health").json() == {"status": "ok", "mode": "sandbox", "demo": True}
 
 
 def test_create_requires_membership_and_paypal(client, draft):
@@ -52,8 +53,8 @@ def test_invitation_flow_and_activation(client, draft):
 def test_only_the_invited_email_can_accept(client, draft):
     payer = sign_in(client, PAYER_EMAIL)
     org = new_org(client, payer, "Harbor", "funder@example.org")
-    created = client.post(f"/orgs/{org}/agreements", json=draft, headers=h(payer)).json()
-    link = created["dev_links"][PAYEE_EMAIL]
+    assert client.post(f"/orgs/{org}/agreements", json=draft, headers=h(payer)).status_code == 201
+    link = emailed_link(client, PAYEE_EMAIL, "/invitations")
 
     impostor = sign_in(client, "impostor@example.org")
     r = accept(client, impostor, link, new_org={"name": "Fake", "paypal_email": "fake@example.org"})
@@ -68,7 +69,8 @@ def test_only_the_invited_email_can_accept(client, draft):
 def test_payee_org_needs_paypal_and_accepting_admin(client, draft):
     payer = sign_in(client, PAYER_EMAIL)
     org = new_org(client, payer, "Harbor", "funder@example.org")
-    link = client.post(f"/orgs/{org}/agreements", json=draft, headers=h(payer)).json()["dev_links"][PAYEE_EMAIL]
+    assert client.post(f"/orgs/{org}/agreements", json=draft, headers=h(payer)).status_code == 201
+    link = emailed_link(client, PAYEE_EMAIL, "/invitations")
     payee = sign_in(client, PAYEE_EMAIL)
     no_paypal = new_org(client, payee, "Riverside")
     r = accept(client, payee, link, org_id=no_paypal)
@@ -122,11 +124,12 @@ def test_permissions_follow_side_and_org_role(client, draft):
     # a viewer in the payer org can read but not confirm; a member can't confirm either (admin+)
     for role in ("viewer", "member"):
         email = f"{role}@harbor.example.org"
-        inv = client.post(
+        r = client.post(
             f"/orgs/{ctx['payer_org']}/invitations", json={"email": email, "role": role}, headers=h(ctx["payer"])
-        ).json()
+        )
+        assert r.status_code == 201
         person = sign_in(client, email)
-        assert accept(client, person, inv["dev_link"]).status_code == 200
+        assert accept(client, person, emailed_link(client, email, "/invitations")).status_code == 200
         assert get(client, aid, person).status_code == 200
         r = client.post(f"/agreements/{aid}/confirm", json={"criteria_hash": hash_}, headers=h(person))
         assert r.status_code == 403 and "admin" in r.json()["detail"]
@@ -175,7 +178,8 @@ def test_payer_can_add_a_reviewer_later(client, draft):
     )
     assert r.status_code == 201
     reviewer = sign_in(client, REVIEWER_EMAIL)
-    assert accept(client, reviewer, r.json()["dev_link"], new_org={"name": "Auditor"}).status_code == 200
+    link = emailed_link(client, REVIEWER_EMAIL, "/invitations")
+    assert accept(client, reviewer, link, new_org={"name": "Auditor"}).status_code == 200
     assert get(client, aid, reviewer).json()["status"] == "active"  # joining later doesn't reopen criteria
     r = client.post(
         f"/agreements/{aid}/invitations",
@@ -199,10 +203,11 @@ def test_lint_endpoint_and_mcp_tags(client, draft):
 def test_same_person_on_both_sides_must_choose(client, draft):
     aid, _, ctx = create_draft(client, draft, payee_email=PAYER_EMAIL.replace("officer", "officer2"))
     # the payer's person also joins the payee org
-    inv = client.post(
+    r = client.post(
         f"/orgs/{ctx['payee_org']}/invitations", json={"email": PAYER_EMAIL, "role": "admin"}, headers=h(ctx["payee"])
-    ).json()
-    assert accept(client, ctx["payer"], inv["dev_link"]).status_code == 200
+    )
+    assert r.status_code == 201
+    assert accept(client, ctx["payer"], emailed_link(client, PAYER_EMAIL, "/invitations")).status_code == 200
     assert get(client, aid, ctx["payer"]).status_code == 409  # ambiguous: which side?
     r = client.get(f"/agreements/{aid}", headers=h(ctx["payer"], ctx["payee_org"]))
     assert r.status_code == 200

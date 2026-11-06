@@ -1,8 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * E2E runs against the real backend in mock mode, through the Vite dev proxy.
- *   API:  MODE=mock LLM=mock PUBLIC_BASE_URL=http://localhost:5173 uv run uvicorn app.main:app --port 8765
+ * E2E runs against the real backend with stand-in PayPal, email and GitHub (scripts/dev_server.py), through the
+ * Vite dev proxy. People sign in through the demo's cast (POST /api/demo/cast), since no email is sent.
+ *   API:  PUBLIC_BASE_URL=http://localhost:5173 uv run python scripts/dev_server.py --port 8765
  *   Web:  MDE_API=http://localhost:8765 npm run dev
  * Set E2E_BASE_URL to point elsewhere.
  */

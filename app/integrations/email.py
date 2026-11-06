@@ -1,7 +1,7 @@
 """Outgoing email: sign-in and invitation links, and notifications about tranches.
 
 Three senders behind one `send`:
-- ConsoleMailer: logs and keeps messages in memory (mock mode also returns the link in API responses).
+- ConsoleMailer: logs and keeps messages in memory (a local run reads links from the log; tests from memory).
 - ResendMailer: Resend's HTTP API (EMAIL_PROVIDER=resend, RESEND_API_KEY).
 - SmtpMailer: any SMTP server, STARTTLS when offered (EMAIL_PROVIDER=smtp, SMTP_*).
 
@@ -22,7 +22,7 @@ log = logging.getLogger("mde.email")
 
 
 def _ensure_visible() -> None:
-    """Console mail is the only way to get sign-in and invitation links outside mock mode, but nothing configures
+    """Console mail is the only way to get sign-in and invitation links without a provider, but nothing configures
     the "mde" loggers under plain `uvicorn app.main:app` (Python then drops INFO). Give them a stderr handler
     unless the host's logging config already handles them."""
     root_handles = logging.getLogger().handlers
@@ -232,6 +232,25 @@ class SmtpMailer:
             log.error("email to %s (%s) not sent: %s", to, subject, e)
 
 
+@dataclass
+class SkipUndeliverable:
+    """Drops mail to the demo's people (addresses at DEMO_EMAIL_DOMAIN, where nothing can be delivered) before it
+    reaches the sender behind it, so the demo doesn't fill the provider's log with bounces. create_app wraps the
+    mailer in this when the demo is on. Anything else (a test mailer's `sent`) is read through to the sender."""
+
+    inner: Mailer
+    domain: str
+
+    def send(self, to: str, subject: str, body: str, link: str, *, tone: str = "neutral") -> None:
+        if to.lower().endswith("@" + self.domain):
+            log.debug("email to %s dropped (demo address): %s", to, subject)
+            return
+        self.inner.send(to, subject, body, link, tone=tone)
+
+    def __getattr__(self, name: str):
+        return getattr(self.inner, name)
+
+
 def make_mailer(settings) -> Mailer:
     if settings.email_provider == "resend":
         return ResendMailer(api_key=settings.resend_api_key.get_secret_value(), sender=settings.email_from)
@@ -243,7 +262,6 @@ def make_mailer(settings) -> Mailer:
             username=settings.smtp_username,
             password=settings.smtp_password.get_secret_value() if settings.smtp_password else None,
         )
-    if not settings.is_mock:
-        _ensure_visible()
-        log.warning("EMAIL_PROVIDER=console outside mock mode: sign-in links and notices are only logged, not sent")
+    _ensure_visible()
+    log.warning("EMAIL_PROVIDER=console: sign-in links and notices are only logged here, not sent")
     return ConsoleMailer()

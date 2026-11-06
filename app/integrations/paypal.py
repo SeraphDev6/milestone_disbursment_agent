@@ -13,7 +13,7 @@ Invoice mode: a connected payee is paid through a pay-now order (intent=CAPTURE,
 unconnected one through a PayPal invoice from the platform account, then Payouts.
 
 Two implementations share one interface:
-- MockPayPal: in-memory, deterministic MOCK ids, approval simulated by our own /mock route.
+- MockPayPal: in-memory, deterministic MOCK ids, approval simulated by our own /mock route (tests only).
 - SandboxPayPal (sandbox and live): the APIMatic-generated PayPal Server SDK (`paypal-server-sdk`) for what it
   covers, which is Orders and Payments (create, authorize and capture orders; reauthorize, capture, void and
   refund), and plain REST over httpx for what it doesn't: Payouts, referenced payouts, Partner Referrals and
@@ -1128,11 +1128,10 @@ class SandboxPayPal:
 
 
 def make_gateway(settings) -> PayPalGateway:
-    """Mock in mock mode, PayPal REST (sandbox by default) otherwise."""
+    """PayPal's API for MODE: the sandbox API in sandbox mode, the live API in live mode (tests pass a MockPayPal
+    to create_app instead). The platform route (money through the platform account) is sandbox-only."""
     from app.config import Mode
 
-    if settings.mode is Mode.mock:
-        return MockPayPal(base_url=settings.api_base_url)
     return SandboxPayPal(
         client_id=settings.paypal_client_id,
         client_secret=settings.paypal_client_secret.get_secret_value(),

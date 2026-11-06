@@ -3,21 +3,21 @@ import { Link, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, call } from "@/api/client";
 import { errorMessage } from "@/api/errors";
-import { isMock, useHealth } from "@/api/queries";
+import { hasDemo, useDemoInfo, useHealth } from "@/api/queries";
 import type { AgreementRead } from "@/api/types";
 import { paths } from "@/app/context";
 import { useTitle } from "@/app/RouteAnnouncer";
 import { sessions, useSessions } from "@/auth/session";
 import { money } from "@/domain/format";
 import { MILESTONE_STAMPS } from "@/domain/status";
-import { Busy, Button, Callout, clearToasts, Facts, Glyph, layout, NumberField, PageHeader, RadioGroup, Sheet, Stamp, toast } from "@/design/components";
+import { Busy, Button, Callout, clearToasts, CopyButton, Facts, Glyph, layout, NumberField, PageHeader, RadioGroup, Sheet, Stamp, toast } from "@/design/components";
 import { demoStore, sampleFile, SAMPLES, seedDemo, type DemoPerson, type DemoRecord } from "./seed";
 import s from "./Demo.module.css";
 
 /**
- * The demo, in one place, for mock mode only: load a realistic grant with three people already signed in,
+ * The demo, in one place, on sandbox deployments: load a realistic grant with three people already signed in,
  * jump between them, grab sample evidence files, and take shortcuts the real product doesn't offer.
- * Everything here drives the real API; nothing in the product depends on this page.
+ * Everything here drives the real API against PayPal's sandbox; nothing in the product depends on this page.
  */
 export function Demo() {
   useTitle("Demo");
@@ -25,12 +25,12 @@ export function Demo() {
   const [record, setRecord] = useState<DemoRecord | null>(() => demoStore.get());
 
   if (health.isPending) return <Busy label="Checking the server" />;
-  if (!isMock(health.data))
+  if (!hasDemo(health.data))
     return (
       <div className={layout.stack}>
-        <PageHeader eyebrow="Demo" title="The demo runs in mock mode" lede="This server talks to real PayPal and a real model, so there's no one-click demo here. Sign in and create an agreement as you normally would." />
-        <Callout tone="note" title="To run the demo">
-          <p>Start the API with <code>MODE=mock</code>: fake PayPal pages, a deterministic verifier, and sign-in links shown on screen instead of emailed.</p>
+        <PageHeader eyebrow="Demo" title="This server has no demo" lede={health.data?.mode === "live" ? "This is the live service: it moves real money through PayPal, so there is no one-click demo here. The demo runs on the sandbox deployment." : "The demo is turned off on this server. Sign in and create an agreement as you normally would."} />
+        <Callout tone="note" title="Looking for the demo?">
+          <p>The demo lives on a sandbox deployment, at its <code>/demo</code> page: a ready-made grant, three people to play, and PayPal's sandbox for the money.</p>
         </Callout>
       </div>
     );
@@ -38,9 +38,9 @@ export function Demo() {
   return (
     <div className={layout.stackLg}>
       <PageHeader
-        eyebrow="Demo · mock mode"
+        eyebrow="Demo · sandbox"
         title="Try the whole loop in three minutes"
-        lede="A literacy grant between a funder and a grantee, with an independent reviewer. You play all three people in this browser. Money moves through stand-in PayPal pages; nothing real is charged."
+        lede="A literacy grant between a funder and a grantee, with an independent reviewer. You play all three people in this browser. Money moves in PayPal's sandbox, with sandbox accounts; nothing real is charged."
       />
       <div className={layout.split}>
         <div className={layout.stackLg}>
@@ -50,6 +50,7 @@ export function Demo() {
         </div>
         <div className={layout.stack}>
           <Script />
+          <PayPalAccounts />
           <Samples />
           {record && (
             <Sheet title="Start over" titleLevel={2} tight>
@@ -101,7 +102,7 @@ function LoadDemo({ onLoaded, hasRecord }: { onLoaded: (r: DemoRecord) => void; 
   return (
     <Sheet title={hasRecord ? "Load a fresh demo grant" : "Load the demo grant"}>
       <div className={layout.stack}>
-        <p>Creates Harbor Foundation (funder), Riverside Reads (grantee) and Sponsor Audit Partners (reviewer), a two-tranche USD 30,000 grant between them, and signs all three people into this browser.</p>
+        <p>Creates Harbor Foundation (funder), Riverside Reads (grantee) and Sponsor Audit Partners (reviewer), a two-tranche USD 30,000 grant between them, and signs all three people into this browser. No email involved: the people are the demo's own.</p>
         <div className={layout.grid2}>
           <RadioGroup
             label="Start"
@@ -217,7 +218,7 @@ function Shortcuts({ record }: { record: DemoRecord }) {
     const token = tokenFor(funder.userId);
     setBusy(mid);
     try {
-      await call(api.POST("/mock/milestones/{milestone_id}/mark-verified", { params: { path: { milestone_id: mid } }, headers: { Authorization: `Bearer ${token}`, "X-Org-Id": funder.orgId } }));
+      await call(api.POST("/demo/milestones/{milestone_id}/mark-verified", { params: { path: { milestone_id: mid } }, headers: { Authorization: `Bearer ${token}`, "X-Org-Id": funder.orgId } }));
       toast(`${title} marked verified`, { body: "Skipped evidence and the verifier. Release it from the tranche page." });
       await load();
     } catch (e) {
@@ -233,7 +234,7 @@ function Shortcuts({ record }: { record: DemoRecord }) {
     try {
       const r = await call(api.POST("/orgs/{org_id}/paypal/connect", { params: { path: { org_id: grantee.orgId } }, headers: { Authorization: `Bearer ${token}` } }));
       window.open(r.onboarding_url, "_blank", "noopener");
-      toast("Mock PayPal onboarding opened", { body: "It completes on its own and returns. Tranches funded from now on pay Riverside Reads directly." });
+      toast("PayPal sandbox onboarding opened", { body: "Sign in there as the payee's sandbox business account and finish connecting. Tranches funded from then on pay Riverside Reads directly." });
     } catch (e) {
       toast("Couldn't start PayPal onboarding", { body: errorMessage(e), tone: "error" });
     } finally {
@@ -245,7 +246,7 @@ function Shortcuts({ record }: { record: DemoRecord }) {
   return (
     <Sheet title="Shortcuts" actions={<Button size="sm" variant="quiet" icon="refresh" onPress={load}>Refresh</Button>}>
       <div className={layout.stack}>
-        <p className={s.muted}>The real product has no buttons like these: they skip steps so you can get to the interesting part.</p>
+        <p className={s.muted}>The real product has no buttons like these: they skip steps so you can get to the interesting part. They only work on demo grants.</p>
         {error && <Callout tone="error" live>{error}</Callout>}
         {!a && !error && <Busy label="Loading the demo grant" />}
         {a && (
@@ -277,7 +278,7 @@ function Shortcuts({ record }: { record: DemoRecord }) {
                 <span className={s.muted}>{payee?.paypal_connected ? "Connected: paid directly." : "Not connected: paid through the platform with a Payout."}</span>
               </span>
               <span />
-              <Button size="sm" icon="external" isPending={busy === "paypal"} isDisabled={!!payee?.paypal_connected} onPress={connectGranteePayPal}>Connect via mock PayPal</Button>
+              <Button size="sm" icon="external" isPending={busy === "paypal"} isDisabled={!!payee?.paypal_connected} onPress={connectGranteePayPal}>Connect PayPal (sandbox)</Button>
             </div>
           </>
         )}
@@ -289,7 +290,7 @@ function Shortcuts({ record }: { record: DemoRecord }) {
 function Script() {
   const steps = [
     ["Sign", "Load “Before signing”. As each person, open Criteria and sign. The agreement goes live when all three have."],
-    ["Fund", "As the funder, open tranche 1 and fund it. Approve the hold on the stand-in PayPal page."],
+    ["Fund", "As the funder, open tranche 1 and fund it. PayPal's sandbox opens: sign in with the payer account below and approve the hold."],
     ["Pre-check", "As the grantee, upload the thin note and pre-check it: the verifier lists what's missing, and nothing is recorded."],
     ["Submit", "Upload the sign-in sheet and the budget, and submit. The checks count 214 rows and total the budget."],
     ["Review", "As the funder or reviewer, read the verdict and its citations, then approve. The hold is captured."],
@@ -304,6 +305,42 @@ function Script() {
         ))}
       </ol>
     </Sheet>
+  );
+}
+
+/** The sandbox accounts to use on PayPal's pages, when the deployment publishes them. */
+function PayPalAccounts() {
+  const info = useDemoInfo(true);
+  const payer = info.data?.paypal_payer;
+  const payee = info.data?.paypal_payee;
+  return (
+    <Sheet title="PayPal sandbox accounts" titleLevel={2} tight>
+      <p className={s.muted}>
+        Funding a tranche and paying a pay-now link happen on <a href={info.data?.paypal_web_url ?? "https://www.sandbox.paypal.com"} target="_blank" rel="noopener">PayPal's sandbox</a>, which has its own accounts. Sign in there with these; your real PayPal won't work and isn't touched.
+      </p>
+      {info.isPending && <Busy label="Loading the sandbox accounts" />}
+      {info.data && !payer && !payee && (
+        <p className={s.muted}>This deployment doesn't publish sandbox accounts. Use your own from <a href="https://developer.paypal.com/dashboard/accounts" target="_blank" rel="noopener">developer.paypal.com</a>: a personal account to approve holds, a business account to connect as the grantee.</p>
+      )}
+      {(payer || payee) && (
+        <dl className={s.accounts}>
+          {payer && <Account label="Payer (approves holds, pays links)" email={payer.email} password={payer.password} />}
+          {payee && <Account label="Payee (connects as Riverside Reads)" email={payee.email} password={payee.password} />}
+        </dl>
+      )}
+    </Sheet>
+  );
+}
+
+function Account({ label, email, password }: { label: string; email: string; password: string }) {
+  return (
+    <div className={s.account}>
+      <dt>{label}</dt>
+      <dd>
+        <span className={layout.row}><code>{email}</code><CopyButton value={email} label={`Copy the ${label} email`} /></span>
+        <span className={layout.row}><code>{password}</code><CopyButton value={password} label={`Copy the ${label} password`} /></span>
+      </dd>
+    </div>
   );
 }
 

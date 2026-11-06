@@ -10,9 +10,8 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import create_app
-from tests.conftest import GOOD_DRAFT, hermetic_settings
-from tests.helpers import create_active, h, token_from
+from tests.conftest import GOOD_DRAFT, hermetic_app
+from tests.helpers import create_active, emailed_link, h, token_from
 from tests.test_verification import SIGN_IN
 
 BASE = "http://localhost"  # the MCP SDK requires https issuers except localhost
@@ -22,7 +21,7 @@ REDIRECT = "http://localhost:3333/callback"
 
 @pytest.fixture
 def client():
-    with TestClient(create_app(hermetic_settings(PUBLIC_BASE_URL=BASE)), base_url=BASE) as c:
+    with TestClient(hermetic_app(PUBLIC_BASE_URL=BASE), base_url=BASE) as c:
         yield c
 
 
@@ -96,7 +95,8 @@ def start_authorize(client, client_id: str, challenge: str, resource: str = RESO
 
 def browser_sign_in(client, consent_url: str, email: str) -> None:
     page = client.post("/oauth/sign-in", data={"email": email, "next": path(consent_url)})
-    link = re.search(r"href='([^']+)'", page.text).group(1).replace("&amp;", "&")
+    assert page.status_code == 200 and "token=" not in page.text  # the link is emailed, never shown
+    link = emailed_link(client, email, "/auth/magic-link/verify")
     q = parse_qs(urlsplit(link).query)
     form = client.get(path(link)).text  # the link's page sets the browser-binding cookie and nonce
     nonce = re.search(r"name=nonce value='([^']+)'", form).group(1)
@@ -319,11 +319,17 @@ def test_leaving_the_org_cuts_off_the_agent(client):
         headers=h(ctx["payer"]),
     ).json()
     client.cookies.clear()
-    analyst = client.post("/auth/magic-link", json={"email": "analyst@harbor.example.org"}).json()["dev_link"]
+    client.post("/auth/magic-link", json={"email": "analyst@harbor.example.org"})
+    analyst = emailed_link(client, "analyst@harbor.example.org", "/auth/")
     session = client.post("/auth/magic-link/verify", json={"token": token_from(analyst)}).json()
+    assert "dev_link" not in inv
     client.post(
         "/invitations/accept",
-        json={"token": token_from(inv["dev_link"]), "org_id": None, "new_org": None},
+        json={
+            "token": token_from(emailed_link(client, "analyst@harbor.example.org", "/invitations")),
+            "org_id": None,
+            "new_org": None,
+        },
         headers=h(session["token"]),
     )
     tokens = connect(client, "analyst@harbor.example.org")

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router";
-import { extractAgreement, isMock, useCreateAgreement, useHealth, useOrg } from "@/api/queries";
+import { extractAgreement, hasDemo, useCreateAgreement, useHealth, useOrg } from "@/api/queries";
 import type { AgreementCreated, ExtractionResult } from "@/api/types";
 import { errorMessage, isApiError } from "@/api/errors";
 import { paths, useOrgCtx } from "@/app/context";
@@ -13,7 +12,6 @@ import {
   ButtonLink,
   Callout,
   Checkbox,
-  CopyButton,
   ErrorSummary,
   Facts,
   FileDropZone,
@@ -357,7 +355,7 @@ function SourceStep({ onStart }: { onStart: (d: DraftForm, x: ExtractionResult |
           <p>Start with one empty tranche and add criteria as you go.</p>
           <Button onPress={() => onStart(blankDraft(), null)}>Start a blank draft</Button>
         </Sheet>
-        {isMock(health.data) && (
+        {hasDemo(health.data) && (
           <Sheet title="Sample grant" titleLevel={3}>
             <p>A two-tranche literacy grant with clean criteria, for trying the flow.</p>
             <Button
@@ -401,37 +399,20 @@ function ExtractionNotes({ x, answered, setAnswered }: { x: ExtractionResult; an
   );
 }
 
-/** In-app invitation link: carries the invitee's email so the accept page can ask them to sign in as the right person. */
-export function inviteHref(link: string, email: string, kind: string, title: string): string {
-  const token = new URL(link, window.location.origin).searchParams.get("token") ?? "";
-  const q = new URLSearchParams({ token, email, kind, title });
-  return `/invitations/accept?${q}`;
-}
-
 function Created({ created, orgId }: { created: AgreementCreated; orgId: string }) {
   const a = created.agreement;
-  const links = created.dev_links ?? {};
   return (
     <div className={layout.stackLg}>
       <PageHeader eyebrow="Draft created" title={a.title} stamp={<Stamp spec={{ label: "Draft", tone: "neutral", glyph: "ring", meaning: "Criteria can still change." }} size="lg" />} lede="Invitations are out. The agreement goes live when the payee and every reviewer have joined and everyone has signed the same criteria." />
       <Sheet title="Invitations sent">
         <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "var(--space-3)" }}>
-          {created.invitations.map((i) => {
-            const link = links[i.email];
-            return (
-              <li key={i.id} className={layout.row} style={{ justifyContent: "space-between", borderBottom: "1px solid var(--rule-hairline)", paddingBottom: "var(--space-2)" }}>
-                <span><strong>{i.email}</strong> <span style={{ color: "var(--text-secondary)" }}>· {i.kind === "counterparty" ? "payee" : "reviewer"}</span></span>
-                {link && (
-                  <span className={layout.row}>
-                    <CopyButton value={`${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, "")}${inviteHref(link, i.email, i.kind, a.title)}`} label={`Copy invitation link for ${i.email}`}>Copy link</CopyButton>
-                    <Link to={inviteHref(link, i.email, i.kind, a.title)}>Open as {i.email}</Link>
-                  </span>
-                )}
-              </li>
-            );
-          })}
+          {created.invitations.map((i) => (
+            <li key={i.id} className={layout.row} style={{ justifyContent: "space-between", borderBottom: "1px solid var(--rule-hairline)", paddingBottom: "var(--space-2)" }}>
+              <span><strong>{i.email}</strong> <span style={{ color: "var(--text-secondary)" }}>· {i.kind === "counterparty" ? "payee" : "reviewer"}</span></span>
+            </li>
+          ))}
         </ul>
-        {Object.keys(links).length > 0 && <p style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)", marginTop: "var(--space-3)" }}>Mock mode: these links would have been emailed. Open one to play that person (you'll be asked to sign in as them).</p>}
+        <p style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)", marginTop: "var(--space-3)" }}>Each person gets an email with their link. They sign in with that address and accept for their organization, or create one. Pending invitations also wait on their home page.</p>
       </Sheet>
       <div className={layout.row}>
         <ButtonLink variant="primary" href={paths.agreement(orgId, a.id)} iconEnd="arrow">Open the agreement</ButtonLink>

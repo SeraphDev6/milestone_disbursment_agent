@@ -51,7 +51,7 @@ test("demo page: dispute window, the reviewer contests, the payee accepts and th
   expect(errors).toEqual([]);
 });
 
-test("the payee connects PayPal through (mock) partner onboarding", async ({ page, context }) => {
+test("the payee connects PayPal through (stand-in) partner onboarding", async ({ page, context }) => {
   const errors = watchErrors(page);
   await loadDemo(page);
   await actAs(page, "Payee");

@@ -51,7 +51,7 @@ Options:
 
 - `--flows escrow`, `--flows paynow` or `--flows platform` (comma-separated) runs part of it.
 - `--headless` hides the browser window. `--manual-paypal` prints the PayPal links for you instead, even with the passwords set.
-- `--base-url https://<host>` runs against a deployment in sandbox mode. Its emails really go out, so also pass `--payer-email` and `--payee-email` with inboxes you can read (the default `@example.org` addresses receive nothing). Set the service's `PAYOUTS_INTERVAL_SECONDS` low (10 is fine with one instance) so the platform-route payout doesn't wait for the hourly cron. The deployment the judges use stays in mock mode, so run this locally or against a second, sandbox-mode service.
+- `--base-url https://<host>` runs against a deployment in sandbox mode. Its emails really go out, so also pass `--payer-email` and `--payee-email` with inboxes you can read (the default `@example.org` addresses receive nothing). Set the service's `PAYOUTS_INTERVAL_SECONDS` low (10 is fine with one instance) so the platform-route payout doesn't wait for the hourly cron. The deployment the judges use is itself in sandbox mode (there is no other non-live mode), so this can run against it; its demo at `/demo` is separate from the walkthrough's agreements.
 
 ## Hands-off: reading the emails from Resend
 
@@ -87,7 +87,7 @@ Afterwards, check the money landed in the sandbox accounts (sandbox.paypal.com, 
 
 ## Record the result
 
-Note on #33 what ran, the PayPal debug ids for anything that failed, and any status or ledger row that differed from mock mode. A difference is a bug in the app or in the mock, and the mock should be fixed to match PayPal.
+Note on #33 what ran, the PayPal debug ids for anything that failed, and any status or ledger row that differed from the test suite's run with the stand-in PayPal. A difference is a bug in the app or in the stand-in, and the stand-in should be fixed to match PayPal.
 
 ## Known PayPal answers
 

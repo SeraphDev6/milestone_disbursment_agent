@@ -7,6 +7,7 @@ from tests.helpers import (
     confirm,
     create_active,
     create_draft,
+    emailed_link,
     h,
     new_org,
     sign_in,
@@ -18,7 +19,8 @@ from tests.test_verification import BUDGET, SIGN_IN, status_of, submit
 
 
 def test_magic_link_is_single_use_and_creates_the_user(client):
-    link = client.post("/auth/magic-link", json={"email": "New.Person@Example.org"}).json()["dev_link"]
+    client.post("/auth/magic-link", json={"email": "New.Person@Example.org"})
+    link = emailed_link(client, "new.person@example.org", "/auth/")
     r = client.post("/auth/magic-link/verify", json={"token": token_from(link)})
     assert r.status_code == 200 and r.json()["user"]["email"] == "new.person@example.org"
     assert client.post("/auth/magic-link/verify", json={"token": token_from(link)}).status_code == 401
@@ -51,8 +53,9 @@ def test_org_roles_and_owner_protection(client):
     inv = client.post(
         f"/orgs/{org}/invitations", json={"email": "adm@harbor.example.org", "role": "admin"}, headers=h(owner)
     ).json()
+    assert inv["invitation"]["email"] == "adm@harbor.example.org" and "dev_link" not in inv
     admin = sign_in(client, "adm@harbor.example.org")
-    accept(client, admin, inv["dev_link"])
+    accept(client, admin, emailed_link(client, "adm@harbor.example.org", "/invitations"))
     members = {m["user"]["email"]: m for m in client.get(f"/orgs/{org}/members", headers=h(admin)).json()}
     assert members["adm@harbor.example.org"]["role"] == "admin"
 

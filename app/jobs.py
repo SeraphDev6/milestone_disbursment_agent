@@ -65,7 +65,7 @@ def main(argv: list[str]) -> int:
             counts = disburse_due(session, make_gateway(settings), now)
             print(", ".join(f"{k.replace('_', ' ')}: {v}" for k, v in counts.items()))
         else:
-            sent = deliver_due(session, now, allow_http=settings.is_mock)
+            sent = deliver_due(session, now, allow_http=settings.local)
             gh = make_github_app(settings)
             checks = publish_checks(session, gh, notifier.tranche_link, now)
             handed = run_handovers(session, gh, now)

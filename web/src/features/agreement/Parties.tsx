@@ -1,5 +1,4 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { Link } from "react-router";
 import type { ColDef } from "ag-grid-community";
 import { useInvitations, useInvite, useRevokeInvitation } from "@/api/queries";
 import type { InvitationRead } from "@/api/types";
@@ -9,8 +8,7 @@ import { useTitle } from "@/app/RouteAnnouncer";
 import { date, ROLE_LABEL } from "@/domain/format";
 import { can } from "@/domain/permissions";
 import { INVITATION_STAMPS, invitationState } from "@/domain/status";
-import { Button, Callout, ConfirmDialog, CopyButton, DataGrid, ErrorSummary, layout, PermissionNote, RadioGroup, Sheet, Stamp, TextField, toast } from "@/design/components";
-import { inviteHref } from "@/features/draft/NewAgreement";
+import { Button, Callout, ConfirmDialog, DataGrid, ErrorSummary, layout, PermissionNote, RadioGroup, Sheet, Stamp, TextField, toast } from "@/design/components";
 import { SignatureBlock } from "./parts";
 
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -107,7 +105,6 @@ function InviteForm() {
   const [email, setEmail] = useState("");
   const [kind, setKind] = useState<"reviewer" | "counterparty">("reviewer");
   const [error, setError] = useState<string | null>(null);
-  const [sent, setSent] = useState<{ email: string; link?: string | null; kind: string } | null>(null);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -115,7 +112,6 @@ function InviteForm() {
     setError(null);
     try {
       const r = await invite.mutateAsync({ email: email.trim(), kind });
-      setSent({ email: r.invitation.email, link: r.dev_link, kind });
       setEmail("");
       toast("Invitation sent", { body: r.invitation.email });
     } catch (err) {
@@ -138,14 +134,6 @@ function InviteForm() {
         <TextField id="invite-email" label="Email" type="email" value={email} onChange={setEmail} error={error} />
         <p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", margin: 0 }}>A new party has to sign too, so inviting someone holds activation until they join and sign.</p>
         <div><Button type="submit" variant="primary" isPending={invite.isPending}>Send invitation</Button></div>
-        {sent?.link && (
-          <Callout tone="info" title="Mock mode: invitation link" live>
-            <div className={layout.row}>
-              <CopyButton value={`${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, "")}${inviteHref(sent.link, sent.email, sent.kind, a.title)}`} label="Copy invitation link">Copy link</CopyButton>
-              <Link to={inviteHref(sent.link, sent.email, sent.kind, a.title)}>Open as {sent.email}</Link>
-            </div>
-          </Callout>
-        )}
       </form>
     </Sheet>
   );

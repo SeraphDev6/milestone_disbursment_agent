@@ -101,11 +101,6 @@ def mailer(request: Request) -> Mailer:
     return request.app.state.mailer
 
 
-def show_links(request: Request) -> bool:
-    """Return sign-in and invitation links in responses (mock mode only, where no email is sent)."""
-    return request.app.state.settings.is_mock
-
-
 def client_ip(request: Request) -> str:
     """The caller's address for rate limits: the first X-Forwarded-For hop when the deployment trusts its proxy."""
     if request.app.state.settings.trust_proxy_headers:

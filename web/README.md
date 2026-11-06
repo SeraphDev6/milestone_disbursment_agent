@@ -7,26 +7,27 @@ React 19 + TypeScript + Vite, served at the site root; the REST API is under `/a
 Everything at once: `docker compose up --build` at the repo root serves the built app at http://localhost:8000/. For development with hot reload:
 
 ```sh
-# terminal 1: the API in mock mode (no keys needed)
-MODE=mock PUBLIC_BASE_URL=http://localhost:5173 uv run uvicorn app.main:app --port 8765
+# terminal 1: the API with stand-in PayPal, email and GitHub (no keys needed; sign-in links print here)
+PUBLIC_BASE_URL=http://localhost:5173 uv run python scripts/dev_server.py --port 8765
 
 # terminal 2: the web app, proxying API paths to it
 cd web && npm install && MDE_API=http://localhost:8765 npm run dev
 # open http://localhost:5173/
 ```
 
-The app is the same in every mode: it talks to the real API. Mock mode only swaps PayPal and email for stand-ins.
+The app is the same against every server: it talks to the real API and reads `GET /health` for the mode (`sandbox` or `live`, shown as a ribbon on sandbox) and whether the demo is on. The dev server above only swaps PayPal, email and GitHub for stand-ins; with it:
 
-- **Sign-in and invitation links** show on screen instead of being emailed.
-- **PayPal approval, onboarding and invoice pages** are local stand-ins.
+- **Sign-in and invitation links** are printed in terminal 1 (nothing is emailed anywhere).
+- **PayPal approval, onboarding and invoice pages** are local stand-ins under `/api/mock`.
 
-Everything demo-only lives at **`/demo`** (mock mode only):
-- loading a ready-made grant with a funder, a grantee and a reviewer signed in
+Everything demo-only lives at **`/demo`** (sandbox servers with the demo on):
+- loading a ready-made grant with a funder, a grantee and a reviewer signed in (the server signs them in: `POST /demo/cast`)
 - one-click "act as" for each
+- the PayPal sandbox accounts to use, when the deployment publishes them
 - sample evidence files
-- shortcuts the product deliberately doesn't have (mark verified, connect the grantee's PayPal)
+- shortcuts the product deliberately doesn't have (mark verified, connect the grantee's PayPal), demo grants only
 
-`PUBLIC_BASE_URL` points at Vite so PayPal's (mock) redirects come back through the same origin.
+`PUBLIC_BASE_URL` points at Vite so PayPal's redirects come back through the same origin.
 
 In production, `npm run build` writes `web/dist`, and the server serves it at `/` (`app/api/spa.py`) on the same origin as the API (`/api`) and the MCP server (`/mcp`).
 

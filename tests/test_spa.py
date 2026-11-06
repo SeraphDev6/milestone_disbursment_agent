@@ -3,8 +3,8 @@
 from fastapi.testclient import TestClient
 
 from app.api.spa import make_spa
-from app.main import Site, create_app, create_site
-from tests.conftest import hermetic_settings
+from app.main import Site, create_site
+from tests.conftest import hermetic_app, hermetic_settings
 
 
 def make(tmp_path):
@@ -46,7 +46,7 @@ def test_without_a_build_the_root_points_at_the_docs(tmp_path):
 def test_site_routes_api_mcp_and_app(tmp_path):
     (tmp_path / "assets").mkdir()
     (tmp_path / "index.html").write_text("<!doctype html><div id=root></div>")
-    api = create_app(hermetic_settings(PUBLIC_BASE_URL="http://localhost"))
+    api = hermetic_app(PUBLIC_BASE_URL="http://localhost")
     with TestClient(Site(api, make_spa(tmp_path)), base_url="http://localhost") as c:
         assert c.get("/api/health").json()["status"] == "ok"
         assert c.get("/health").status_code == 200 and "id=root" in c.get("/health").text  # not an API path
@@ -62,7 +62,8 @@ def test_site_routes_api_mcp_and_app(tmp_path):
         assert c.post("/mcp", json={}).status_code in (400, 401, 406)  # the MCP server answered, not the app
         assert "id=root" in c.get("/o/1/a/2/m/3").text
         # the API's own browser pages, and the links it builds, carry the prefix
-        link = c.post("/api/auth/magic-link", json={"email": "pat@example.org"}).json()["dev_link"]
+        assert c.post("/api/auth/magic-link", json={"email": "pat@example.org"}).status_code == 200
+        link = api.state.mailer.sent[-1].link
         assert link.startswith("http://localhost/api/auth/magic-link/verify?token=")
         page = c.get(link)
         assert page.status_code == 200 and "action='/api/auth/magic-link/complete'" in page.text

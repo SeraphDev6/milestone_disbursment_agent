@@ -96,7 +96,6 @@ function Members() {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<OrgRole>("member");
   const [error, setError] = useState<string | null>(null);
-  const [devLink, setDevLink] = useState<string | null>(null);
   const [removing, setRemoving] = useState<MembershipRead | null>(null);
 
   const cols = useMemo<ColDef<MembershipRead>[]>(
@@ -146,8 +145,7 @@ function Members() {
     if (!EMAIL.test(email.trim())) return setError("Enter an email like name@example.org");
     setError(null);
     try {
-      const r = await invite.mutateAsync({ email: email.trim(), role });
-      setDevLink(r.dev_link ?? null);
+      await invite.mutateAsync({ email: email.trim(), role });
       toast("Invitation sent", { body: `${email.trim()} as ${role}` });
       setEmail("");
     } catch (err) {
@@ -167,11 +165,6 @@ function Members() {
               <Select label="Role" value={role} onChange={setRole} options={ROLES.filter((r) => owner || r.id !== "owner")} />
             </div>
             <div><Button type="submit" variant="primary" isPending={invite.isPending}>Send invitation</Button></div>
-            {devLink && (
-              <Callout tone="info" title="Mock mode: invitation link" live>
-                <CopyButton value={devLink} label="Copy invitation link">Copy link</CopyButton>
-              </Callout>
-            )}
           </form>
         ) : (
           <PermissionNote>Inviting and managing members needs admin or above.</PermissionNote>

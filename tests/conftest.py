@@ -1,9 +1,13 @@
 import copy
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.config import Settings
+from app.config import hermetic_settings
+from app.integrations.email import ConsoleMailer
+from app.integrations.github_app import MockGitHubApp
+from app.integrations.paypal import MockPayPal
 from app.main import create_app
 
 GOOD_DRAFT = {
@@ -72,24 +76,21 @@ def draft() -> dict:
     return copy.deepcopy(GOOD_DRAFT)
 
 
-def hermetic_settings(**overrides) -> Settings:
-    """Hermetic: ignores .env and pins mock PayPal + mock model."""
-    return Settings(
-        **{
-            "_env_file": None,
-            "mode": "mock",
-            "llm": "mock",
-            "database_url": "sqlite://",
-            "outbound_interval_seconds": 0,
-            "payouts_interval_seconds": 0,
-            "web_app_built": False,  # links go to the API's own pages unless a test sets public_app_url
-            **overrides,
-        }
+def hermetic_app(**overrides) -> FastAPI:
+    """The app in sandbox mode with every integration a stand-in: MockPayPal (its approval, onboarding and invoice
+    pages are mounted under /mock), a mailer that keeps messages in memory (tests read links from
+    `app.state.mailer.sent`), the mock GitHub App and the mock model. Settings overrides go to hermetic_settings;
+    links go to the API's own pages unless a test sets public_app_url."""
+    settings = hermetic_settings(**overrides)
+    return create_app(
+        settings,
+        paypal=MockPayPal(base_url=settings.api_base_url),
+        mailer=ConsoleMailer(),
+        github_app=MockGitHubApp(base_url=settings.api_base_url),
     )
 
 
 @pytest.fixture
 def client():
-    app = create_app(hermetic_settings())
-    with TestClient(app) as c:
+    with TestClient(hermetic_app()) as c:
         yield c

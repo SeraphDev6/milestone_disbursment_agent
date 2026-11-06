@@ -136,12 +136,12 @@ const guessType = (name: string): EvidenceType => (/\.(csv|xlsx)$/i.test(name) ?
  * after upload.
  */
 export function AddEvidence({
-  criteria, mock, canSubmit, submitReason, onSubmitted, actions, minVisibility,
+  criteria, demo, canSubmit, submitReason, onSubmitted, actions, minVisibility,
 }: {
   criteria: Criterion[];
   /** Set when the agreement withholds work until capture: the least the payer may see of each item. */
   minVisibility?: EvidenceVisibility;
-  mock: boolean;
+  demo: boolean;
   canSubmit: boolean;
   submitReason?: string;
   onSubmitted: () => void;
@@ -280,7 +280,7 @@ export function AddEvidence({
         ) : (
           <div className={layout.row}>
             <Button icon="edit" onPress={() => setWriting(true)}>Write an entry</Button>
-            {mock && <Link to="/demo" style={{ fontSize: "var(--text-sm)" }}>Sample evidence files are on the demo page</Link>}
+            {demo && <Link to="/demo" style={{ fontSize: "var(--text-sm)" }}>Sample evidence files are on the demo page</Link>}
           </div>
         )}
 

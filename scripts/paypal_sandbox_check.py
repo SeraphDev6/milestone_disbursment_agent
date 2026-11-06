@@ -40,9 +40,6 @@ def main() -> int:
     except ValueError as e:
         fail("settings", str(e))
         return 1
-    if settings.is_mock:
-        fail("settings", "MODE=mock; set MODE=sandbox (or live) and the PayPal keys in .env")
-        return 1
     ok(
         "settings",
         f"MODE={settings.mode.value}, API {settings.paypal_api_url}, client id ends ...{settings.paypal_client_id[-4:]}",

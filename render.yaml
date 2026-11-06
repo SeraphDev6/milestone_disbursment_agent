@@ -2,7 +2,7 @@
 #
 # Render prompts for every `sync: false` value when the Blueprint is first created (they can be left blank and
 # filled in later from the dashboard). MODE is sandbox (PayPal sandbox, with the PayPal keys, ANTHROPIC_API_KEY and
-# Resend); set it to mock here for a demo without keys. The Blueprint auto-syncs, so a value changed only in the
+# Resend), so the demo is at /demo; the only other mode is live. The Blueprint auto-syncs, so a value changed only in the
 # dashboard is put back to what this file says on the next merge. One web instance runs the
 # outbound-webhook loop in-process; payouts and the daily sweep run as cron jobs here so several instances never
 # race on the same tranche (PAYOUTS_INTERVAL_SECONDS=0 on the web). Blueprint environment groups only take
@@ -38,6 +38,16 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: RESEND_API_KEY
+        sync: false
+      # Throwaway PayPal sandbox accounts the demo page shows visitors (payer approves holds; payee, a business
+      # account, connects as the grantee). Leave blank to make visitors bring their own.
+      - key: DEMO_PAYPAL_PAYER_EMAIL
+        sync: false
+      - key: DEMO_PAYPAL_PAYER_PASSWORD
+        sync: false
+      - key: DEMO_PAYPAL_PAYEE_EMAIL
+        sync: false
+      - key: DEMO_PAYPAL_PAYEE_PASSWORD
         sync: false
       - key: S3_ENDPOINT_URL
         sync: false # R2: https://<account id>.r2.cloudflarestorage.com

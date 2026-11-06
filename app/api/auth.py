@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 from sqlmodel import Field, SQLModel, select
 
-from app.api.deps import PrincipalDep, SessionDep, bearer_token, client_ip, mailer, rate_limit, show_links
+from app.api.deps import PrincipalDep, SessionDep, bearer_token, client_ip, mailer, rate_limit
 from app.db import as_utc, utcnow
 from app.models import (
     Agreement,
@@ -30,7 +30,6 @@ class MagicLinkRequest(SQLModel):
 
 class MagicLinkSent(SQLModel):
     sent: bool = True
-    dev_link: str | None = Field(default=None, description="Mock mode only: the link that would have been emailed.")
 
 
 class MagicLinkVerify(SQLModel):
@@ -69,10 +68,10 @@ def request_link(body: MagicLinkRequest, session: SessionDep, request: Request) 
     settings = request.app.state.settings
     rate_limit(request, "magic_link", client_ip(request))
     rate_limit(request, "magic_link", "email:" + body.email.strip().lower())
-    link = identity.request_magic_link(
+    identity.request_magic_link(
         session, mailer(request), body.email, settings.api_base_url, app_url=request.app.state.app_url
     )
-    return MagicLinkSent(dev_link=link if show_links(request) else None)
+    return MagicLinkSent()
 
 
 @router.post("/auth/magic-link/verify", summary="Exchange a sign-in link token for a session token")

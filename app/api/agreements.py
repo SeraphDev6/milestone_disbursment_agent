@@ -10,7 +10,7 @@ from starlette.concurrency import run_in_threadpool
 from app.ai.agents import AIError
 from app.ai.extraction import ExtractionResult, extract
 from app.api.auth import invitation_read
-from app.api.deps import AgreementAccessDep, OrgKeyDep, PrincipalDep, SessionDep, ai, mailer, rate_limit, show_links
+from app.api.deps import AgreementAccessDep, OrgKeyDep, PrincipalDep, SessionDep, ai, mailer, rate_limit
 from app.api.views import agreement_read
 from app.db import record_audit, utcnow
 from app.domain.criteria import assign_criterion_ids, criteria_hash, lint_agreement
@@ -49,9 +49,6 @@ class TranchesDraft(SQLModel):
 class AgreementCreated(SQLModel):
     agreement: AgreementRead
     invitations: list[InvitationRead]
-    dev_links: dict[str, str] = Field(
-        default_factory=dict, description="Mock mode only: invitee email -> the link that would have been emailed."
-    )
 
 
 class InviteToAgreement(SQLModel):
@@ -61,7 +58,6 @@ class InviteToAgreement(SQLModel):
 
 class InvitationSent(SQLModel):
     invitation: InvitationRead
-    dev_link: str | None = None
 
 
 class MilestonesUpdate(SQLModel):
@@ -155,12 +151,12 @@ def create_agreement(
     session.add(row)
     session.flush()
     record_audit(session, row.id, actor, "agreement_created", to_status=row.status)
-    base, links, invitations = request.app.state.settings.api_base_url, {}, []
+    base, invitations = request.app.state.settings.api_base_url, []
     invitees = [(draft.counterparty_email, InvitationKind.counterparty)] + [
         (e, InvitationKind.reviewer) for e in draft.reviewer_emails
     ]
     for email, kind in invitees:
-        inv, link = identity.invite(
+        inv, _ = identity.invite(
             session,
             mailer(request),
             kind=kind,
@@ -172,12 +168,9 @@ def create_agreement(
             commit=False,
         )
         invitations.append(inv)
-        links[inv.email] = link
     session.commit()
     return AgreementCreated(
-        agreement=agreement_read(row),
-        invitations=[invitation_read(session, i) for i in invitations],
-        dev_links=links if show_links(request) else {},
+        agreement=agreement_read(row), invitations=[invitation_read(session, i) for i in invitations]
     )
 
 
@@ -209,7 +202,7 @@ def invite_to_agreement(
         pending = identity.pending_agreement_invitations(session, a.id)
         if any(p.role == Role.payee for p in a.parties) or any(i.kind == kind for i in pending):
             raise AccessError("this agreement already has a payee or a pending payee invitation", 409)
-    inv, link = identity.invite(
+    inv, _ = identity.invite(
         session,
         mailer(request),
         kind=kind,
@@ -219,7 +212,7 @@ def invite_to_agreement(
         app_url=request.app.state.app_url,
         agreement=a,
     )
-    return InvitationSent(invitation=invitation_read(session, inv), dev_link=link if show_links(request) else None)
+    return InvitationSent(invitation=invitation_read(session, inv))
 
 
 @router.get("/agreements/{agreement_id}/invitations", summary="Invitations on this agreement")

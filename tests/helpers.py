@@ -20,10 +20,18 @@ def token_from(link: str) -> str:
     return parse_qs(urlsplit(link).query)["token"][0]
 
 
+def emailed_link(client, to: str, path: str) -> str:
+    """The latest link emailed to `to` whose path contains `path` (the test mailer keeps every message)."""
+    for mail in reversed(client.app.state.mailer.sent):
+        if mail.to == to.strip().lower() and path in mail.link:
+            return mail.link
+    raise AssertionError(f"no email to {to} with a {path} link")
+
+
 def sign_in(client, email: str) -> str:
     r = client.post("/auth/magic-link", json={"email": email})
     assert r.status_code == 200, r.text
-    r = client.post("/auth/magic-link/verify", json={"token": token_from(r.json()["dev_link"])})
+    r = client.post("/auth/magic-link/verify", json={"token": token_from(emailed_link(client, email, "/auth/"))})
     assert r.status_code == 200, r.text
     return r.json()["token"]
 
@@ -60,13 +68,11 @@ def create_draft(
     assert r.status_code == 201, r.text
     created = r.json()
     aid = created["agreement"]["id"]
+    links = {i["email"]: emailed_link(client, i["email"], "/invitations/accept") for i in created["invitations"]}
 
     payee = sign_in(client, body["counterparty_email"])
     r = accept(
-        client,
-        payee,
-        created["dev_links"][body["counterparty_email"]],
-        new_org={"name": "Riverside Reads", "paypal_email": PAYEE_PAYPAL},
+        client, payee, links[payee_email.lower()], new_org={"name": "Riverside Reads", "paypal_email": PAYEE_PAYPAL}
     )
     assert r.status_code == 200, r.text
     ctx = {
@@ -74,7 +80,7 @@ def create_draft(
         "payee": payee,
         "payer_org": payer_org,
         "payee_org": r.json()["organization"]["id"],
-        "links": created["dev_links"],
+        "links": links,
     }
     return aid, [m["id"] for m in created["agreement"]["milestones"]], ctx
 

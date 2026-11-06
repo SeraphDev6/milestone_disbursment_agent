@@ -1,10 +1,11 @@
 /**
- * Mock mode only: seed a complete grant by driving the real API, the same way tests/helpers.py does.
- * Three people (funder officer, grantee director, reviewer) each sign in with a magic link; the grantee
- * and reviewer accept their invitations with new orgs. All three sessions are kept so "Switch person"
- * can play every side.
+ * Seed a complete grant by driving the real API, the same way tests/helpers.py does. The server signs in the
+ * three people (funder officer, grantee director, reviewer) without email (POST /demo/cast); from there
+ * everything is the ordinary product: the funder creates the organization and the grant, the grantee and
+ * reviewer accept the invitations waiting in their inbox (GET /me) with new orgs. All three sessions are kept
+ * so "Switch person" can play every side.
  */
-import { api, call, tokenFromLink } from "@/api/client";
+import { api, call } from "@/api/client";
 import type { AgreementCreate } from "@/api/types";
 import { sessions } from "@/auth/session";
 
@@ -140,25 +141,28 @@ const auth = (token: string, orgId?: string) => ({
   headers: { Authorization: `Bearer ${token}`, ...(orgId ? { "X-Org-Id": orgId } : {}) },
 });
 
-async function signIn(email: string) {
-  const sent = await call(api.POST("/auth/magic-link", { body: { email } }));
-  const token = sent.dev_link && tokenFromLink(sent.dev_link);
-  if (!token) throw new Error("This server didn't return a sign-in link, so it isn't in mock mode.");
-  return call(api.POST("/auth/magic-link/verify", { body: { token } }));
+/** Accept the one invitation waiting for this person, for a new organization. */
+async function acceptWaiting(token: string, newOrg: { name: string; paypal_email?: string }) {
+  const me = await call(api.GET("/me", auth(token)));
+  const inv = me.invitations[0];
+  if (!inv) throw new Error(`No invitation is waiting for ${me.user.email}.`);
+  return call(api.POST("/invitations/{invitation_id}/accept", { params: { path: { invitation_id: inv.id } }, body: { new_org: newOrg }, ...auth(token) }));
 }
 
 /** `withheld`: SOW-style. The funder sees the work once paid, auto-release is on, and model-judged criteria need
  * the skeptic's second opinion; needs a dispute window, so it's at least 3 days. */
 export async function seedDemo(opts: { signed: boolean; disputeWindowDays?: number; withheld?: boolean }, progress: DemoProgress) {
-  const code = Math.random().toString(36).slice(2, 6);
-  const emails = {
-    funder: `officer+${code}@harbor.example.org`,
-    grantee: `director+${code}@riverside.example.org`,
-    reviewer: `auditor+${code}@sponsor.example.org`,
+  progress("Signing in the funder, the grantee and the reviewer");
+  const cast = await call(api.POST("/demo/cast"));
+  const person = (key: "funder" | "grantee" | "reviewer") => {
+    const p = cast.people.find((x) => x.key === key);
+    if (!p) throw new Error(`The server's demo cast has no ${key}.`);
+    return p;
   };
-
-  progress("Signing in the funder's program officer");
-  const funder = await signIn(emails.funder);
+  const funder = person("funder");
+  const grantee = person("grantee");
+  const reviewer = person("reviewer");
+  const emails = { funder: funder.email, grantee: grantee.email, reviewer: reviewer.email };
   const harbor = await call(api.POST("/orgs", { body: { name: "Harbor Foundation", paypal_email: "funder@example.org" }, ...auth(funder.token) }));
 
   progress("Drafting the grant and inviting the grantee and a reviewer");
@@ -176,25 +180,12 @@ export async function seedDemo(opts: { signed: boolean; disputeWindowDays?: numb
     }),
   );
   const aid = created.agreement.id;
-  const links = created.dev_links ?? {};
 
   progress("The grantee accepts for Riverside Reads");
-  const grantee = await signIn(emails.grantee);
-  const riverside = await call(
-    api.POST("/invitations/accept", {
-      body: { token: tokenFromLink(links[emails.grantee]!)!, new_org: { name: "Riverside Reads", paypal_email: "grantee@example.org" } },
-      ...auth(grantee.token),
-    }),
-  );
+  const riverside = await acceptWaiting(grantee.token, { name: "Riverside Reads", paypal_email: "grantee@example.org" });
 
   progress("The reviewer accepts for Sponsor Audit Partners");
-  const reviewer = await signIn(emails.reviewer);
-  const sponsor = await call(
-    api.POST("/invitations/accept", {
-      body: { token: tokenFromLink(links[emails.reviewer]!)!, new_org: { name: "Sponsor Audit Partners" } },
-      ...auth(reviewer.token),
-    }),
-  );
+  const sponsor = await acceptWaiting(reviewer.token, { name: "Sponsor Audit Partners" });
 
   if (opts.signed) {
     progress("Everyone signs the criteria");
