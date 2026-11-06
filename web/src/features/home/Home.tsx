@@ -69,7 +69,7 @@ function WaitingOnYou({ queue, payeeWork, loading, orgId }: { queue?: ReviewItem
                   {i.second_opinion_disagreed && " · second opinion disagreed"}
                 </span>
               </div>
-              <span className={s.queueAction}>{i.status === "disputed" ? "Re-review the dispute" : "Approve or reject"}</span>
+              <span className={s.queueAction}>{!i.yours_to_decide ? `Waiting on the ${ROLE_LABEL[i.waiting_on].toLowerCase()}; you can reject` : i.status === "disputed" ? "Re-review the dispute" : "Approve or reject"}</span>
             </li>
           ))}
           {payeeWork.map((a) => (

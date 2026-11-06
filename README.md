@@ -72,7 +72,7 @@ Everything is done as a signed-in person acting for an organization (see "Organi
 9. **Agents (MCP):** point an MCP client (Claude Desktop, Claude Code, etc.) at `<base>/mcp`. It discovers the OAuth endpoints, opens a consent page where you sign in and pick the org it acts for, then gets org-bound tools (list agreements, status, evidence, verdicts, pre-check, submit evidence, review queue, portfolio, compliance packet, drafting). Headless agents use an org API key as the bearer token. Confirming, approving, releasing, funding and disputes stay with people.
 10. **Track:** `GET /orgs/{id}/agreements?side=payer|payee|reviewer`, `GET /orgs/{id}/portfolio`, audit logs, compliance packets (JSON/PDF), and signed outbound webhooks via `POST /agreements/{id}/subscriptions`.
 
-A complete example draft is in [`tests/conftest.py`](tests/conftest.py), and [`tests/helpers.py`](tests/helpers.py) walks the whole sign-in, org and invitation flow.
+The whole thing in one file: [`sdk/python/examples/quickstart.py`](sdk/python/examples/quickstart.py) or [`sdk/typescript/examples/quickstart.ts`](sdk/typescript/examples/quickstart.ts) run steps 2 to 8 against the hosted sandbox demo (or a local dev server) and print what happened; [`webhook_receiver.py`](sdk/python/examples/webhook_receiver.py) / [`webhook-receiver.ts`](sdk/typescript/examples/webhook-receiver.ts) show step 10 from the receiving end. A complete example draft is in [`tests/conftest.py`](tests/conftest.py), and [`tests/helpers.py`](tests/helpers.py) walks the whole sign-in, org and invitation flow.
 
 ## Running it for real
 
@@ -130,6 +130,13 @@ uv run pytest -m eval tests/evals -s       # the demo's documents through the re
 uv run ruff check . && uv run ruff format .
 uv run python -m app.sdk_spec   # after changing a core operation: rewrites sdk/openapi-core.json
 ```
+
+### SDK helpers
+
+`sdk/python` and `sdk/typescript` are small dependency-free packages (`milestone-ledger`) with `verify_webhook` /
+`verifyWebhook`: signature and timestamp checks for outbound webhooks, constant-time, with stable error codes and a
+typed event. Both are tested against deliveries signed by the engine's own signer (`sdk/fixtures/webhooks.json`, from
+`scripts/sdk_fixtures.py`), so they can't drift from `app/services/outbound.py`. See `sdk/README.md`.
 
 ### SDK core spec
 

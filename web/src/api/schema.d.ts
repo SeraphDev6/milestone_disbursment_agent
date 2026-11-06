@@ -694,6 +694,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/milestones/{milestone_id}/pay-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Invoice mode: email the payer side a fresh pay link and return it (links expire; this reissues one) */
+        post: operations["resend_pay_link_milestones__milestone_id__pay_link_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/milestones/{milestone_id}/payout": {
         parameters: {
             query?: never;
@@ -1353,6 +1370,12 @@ export interface components {
              */
             require_reviewer_approval?: boolean;
             /**
+             * Reviewer Decides Withheld
+             * @description deliverable_release=on_capture: while a tranche's evidence is withheld from the payer, a tranche in review waits for an invited reviewer's approval (they see all the evidence; the payer can't judge what they can't see, but can still reject). Without a reviewer on the agreement the payer decides as usual.
+             * @default true
+             */
+            reviewer_decides_withheld?: boolean;
+            /**
              * Dispute Window Days
              * @description Escrow: days between capturing a verified tranche and paying the payee, during which the payer or a reviewer can contest it. 0 pays at once.
              * @default 0
@@ -1431,6 +1454,12 @@ export interface components {
              * @default false
              */
             require_reviewer_approval?: boolean;
+            /**
+             * Reviewer Decides Withheld
+             * @description deliverable_release=on_capture: while a tranche's evidence is withheld from the payer, a tranche in review waits for an invited reviewer's approval (they see all the evidence; the payer can't judge what they can't see, but can still reject). Without a reviewer on the agreement the payer decides as usual.
+             * @default true
+             */
+            reviewer_decides_withheld?: boolean;
             /**
              * Dispute Window Days
              * @description Escrow: days between capturing a verified tranche and paying the payee, during which the payer or a reviewer can contest it. 0 pays at once.
@@ -3183,6 +3212,13 @@ export interface components {
              * @default false
              */
             second_opinion_disagreed?: boolean;
+            /** @description Whose approval it waits for: the reviewer when the agreement requires one or the work is withheld from the payer, else the payer. A payer can always reject. */
+            waiting_on: components["schemas"]["Role"];
+            /**
+             * Yours To Decide
+             * @description This org's side is the one whose approval it waits for.
+             */
+            yours_to_decide: boolean;
         };
         /** ReviewOutcome */
         ReviewOutcome: {
@@ -5205,6 +5241,41 @@ export interface operations {
         };
     };
     release_milestones__milestone_id__release_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Which of your orgs you act for, if you belong to several. */
+                "X-Org-Id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                milestone_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettlementRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resend_pay_link_milestones__milestone_id__pay_link_post: {
         parameters: {
             query?: never;
             header?: {

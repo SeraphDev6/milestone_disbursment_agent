@@ -116,6 +116,12 @@
             "title": "Require Reviewer Approval",
             "type": "boolean"
           },
+          "reviewer_decides_withheld": {
+            "default": true,
+            "description": "deliverable_release=on_capture: while a tranche's evidence is withheld from the payer, a tranche in review waits for an invited reviewer's approval (they see all the evidence; the payer can't judge what they can't see, but can still reject). Without a reviewer on the agreement the payer decides as usual.",
+            "title": "Reviewer Decides Withheld",
+            "type": "boolean"
+          },
           "reviewer_emails": {
             "description": "Optional third-party reviewers to invite (criteria and evidence).",
             "items": {
@@ -284,6 +290,12 @@
             "default": false,
             "description": "When on, only a reviewer's approval releases a tranche in review.",
             "title": "Require Reviewer Approval",
+            "type": "boolean"
+          },
+          "reviewer_decides_withheld": {
+            "default": true,
+            "description": "deliverable_release=on_capture: while a tranche's evidence is withheld from the payer, a tranche in review waits for an invited reviewer's approval (they see all the evidence; the payer can't judge what they can't see, but can still reject). Without a reviewer on the agreement the payer decides as usual.",
+            "title": "Reviewer Decides Withheld",
             "type": "boolean"
           },
           "settlement_mode": {
@@ -4162,6 +4174,127 @@
           }
         ],
         "summary": "Payer starts a PayPal hold for one tranche",
+        "tags": [
+          "settlement"
+        ]
+      }
+    },
+    "/milestones/{milestone_id}/pay-link": {
+      "post": {
+        "operationId": "resendPayLink",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "milestone_id",
+            "required": true,
+            "schema": {
+              "title": "Milestone Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "The request body or parameters failed validation."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Invoice mode: email the payer side a fresh pay link and return it (links expire; this reissues one)",
         "tags": [
           "settlement"
         ]

@@ -43,6 +43,7 @@ export type DraftForm = {
   settlement_mode: SettlementMode;
   auto_release_threshold: number;
   require_reviewer_approval: boolean;
+  reviewer_decides_withheld: boolean;
   dispute_window_days: number;
   deliverable_release: DeliverableRelease;
   min_evidence_visibility: EvidenceVisibility;
@@ -83,6 +84,7 @@ export function blankDraft(): DraftForm {
     settlement_mode: "escrow_release",
     auto_release_threshold: 0.85,
     require_reviewer_approval: false,
+    reviewer_decides_withheld: true,
     dispute_window_days: 0,
     deliverable_release: "on_submit",
     min_evidence_visibility: "hash_only",
@@ -162,6 +164,7 @@ export function agreementOut(d: DraftForm): AgreementCreate {
     settlement_mode: d.settlement_mode,
     auto_release_threshold: d.auto_release_threshold,
     require_reviewer_approval: d.require_reviewer_approval,
+    reviewer_decides_withheld: d.reviewer_decides_withheld,
     dispute_window_days: d.dispute_window_days,
     deliverable_release: d.deliverable_release ?? "on_submit",
     min_evidence_visibility: d.min_evidence_visibility ?? "hash_only",

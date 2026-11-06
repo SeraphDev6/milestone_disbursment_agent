@@ -217,7 +217,12 @@ export function NewAgreement() {
                     <p>If you also turn on auto-release when signing, you'd pay on the model's verdict alone. A reviewer can see the evidence for you.</p>
                   </Callout>
                 )}
-                <Switch isSelected={draft.require_reviewer_approval} onChange={(v) => set({ require_reviewer_approval: v })} hint="Only an invited reviewer's approval can release a tranche in review. You can still reject.">
+                {draft.deliverable_release === "on_capture" && (
+                  <Switch isSelected={draft.reviewer_decides_withheld} onChange={(v) => set({ reviewer_decides_withheld: v })} hint="While the work is withheld from you, a tranche in review waits for your reviewer, who sees all the evidence. You can still reject. Without a reviewer on the agreement, you decide.">
+                    The reviewer judges work you can't see yet
+                  </Switch>
+                )}
+                <Switch isSelected={draft.require_reviewer_approval} onChange={(v) => set({ require_reviewer_approval: v })} hint="Only an invited reviewer's approval can release a tranche in review, withheld or not. You can still reject.">
                   Require a reviewer's approval
                 </Switch>
               </div>

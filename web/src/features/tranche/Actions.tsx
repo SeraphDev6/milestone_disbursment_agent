@@ -32,7 +32,9 @@ export function Actions({ a, m, seat, verdict, acts, rejected }: { a: AgreementR
   const check = (x: TrancheAction) => canOnTranche(seat, x, ctx);
   const payee = a.parties.find((p) => p.role === "payee")?.display_name ?? "the payee";
   const amt = money(m.amount, a.currency);
-  const reviewerOnly = approveBlockedByReviewerRule(seat, a.require_reviewer_approval);
+  const hasReviewer = a.parties.some((p) => p.role === "reviewer" && p.org_id);
+  const withheldForReviewer = a.deliverable_release === "on_capture" && !m.revealed_at && a.reviewer_decides_withheld && hasReviewer;
+  const reviewerOnly = approveBlockedByReviewerRule(seat, a.require_reviewer_approval, withheldForReviewer);
 
   async function run(label: string, fn: () => Promise<unknown>, body?: string) {
     try {
