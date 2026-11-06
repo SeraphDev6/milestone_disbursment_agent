@@ -63,6 +63,7 @@ export type ApiKeyCreated = S["ApiKeyCreated"];
 export type ReviewItem = S["ReviewItem"];
 export type Portfolio = S["Portfolio"];
 export type DemoFile = S["DemoFile"];
+export type EmailIntegration = S["EmailIntegration"];
 export type GitHubIntegration = Req<S["GitHubIntegration"], "content_type" | "events">;
 export type SubscriptionRead = Req<S["SubscriptionRead"], "events">;
 export type SubscriptionCreated = S["SubscriptionCreated"];
