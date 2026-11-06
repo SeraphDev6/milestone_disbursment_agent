@@ -521,7 +521,7 @@ export function useTrancheActions(agreementId: string, milestoneId: string, orgI
       onSuccess: done,
     }),
     review: useMutation({
-      mutationFn: (body: { decision: "approve" | "reject"; note?: string | null }) =>
+      mutationFn: (body: { decision: "approve" | "reject" | "release_met"; note?: string | null }) =>
         call(api.POST("/milestones/{milestone_id}/review", { ...m, body, ...o })),
       onSuccess: done,
     }),

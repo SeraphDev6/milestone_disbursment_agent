@@ -157,6 +157,15 @@ class MilestoneRead(MilestoneBase):
         description="deliverable_release=on_capture: when the payer's money was captured and the full evidence "
         "opened to the payer side. Unset while the evidence is withheld.",
     )
+    amount_released: Decimal = Field(
+        default=Decimal("0.00"),
+        description="Captured from the payer so far, less refunds. Below `amount` while a partial release has paid "
+        "some criteria and the rest is still on hold.",
+    )
+    criteria_paid: list[str] = Field(
+        default_factory=list,
+        description="Partial release: criteria whose share has been captured. Every id once the tranche is settled.",
+    )
     pay_path: str | None = Field(
         default=None, description="Invoice mode: where the payer pays this tranche (relative to the API), while open."
     )
@@ -214,6 +223,12 @@ class AgreementBase(SQLModel):
         description="When the payer can open the payee's full evidence: on_submit (as it arrives; usual for grants) "
         "or on_capture (only once the tranche is captured, so the payer pays on the verdict; suggested for SOWs). "
         "Part of the criteria hash both parties sign; set when the agreement is created.",
+    )
+    partial_release: bool = Field(
+        default=False,
+        description="Escrow: pay the share of a tranche its met criteria account for, by criterion weight, before "
+        "the rest is met (the hold keeps the remainder; the final capture settles the tranche). Off: a tranche pays "
+        "in full when every criterion is met, and nothing before. Part of the criteria hash when on.",
     )
     min_evidence_visibility: EvidenceVisibility = Field(
         default=EvidenceVisibility.hash_only,

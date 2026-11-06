@@ -127,9 +127,10 @@ def test_weighted_share_and_the_lint_warning_for_differing_weights():
     assert weighted_share(m.criteria, {"c2"}) == 0.25
     assert weighted_share(m.criteria, {"c1", "c2"}) == 1.0 and weighted_share(m.criteria, set()) == 0.0
     report = lint_tranches(m.amount, [m])
-    assert [i.code for i in report.issues if i.level == "warning"] == ["weights_not_yet_paid"]
+    assert [i.code for i in report.issues if i.level == "warning"] == ["weights_not_paid"]
+    assert not [i for i in lint_tranches(m.amount, [m], partial_release=True).issues if i.level == "warning"]
     m.criteria[0].weight = 1
-    assert "weights_not_yet_paid" not in {i.code for i in lint_tranches(m.amount, [m]).issues}
+    assert "weights_not_paid" not in {i.code for i in lint_tranches(m.amount, [m]).issues}
 
 
 def test_verdicts_report_the_met_share_by_weight(client):

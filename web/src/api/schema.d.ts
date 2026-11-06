@@ -758,7 +758,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Pay a captured tranche to the payee now (waives the rest of the dispute window; retries a failed payout) */
+        /** Pay a captured tranche to the payee now (waives the rest of the dispute window; retries a failed payout, including a partial share's) */
         post: operations["payout_milestones__milestone_id__payout_post"];
         delete?: never;
         options?: never;
@@ -1080,7 +1080,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Payer (admin) or reviewer approves or rejects a verdict in review */
+        /** Payer (admin) or reviewer approves, rejects, or pays the met share of a verdict in review */
         post: operations["review_milestones__milestone_id__review_post"];
         delete?: never;
         options?: never;
@@ -1549,6 +1549,12 @@ export interface components {
              */
             deliverable_release?: components["schemas"]["DeliverableRelease"];
             /**
+             * Partial Release
+             * @description Escrow: pay the share of a tranche its met criteria account for, by criterion weight, before the rest is met (the hold keeps the remainder; the final capture settles the tranche). Off: a tranche pays in full when every criterion is met, and nothing before. Part of the criteria hash when on.
+             * @default false
+             */
+            partial_release?: boolean;
+            /**
              * @description on_capture only: the least the payee may show the payer of each evidence item before capture. hash_only (pass/fail and the pinned hash), verdict_only (+ observed values), excerpt (+ the verifier's quotes and rationale) or preview. The payee picks a level at or above it per item. Signed with the criteria.
              * @default hash_only
              */
@@ -1633,6 +1639,12 @@ export interface components {
              * @default on_submit
              */
             deliverable_release?: components["schemas"]["DeliverableRelease"];
+            /**
+             * Partial Release
+             * @description Escrow: pay the share of a tranche its met criteria account for, by criterion weight, before the rest is met (the hold keeps the remainder; the final capture settles the tranche). Off: a tranche pays in full when every criterion is met, and nothing before. Part of the criteria hash when on.
+             * @default false
+             */
+            partial_release?: boolean;
             /**
              * @description on_capture only: the least the payee may show the payer of each evidence item before capture. hash_only (pass/fail and the pinned hash), verdict_only (+ observed values), excerpt (+ the verifier's quotes and rationale) or preview. The payee picks a level at or above it per item. Signed with the criteria.
              * @default hash_only
@@ -1893,7 +1905,8 @@ export interface components {
         };
         /**
          * Criterion
-         * @description One checkable condition of a tranche. A tranche releases only when every criterion is met.
+         * @description One checkable condition of a tranche. A tranche settles only when every criterion is met; with partial
+         *     release on, each criterion's weighted share can pay as soon as it is met.
          */
         "Criterion-Input": {
             /**
@@ -1935,14 +1948,15 @@ export interface components {
             due_by?: string | null;
             /**
              * Weight
-             * @description Relative weight for future partial release; unused while release is all-or-nothing.
+             * @description Relative weight within the tranche. With partial_release on, a tranche pays the share of its amount its met criteria account for by weight; otherwise weights only show the met share on the verdict.
              * @default 1
              */
             weight?: number | string;
         };
         /**
          * Criterion
-         * @description One checkable condition of a tranche. A tranche releases only when every criterion is met.
+         * @description One checkable condition of a tranche. A tranche settles only when every criterion is met; with partial
+         *     release on, each criterion's weighted share can pay as soon as it is met.
          */
         "Criterion-Output": {
             /**
@@ -1984,7 +1998,7 @@ export interface components {
             due_by?: string | null;
             /**
              * Weight
-             * @description Relative weight for future partial release; unused while release is all-or-nothing.
+             * @description Relative weight within the tranche. With partial_release on, a tranche pays the share of its amount its met criteria account for by weight; otherwise weights only show the met share on the verdict.
              * @default 1
              */
             weight?: string;
@@ -2129,6 +2143,16 @@ export interface components {
             /** @description submitted, succeeded, failed or unclaimed. */
             status: components["schemas"]["SettlementStatus"];
             /**
+             * Amount
+             * @description The captured amount this pays out or refunds.
+             */
+            amount: string;
+            /**
+             * Settlement Id
+             * @description The capture whose money this moves.
+             */
+            settlement_id: string | null;
+            /**
              * Error
              * @description PayPal's error when the attempt failed.
              */
@@ -2171,6 +2195,11 @@ export interface components {
              */
             paypal_ref?: string | null;
             status: components["schemas"]["SettlementStatus"];
+            /**
+             * Amount
+             * @description The captured amount this pays out or refunds.
+             */
+            amount: string;
             /**
              * Id
              * @description Disbursement attempt id.
@@ -3101,6 +3130,17 @@ export interface components {
              */
             revealed_at?: string | null;
             /**
+             * Amount Released
+             * @description Captured from the payer so far, less refunds. Below `amount` while a partial release has paid some criteria and the rest is still on hold.
+             * @default 0.00
+             */
+            amount_released?: string;
+            /**
+             * Criteria Paid
+             * @description Partial release: criteria whose share has been captured. Every id once the tranche is settled.
+             */
+            criteria_paid?: string[];
+            /**
              * Pay Path
              * @description Invoice mode: where the payer pays this tranche (relative to the API), while open.
              */
@@ -3439,10 +3479,10 @@ export interface components {
         ReviewRequest: {
             /**
              * Decision
-             * @description approve releases the tranche (it settles when funded); reject sends it back with what's missing.
+             * @description approve releases the tranche (it settles when funded); reject sends it back with what's missing; release_met (agreements with partial_release) pays the share the verdict's met criteria account for and sends the rest back.
              * @enum {string}
              */
-            decision: "approve" | "reject";
+            decision: "approve" | "reject" | "release_met";
             /**
              * Note
              * @description Shown to the payee and kept in the audit log.
@@ -3594,6 +3634,21 @@ export interface components {
             /** @description submitted, succeeded, failed or expired. */
             status: components["schemas"]["SettlementStatus"];
             /**
+             * Amount
+             * @description What this attempt captures or invoices (a share, with partial release).
+             */
+            amount: string;
+            /**
+             * Final
+             * @description Escrow: whether this capture closes the hold. False for a partial share.
+             */
+            final: boolean;
+            /**
+             * Criterion Ids
+             * @description The criteria this capture pays for.
+             */
+            criterion_ids: string[];
+            /**
              * Error
              * @description PayPal's error when the attempt failed.
              */
@@ -3638,6 +3693,22 @@ export interface components {
             paypal_ref?: string | null;
             /** @description Mirrored from PayPal responses and webhooks. */
             status: components["schemas"]["SettlementStatus"];
+            /**
+             * Amount
+             * @description What this attempt captures or invoices: the whole tranche, or (partial release) the share of it the newly met criteria account for by weight.
+             */
+            amount: string;
+            /**
+             * Final
+             * @description Escrow: this capture closes the hold (final_capture). False for a partial release, which leaves the remainder on hold for the criteria still to be met.
+             * @default true
+             */
+            final?: boolean;
+            /**
+             * Criterion Ids
+             * @description Partial release: the criteria this capture pays for. Empty for a whole-tranche release.
+             */
+            criterion_ids?: string[];
             /**
              * Id
              * @description Settlement attempt id.
@@ -3862,7 +3933,7 @@ export interface components {
             created_at: string;
             /**
              * Weighted Share
-             * @description The share of the tranche the met criteria account for, by criterion weight (1.0 when all are met). Reported for partial release; the release itself is still all-or-nothing.
+             * @description The share of the tranche the met criteria account for, by criterion weight (1.0 when all are met). With partial_release on, this share of the tranche can be paid now.
              */
             weighted_share?: number | null;
         };

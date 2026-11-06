@@ -110,6 +110,12 @@
             "default": "hash_only",
             "description": "on_capture only: the least the payee may show the payer of each evidence item before capture. hash_only (pass/fail and the pinned hash), verdict_only (+ observed values), excerpt (+ the verifier's quotes and rationale) or preview. The payee picks a level at or above it per item. Signed with the criteria."
           },
+          "partial_release": {
+            "default": false,
+            "description": "Escrow: pay the share of a tranche its met criteria account for, by criterion weight, before the rest is met (the hold keeps the remainder; the final capture settles the tranche). Off: a tranche pays in full when every criterion is met, and nothing before. Part of the criteria hash when on.",
+            "title": "Partial Release",
+            "type": "boolean"
+          },
           "require_reviewer_approval": {
             "default": false,
             "description": "When on, only a reviewer's approval releases a tranche in review.",
@@ -269,6 +275,12 @@
             "$ref": "#/components/schemas/EvidenceVisibility",
             "default": "hash_only",
             "description": "on_capture only: the least the payee may show the payer of each evidence item before capture. hash_only (pass/fail and the pinned hash), verdict_only (+ observed values), excerpt (+ the verifier's quotes and rationale) or preview. The payee picks a level at or above it per item. Signed with the criteria."
+          },
+          "partial_release": {
+            "default": false,
+            "description": "Escrow: pay the share of a tranche its met criteria account for, by criterion weight, before the rest is met (the hold keeps the remainder; the final capture settles the tranche). Off: a tranche pays in full when every criterion is met, and nothing before. Part of the criteria hash when on.",
+            "title": "Partial Release",
+            "type": "boolean"
           },
           "parties": {
             "description": "Payer, payee and any reviewers that have joined.",
@@ -533,7 +545,7 @@
         "type": "object"
       },
       "Criterion-Input": {
-        "description": "One checkable condition of a tranche. A tranche releases only when every criterion is met.",
+        "description": "One checkable condition of a tranche. A tranche settles only when every criterion is met; with partial\nrelease on, each criterion's weighted share can pay as soon as it is met.",
         "properties": {
           "check_id": {
             "anyOf": [
@@ -616,7 +628,7 @@
               }
             ],
             "default": "1",
-            "description": "Relative weight for future partial release; unused while release is all-or-nothing.",
+            "description": "Relative weight within the tranche. With partial_release on, a tranche pays the share of its amount its met criteria account for by weight; otherwise weights only show the met share on the verdict.",
             "title": "Weight"
           }
         },
@@ -630,7 +642,7 @@
         "type": "object"
       },
       "Criterion-Output": {
-        "description": "One checkable condition of a tranche. A tranche releases only when every criterion is met.",
+        "description": "One checkable condition of a tranche. A tranche settles only when every criterion is met; with partial\nrelease on, each criterion's weighted share can pay as soon as it is met.",
         "properties": {
           "check_id": {
             "anyOf": [
@@ -704,7 +716,7 @@
           },
           "weight": {
             "default": "1",
-            "description": "Relative weight for future partial release; unused while release is all-or-nothing.",
+            "description": "Relative weight within the tranche. With partial_release on, a tranche pays the share of its amount its met criteria account for by weight; otherwise weights only show the met share on the verdict.",
             "title": "Weight",
             "type": "string"
           }
@@ -800,6 +812,11 @@
       },
       "DisbursementAttempt": {
         "properties": {
+          "amount": {
+            "description": "The captured amount this pays out or refunds.",
+            "title": "Amount",
+            "type": "string"
+          },
           "attempt": {
             "description": "1 for the first try; a failed payout retries with the next number.",
             "title": "Attempt",
@@ -854,6 +871,18 @@
             "description": "Payout item id, referenced payout id or refund id from PayPal.",
             "title": "Paypal Ref"
           },
+          "settlement_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The capture whose money this moves.",
+            "title": "Settlement Id"
+          },
           "status": {
             "$ref": "#/components/schemas/SettlementStatus",
             "description": "submitted, succeeded, failed or unclaimed."
@@ -873,6 +902,8 @@
           "idempotency_key",
           "paypal_ref",
           "status",
+          "amount",
+          "settlement_id",
           "error",
           "created_at",
           "updated_at"
@@ -892,6 +923,11 @@
       },
       "DisbursementRead": {
         "properties": {
+          "amount": {
+            "description": "The captured amount this pays out or refunds.",
+            "title": "Amount",
+            "type": "string"
+          },
           "attempt": {
             "description": "1 for the first try; a failed payout retries with the next number.",
             "minimum": 1.0,
@@ -938,6 +974,7 @@
           "attempt",
           "idempotency_key",
           "status",
+          "amount",
           "id",
           "milestone_status"
         ],
@@ -1850,6 +1887,12 @@
             "title": "Amount",
             "type": "string"
           },
+          "amount_released": {
+            "default": "0.00",
+            "description": "Captured from the payer so far, less refunds. Below `amount` while a partial release has paid some criteria and the rest is still on hold.",
+            "title": "Amount Released",
+            "type": "string"
+          },
           "awaiting_approval": {
             "default": false,
             "description": "Funding was started and PayPal is waiting for the payer to approve the hold; clients poll while this is set. Cleared when the hold is placed, the payer cancels, or funding is started again.",
@@ -1876,6 +1919,14 @@
             },
             "minItems": 1,
             "title": "Criteria",
+            "type": "array"
+          },
+          "criteria_paid": {
+            "description": "Partial release: criteria whose share has been captured. Every id once the tranche is settled.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Criteria Paid",
             "type": "array"
           },
           "due_date": {
@@ -2227,10 +2278,11 @@
         ],
         "properties": {
           "decision": {
-            "description": "approve releases the tranche (it settles when funded); reject sends it back with what's missing.",
+            "description": "approve releases the tranche (it settles when funded); reject sends it back with what's missing; release_met (agreements with partial_release) pays the share the verdict's met criteria account for and sends the rest back.",
             "enum": [
               "approve",
-              "reject"
+              "reject",
+              "release_met"
             ],
             "title": "Decision",
             "type": "string"
@@ -2267,6 +2319,11 @@
       },
       "SettlementAttempt": {
         "properties": {
+          "amount": {
+            "description": "What this attempt captures or invoices (a share, with partial release).",
+            "title": "Amount",
+            "type": "string"
+          },
           "attempt": {
             "description": "1 for the first try; a failed release retries with the next number.",
             "title": "Attempt",
@@ -2277,6 +2334,14 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "criterion_ids": {
+            "description": "The criteria this capture pays for.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Criterion Ids",
+            "type": "array"
           },
           "error": {
             "anyOf": [
@@ -2289,6 +2354,11 @@
             ],
             "description": "PayPal's error when the attempt failed.",
             "title": "Error"
+          },
+          "final": {
+            "description": "Escrow: whether this capture closes the hold. False for a partial share.",
+            "title": "Final",
+            "type": "boolean"
           },
           "id": {
             "description": "Settlement attempt id.",
@@ -2340,6 +2410,9 @@
           "idempotency_key",
           "paypal_ref",
           "status",
+          "amount",
+          "final",
+          "criterion_ids",
           "error",
           "created_at",
           "updated_at"
@@ -2358,11 +2431,30 @@
       },
       "SettlementRead": {
         "properties": {
+          "amount": {
+            "description": "What this attempt captures or invoices: the whole tranche, or (partial release) the share of it the newly met criteria account for by weight.",
+            "title": "Amount",
+            "type": "string"
+          },
           "attempt": {
             "description": "Attempt number; part of the PayPal idempotency key.",
             "minimum": 1.0,
             "title": "Attempt",
             "type": "integer"
+          },
+          "criterion_ids": {
+            "description": "Partial release: the criteria this capture pays for. Empty for a whole-tranche release.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Criterion Ids",
+            "type": "array"
+          },
+          "final": {
+            "default": true,
+            "description": "Escrow: this capture closes the hold (final_capture). False for a partial release, which leaves the remainder on hold for the criteria still to be met.",
+            "title": "Final",
+            "type": "boolean"
           },
           "id": {
             "description": "Settlement attempt id.",
@@ -2418,6 +2510,7 @@
           "mode",
           "idempotency_key",
           "status",
+          "amount",
           "id",
           "milestone_status"
         ],
@@ -2743,7 +2836,7 @@
                 "type": "null"
               }
             ],
-            "description": "The share of the tranche the met criteria account for, by criterion weight (1.0 when all are met). Reported for partial release; the release itself is still all-or-nothing.",
+            "description": "The share of the tranche the met criteria account for, by criterion weight (1.0 when all are met). With partial_release on, this share of the tranche can be paid now.",
             "title": "Weighted Share"
           }
         },
@@ -4427,7 +4520,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Pay a captured tranche to the payee now (waives the rest of the dispute window; retries a failed payout)",
+        "summary": "Pay a captured tranche to the payee now (waives the rest of the dispute window; retries a failed payout, including a partial share's)",
         "tags": [
           "settlement"
         ]
@@ -4821,7 +4914,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Payer (admin) or reviewer approves or rejects a verdict in review",
+        "summary": "Payer (admin) or reviewer approves, rejects, or pays the met share of a verdict in review",
         "tags": [
           "evidence"
         ]

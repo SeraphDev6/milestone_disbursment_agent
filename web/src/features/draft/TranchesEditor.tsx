@@ -216,7 +216,7 @@ function CriterionEditor({
           step={0.5}
           value={Number(c.weight) || 1}
           onChange={(v) => onChange({ weight: v === null || v === undefined || Number.isNaN(v) ? "1" : String(v) })}
-          description="Relative to the tranche's other criteria. The verdict reports the met share by weight; release itself is still all-or-nothing."
+          description="Relative to the tranche's other criteria. With partial release on, this criterion's share of the tranche pays as soon as it is met; otherwise the verdict only reports the met share."
         />
         <RadioGroup id={fieldId(`${base}.verification`)} label="Who decides" value={c.verification} options={VERIFICATION} onChange={(v) => onChange({ verification: v })} />
         {c.verification === "check" && (

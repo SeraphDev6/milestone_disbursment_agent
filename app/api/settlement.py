@@ -133,7 +133,8 @@ def _disbursement_read(d, m) -> DisbursementRead:
 @router.post(
     "/milestones/{milestone_id}/payout",
     openapi_extra={"x-sdk-core": "payoutMilestone"},
-    summary="Pay a captured tranche to the payee now (waives the rest of the dispute window; retries a failed payout)",
+    summary="Pay a captured tranche to the payee now (waives the rest of the dispute window; retries a failed "
+    "payout, including a partial share's)",
 )
 def payout(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep, request: Request) -> DisbursementRead:
     access, m = auth

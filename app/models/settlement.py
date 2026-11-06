@@ -2,9 +2,9 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime
+from sqlalchemy import JSON, DateTime
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.columns import enum_type, fk, id_field, timestamp, utcnow
@@ -26,6 +26,22 @@ class SettlementBase(SQLModel):
     status: SettlementStatus = Field(
         sa_type=enum_type(SettlementStatus, 16), description="Mirrored from PayPal responses and webhooks."
     )
+    amount: Decimal = Field(
+        max_digits=14,
+        decimal_places=2,
+        description="What this attempt captures or invoices: the whole tranche, or (partial release) the share of "
+        "it the newly met criteria account for by weight.",
+    )
+    final: bool = Field(
+        default=True,
+        description="Escrow: this capture closes the hold (final_capture). False for a partial release, which leaves "
+        "the remainder on hold for the criteria still to be met.",
+    )
+    criterion_ids: list[str] = Field(
+        default_factory=list,
+        sa_type=JSON,
+        description="Partial release: the criteria this capture pays for. Empty for a whole-tranche release.",
+    )
 
 
 class Settlement(SettlementBase, table=True):
@@ -41,6 +57,7 @@ class Settlement(SettlementBase, table=True):
     )
 
     milestone: "Milestone" = Relationship(back_populates="settlements")
+    disbursements: list["Disbursement"] = Relationship(back_populates="settlement")
 
 
 class SettlementRead(SettlementBase):
@@ -61,6 +78,9 @@ class DisbursementBase(SQLModel):
         default=None, max_length=128, index=True, description="Payout item, payout batch or refund id."
     )
     status: SettlementStatus = Field(sa_type=enum_type(SettlementStatus, 16))
+    amount: Decimal = Field(
+        max_digits=14, decimal_places=2, description="The captured amount this pays out or refunds."
+    )
 
 
 class Disbursement(DisbursementBase, table=True):
@@ -68,6 +88,7 @@ class Disbursement(DisbursementBase, table=True):
 
     id: str = id_field()
     milestone_id: str | None = fk("milestones.id")
+    settlement_id: str | None = fk("settlements.id", optional=True)  # the capture whose money moves
     error: str | None = Field(default=None, max_length=500)
     created_at: datetime = timestamp()
     updated_at: datetime = Field(
@@ -75,6 +96,7 @@ class Disbursement(DisbursementBase, table=True):
     )
 
     milestone: "Milestone" = Relationship(back_populates="disbursements")
+    settlement: Optional["Settlement"] = Relationship(back_populates="disbursements")
 
 
 class DisbursementRead(DisbursementBase):

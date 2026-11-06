@@ -19,7 +19,7 @@ from sqlmodel import Session, select
 from app.db.audit import verify_chain
 from app.domain.criteria import weighted_share
 from app.models import Agreement, AuditEvent, LedgerEntry, Milestone, Role, SkepticPass
-from app.services import disclosure
+from app.services import disclosure, settlement
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -88,6 +88,8 @@ def milestone_section(session: Session, m: Milestone, role: Role | str | None = 
         "id": m.id,
         "title": m.title,
         "amount": str(m.amount),
+        "amount_released": str(settlement.released(m) - settlement.refunded(m)),
+        "criteria_paid": sorted(settlement.paid_criteria(m)),
         "due_date": m.due_date.isoformat() if m.due_date else None,
         "status": m.status,
         "revealed_at": _iso(m.revealed_at),
@@ -149,12 +151,23 @@ def milestone_section(session: Session, m: Milestone, role: Role | str | None = 
         "reviews": [
             {"at": _iso(e.at), "actor": e.actor, "action": e.action, "note": (e.detail or {}).get("note")}
             for e in events
-            if e.action in ("review_approved", "review_rejected", "disputed", "contested", "contest_resolved")
+            if e.action
+            in (
+                "review_approved",
+                "review_released_share",
+                "review_rejected",
+                "disputed",
+                "contested",
+                "contest_resolved",
+            )
         ],
         "settlements": [
             {
                 "attempt": s.attempt,
                 "mode": s.mode,
+                "amount": str(s.amount),
+                "final": s.final,
+                "criterion_ids": s.criterion_ids,
                 "idempotency_key": s.idempotency_key,
                 "paypal_ref": s.paypal_ref,
                 "status": s.status,
@@ -168,6 +181,8 @@ def milestone_section(session: Session, m: Milestone, role: Role | str | None = 
             {
                 "kind": d.kind,
                 "attempt": d.attempt,
+                "amount": str(d.amount),
+                "capture_id": d.settlement.paypal_ref if d.settlement else None,
                 "idempotency_key": d.idempotency_key,
                 "paypal_ref": d.paypal_ref,
                 "status": d.status,
@@ -409,9 +424,19 @@ def render_pdf(packet: dict) -> bytes:
             flow += [
                 _p("Payments", h3),
                 _table(
-                    [["Attempt", "Mode", "PayPal ref", "Status"]]
-                    + [[s["attempt"], s["mode"], s["paypal_ref"], s["status"]] for s in m["settlements"]],
-                    [0.7 * inch, 1.5 * inch, 2.8 * inch, 1.5 * inch],
+                    [["Attempt", "Mode", "Amount", "For", "PayPal ref", "Status"]]
+                    + [
+                        [
+                            s["attempt"],
+                            s["mode"],
+                            s["amount"],
+                            ", ".join(s["criterion_ids"]) if not s["final"] else "all",
+                            s["paypal_ref"],
+                            s["status"],
+                        ]
+                        for s in m["settlements"]
+                    ],
+                    [0.6 * inch, 1.2 * inch, 0.9 * inch, 0.9 * inch, 1.9 * inch, 1.0 * inch],
                     small,
                 ),
             ]
