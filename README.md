@@ -74,6 +74,35 @@ Everything is done as a signed-in person acting for an organization (see "Organi
 
 The whole thing in one file: [`sdk/python/examples/quickstart.py`](sdk/python/examples/quickstart.py) or [`sdk/typescript/examples/quickstart.ts`](sdk/typescript/examples/quickstart.ts) run steps 2 to 8 against the hosted sandbox demo (or a local dev server) and print what happened; [`webhook_receiver.py`](sdk/python/examples/webhook_receiver.py) / [`webhook-receiver.ts`](sdk/typescript/examples/webhook-receiver.ts) show step 10 from the receiving end. A complete example draft is in [`tests/conftest.py`](tests/conftest.py), and [`tests/helpers.py`](tests/helpers.py) walks the whole sign-in, org and invitation flow.
 
+## Integrate
+
+Everything the web app does goes through the REST API, so your own system can too. The pieces, in the order you'll
+use them:
+
+- **Install the helpers:** `pip install ./sdk/python` or `npm install ./sdk/typescript` (`milestone-ledger`; on PyPI
+  and npm once #18 lands). Dependency-free; they verify webhooks and type the events. Calls to the API are plain HTTP
+  for now: the [core spec](sdk/openapi-core.json) is kept generator-ready for an APIMatic or OpenAPI client (#15).
+- **Read the reference:** [SDK reference](https://seraphdev6.github.io/milestone_disbursment_agent/sdk/reference.html)
+  (the core operations, with examples, error semantics and the conventions: bearer auth, `X-Org-Id`, idempotency,
+  money and time formats) and the full API at [app.milestone-ledger.com/api/docs](https://app.milestone-ledger.com/api/docs).
+- **The core flow,** by operation id: `extractAgreement` or `extractAgreementText` to propose tranches from a document,
+  `createAgreement` (as the payer org) to draft and invite, `getAgreement` and `confirmAgreement` for each party to
+  sign the criteria hash, `fundMilestone` for the PayPal hold (escrow), `precheckEvidence` and `submitEvidence` or
+  `uploadEvidence` for the payee, `getVerdict`, `reviewMilestone` when a person must decide, `releaseMilestone` and
+  `payoutMilestone` to move the money, `getLedger` for the record, and `createSubscription` for signed webhooks.
+- **Start from the quickstart:** [`sdk/python/examples/quickstart.py`](sdk/python/examples/quickstart.py) or
+  [`sdk/typescript/examples/quickstart.ts`](sdk/typescript/examples/quickstart.ts) run that flow end to end against the
+  hosted sandbox demo in about sixty lines.
+- **Hear about changes:** subscribe a URL to an agreement's events and verify every delivery with `verify_webhook` /
+  `verifyWebhook` (HMAC over timestamp and body, replay window, stable error codes). The example receivers
+  ([`webhook_receiver.py`](sdk/python/examples/webhook_receiver.py), [`webhook-receiver.ts`](sdk/typescript/examples/webhook-receiver.ts))
+  mark settled tranches paid in their own records and ignore retries they've handled.
+- **Let an agent do it:** the same operations are MCP tools at `/mcp` (OAuth for people, an org API key for headless
+  agents); see "Try the flow", step 9.
+
+Licensing: the engine is AGPL-3.0; everything under `sdk/` (packages, examples, fixtures, the core spec) is Apache-2.0,
+so integrating with a deployment never pulls your code under the AGPL.
+
 ## Running it for real
 
 Two scheduled jobs and a few settings turn a local run into a deployment (all in `.env.example`):
@@ -217,4 +246,6 @@ privacy and AI governance) is tracked in
 
 ## License
 
-[AGPL-3.0-only](LICENSE).
+The engine is [AGPL-3.0-only](LICENSE). The SDK packages, examples, fixtures and the core spec under
+[`sdk/`](sdk/README.md) are Apache-2.0 (each package carries its own `LICENSE`), so a product that integrates with a
+Milestone Ledger deployment through the API, the SDK or webhooks is not an AGPL work.
