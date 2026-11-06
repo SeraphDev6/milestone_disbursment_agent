@@ -353,6 +353,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/orgs/{org_id}/open-work": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Tranches this org can earn as payee: open for evidence, with their criteria and any rejection
+         * @description For an agent (or a person) working as the payee: everything that can be submitted against right now.
+         *     A tranche is open while it is pending, funded or overdue; one in review, verifying or paid is not.
+         */
+        get: operations["open_work_orgs__org_id__open_work_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/orgs/{org_id}/portfolio": {
         parameters: {
             query?: never;
@@ -1879,7 +1900,7 @@ export interface components {
              * Key
              * @enum {string}
              */
-            key: "agreement" | "sign_in_pdf" | "sign_in" | "budget" | "report" | "report_draft" | "thin";
+            key: "agreement" | "sow" | "sign_in_pdf" | "sign_in" | "budget" | "report" | "report_draft" | "thin";
             /**
              * Name
              * @description File name; GET /demo/files/{name} serves it.
@@ -3164,6 +3185,21 @@ export interface components {
              */
             source_quote: string;
         };
+        /** Rejection */
+        Rejection: {
+            /**
+             * Note
+             * @description What the reviewer wrote.
+             */
+            note: string | null;
+            /**
+             * Missing
+             * @description Per unmet criterion: criterion_id and what to send instead.
+             */
+            missing: {
+                [key: string]: unknown;
+            }[];
+        };
         /** RepoRead */
         RepoRead: {
             /**
@@ -3661,6 +3697,45 @@ export interface components {
          * @enum {string}
          */
         VerificationMethod: "check" | "model" | "human";
+        /**
+         * WorkItem
+         * @description A tranche open to this org as payee: what it pays, what it needs, and what was missing last time.
+         */
+        WorkItem: {
+            /** Agreement Id */
+            agreement_id: string;
+            /** Agreement Title */
+            agreement_title: string;
+            /** Milestone Id */
+            milestone_id: string;
+            /** Milestone Title */
+            milestone_title: string;
+            /** Amount */
+            amount: string;
+            /** Currency */
+            currency: string;
+            /** Due Date */
+            due_date: string | null;
+            status: components["schemas"]["MilestoneStatus"];
+            /**
+             * Funded
+             * @description Escrow: the payer's hold is in place, so a verified tranche pays at once.
+             */
+            funded: boolean;
+            settlement_mode: components["schemas"]["SettlementMode"];
+            /**
+             * Criteria
+             * @description What the evidence must show; precheck_evidence tests a draft.
+             */
+            criteria: components["schemas"]["Criterion-Output"][];
+            /** @description Set when the last submission was rejected. */
+            last_rejection: components["schemas"]["Rejection"] | null;
+            /**
+             * Submit With
+             * @description The tool to use: submit_evidence (text, links, data) or the uploads endpoint for files.
+             */
+            submit_with: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -4529,6 +4604,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    open_work_orgs__org_id__open_work_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkItem"][];
                 };
             };
             /** @description Validation Error */

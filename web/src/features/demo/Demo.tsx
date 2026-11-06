@@ -11,7 +11,7 @@ import { sessions, useSessions } from "@/auth/session";
 import { money } from "@/domain/format";
 import { MILESTONE_STAMPS } from "@/domain/status";
 import { Busy, Button, Callout, clearToasts, CopyButton, Facts, Glyph, layout, NumberField, PageHeader, RadioGroup, Sheet, Stamp, TextField, toast } from "@/design/components";
-import { demoStore, fetchDemoFile, seedDemo, SIGN_IN_DATE, type DemoKind, type DemoPerson, type DemoRecord } from "./seed";
+import { demoStore, fetchDemoFile, seedDemo, SIGN_IN_DATE, type DemoAgent, type DemoKind, type DemoPerson, type DemoRecord } from "./seed";
 import s from "./Demo.module.css";
 
 /**
@@ -49,6 +49,7 @@ export function Demo() {
           {record?.extraction && <Proposed record={record} />}
           {record?.kind === "sow" && <GitHubSheet record={record} />}
           {record && <Shortcuts record={record} />}
+          {record && <AgentSheet record={record} onChange={setRecord} />}
         </div>
         <div className={layout.stack}>
           <Script />
@@ -335,6 +336,7 @@ function Script() {
     ["Review", "As the funder or reviewer, read the verdict and its citations, then approve. The hold is captured. For tranche 2, the finished report is met and cited; the draft with its TODOs lands in review."],
     ["Window", "With a dispute window, the payment waits there: contest it as the reviewer, or pay now as the funder."],
     ["Same engine", "Load the SOW with a repo of yours. As the contractor, merge a pull request carrying the milestone's label; CI green verifies it and the invoice goes out. As the client, open the pay link and pay it in PayPal's sandbox."],
+    ["Agent", "Create an agent key for the payee and connect Claude Code to /mcp with it. Ask it to call open_work and submit evidence: the tranche verifies and pays the same way."],
     ["Record", "Open the ledger, the activity log and the compliance packet: every step, cited and timestamped."],
   ];
   return (
@@ -381,6 +383,61 @@ function Account({ label, email, password }: { label: string; email: string; pas
         <span className={layout.row}><code>{password}</code><CopyButton value={password} label={`Copy the ${label} password`} /></span>
       </dd>
     </div>
+  );
+}
+
+/** Beat 7: an AI agent does the payee's work over MCP. Mints an org API key for the payee (the real product's
+ * settings page does the same) and shows how to connect an MCP client with it. */
+function AgentSheet({ record, onChange }: { record: DemoRecord; onChange: (r: DemoRecord) => void }) {
+  const payee = record.people.find((p) => p.key === "grantee")!;
+  const [busy, setBusy] = useState(false);
+  const mcpUrl = `${window.location.origin}/mcp`;
+  async function mint() {
+    const token = tokenFor(payee.userId);
+    if (!token) return toast("The payee isn't signed in any more; load a fresh demo.", { tone: "error" });
+    setBusy(true);
+    try {
+      const key = await call(api.POST("/orgs/{org_id}/api-keys", { params: { path: { org_id: payee.orgId } }, body: { name: "demo agent", org_role: "member" }, headers: { Authorization: `Bearer ${token}` } }));
+      const agent: DemoAgent = { token: key.token, orgId: payee.orgId, orgName: payee.orgName, createdAt: new Date().toISOString() };
+      const next = { ...record, agent };
+      demoStore.set(next);
+      onChange(next);
+      toast(`Agent key for ${payee.orgName} created`, { body: "Connect an MCP client with it; the tools act as the payee." });
+    } catch (e) {
+      toast("Couldn't create the key", { body: errorMessage(e), tone: "error" });
+    } finally {
+      setBusy(false);
+    }
+  }
+  const a = record.agent;
+  const snippet = a ? `claude mcp add --transport http milestone-ledger ${mcpUrl} --header "Authorization: Bearer ${a.token}"` : "";
+  const prompt = `You are ${payee.orgName}'s agent on Milestone Ledger. Call open_work for org ${payee.orgId}, pick the first tranche, precheck_evidence with a draft that meets each criterion, then submit_evidence. Report the verdict with get_verdict.`;
+  return (
+    <Sheet title={`Let an agent be the ${payee.role.toLowerCase()}`}>
+      <div className={layout.stack}>
+        <p className={s.muted}>
+          The same engine, driven by an AI agent over MCP: it asks <code>open_work</code> what {payee.orgName} can earn and what each tranche needs, drafts and pre-checks evidence, submits it, and gets paid when it verifies. People still fund, sign and approve.
+        </p>
+        {!a ? (
+          <div><Button icon="key" isPending={busy} onPress={mint}>Create an agent key for {payee.orgName}</Button></div>
+        ) : (
+          <dl className={s.accounts}>
+            <div className={s.account}>
+              <dt>Connect Claude Code (or any MCP client that sends a bearer header)</dt>
+              <dd><span className={layout.row}><code>{snippet}</code><CopyButton value={snippet} label="Copy the MCP connection command" /></span></dd>
+            </div>
+            <div className={s.account}>
+              <dt>Then ask it</dt>
+              <dd><span className={layout.row}><code>{prompt}</code><CopyButton value={prompt} label="Copy the prompt" /></span></dd>
+            </div>
+            <div className={s.account}>
+              <dt>The key</dt>
+              <dd><span className={layout.row}><code>{a.token}</code><CopyButton value={a.token} label="Copy the agent key" /></span><span className={s.muted}>Acts as a member of {a.orgName}: it can read and submit evidence, never fund, sign or approve. Revoke it from the organization's settings.</span></dd>
+            </div>
+          </dl>
+        )}
+      </div>
+    </Sheet>
   );
 }
 
