@@ -35,5 +35,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked --no-dev
+        working-directory: .
+      - name: Start the engine with its stand-ins (PayPal, email, GitHub, model)
+        run: |
+          uv run python scripts/dev_server.py --port 8765 --database-url sqlite:///./contract.db > dev_server.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://localhost:8765/api/health && break; sleep 1; done
+          curl -sf http://localhost:8765/api/health
+        working-directory: .
       - run: npm ci
-      - run: npm run check
+      - name: Build, unit tests, and the quickstart against the running engine (contract test)
+        run: npm run check
+        env:
+          MDE_BASE_URL: http://localhost:8765/api
+      - name: Engine log
+        if: failure()
+        run: cat dev_server.log
+        working-directory: .

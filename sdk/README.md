@@ -23,6 +23,11 @@ MDE_BASE_URL=https://app.milestone-ledger.com/api npx tsx sdk/typescript/example
 # or locally: uv run python scripts/dev_server.py --port 8765, then MDE_BASE_URL=http://localhost:8765/api
 ```
 
+Both quickstarts double as contract tests: `tests/test_sdk_examples.py` runs the Python one against the hermetic app,
+and the TypeScript package's `test/quickstart.test.ts` runs the TypeScript one against a running engine when
+`MDE_BASE_URL` is set (CI starts `scripts/dev_server.py` and points it there), so an API change that breaks the core
+flow fails the build in both languages.
+
 `python/examples/webhook_receiver.py` and `typescript/examples/webhook-receiver.ts` are the smallest real integration:
 a receiver that verifies each delivery with the SDK and marks settled tranches paid in its own `paid.json`, ignoring
 retries it has already handled. `tests/test_sdk_examples.py` runs the Python quickstart against the hermetic app and
