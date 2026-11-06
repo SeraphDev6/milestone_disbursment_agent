@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "demo"
 
 AGREEMENT = "Riverside Literacy Grant Agreement.pdf"
+SOW = "Checkout redesign SOW.pdf"
 SIGN_IN = "Spring workshop sign-in sheets (register).csv"
 SIGN_IN_PDF = "Spring workshop sign-in sheets (signed).pdf"
 BUDGET = "Spring workshop budget report.csv"
@@ -47,6 +48,7 @@ ACTUAL_SPEND = "9800.50"
 
 # PDF metadata dates: the agreement's signing date and the report's cover date, so `dated_by` reads them.
 AGREEMENT_DATE = "D:20270115100000+00'00'"
+SOW_DATE = "D:20270201090000+00'00'"
 SIGN_IN_DATE = "D:20270522163000+00'00'"  # the last workshop session
 REPORT_DATE = "D:20270912090000+00'00'"
 
@@ -206,6 +208,79 @@ def grant_agreement() -> bytes:
         ),
     ]
     return _pdf(story, f"Grant Agreement {GRANT_NO}", FUNDER, AGREEMENT_DATE)
+
+
+# --- the SOW (the "same engine" beat: a contractor paid by invoice when a labelled PR merges with CI green) ---------
+
+CLIENT = "Acme Retail"
+CONTRACTOR = "Dev Co"
+
+
+def sow_agreement() -> bytes:
+    s = _styles()
+    p = lambda text, style="body": Paragraph(text, s[style])
+    story = [
+        p("STATEMENT OF WORK", "title"),
+        p("SOW No. AR-2027-03 · Checkout redesign · Effective February 1, 2027", "sub"),
+        Spacer(1, 14),
+        p(
+            f"This Statement of Work (the “SOW”) is made under the Master Services Agreement dated January 10, 2027 "
+            f"between <b>{CLIENT}</b>, Inc., 1200 Commerce Way, Austin, TX 78701 (the “Client”), and <b>{CONTRACTOR}</b> LLC, "
+            f"55 Foundry Street, Portland, OR 97209 (the “Contractor”)."
+        ),
+        p("1. Scope", "h"),
+        p(
+            "The Contractor will redesign the checkout of the Client's web store (repository acme-retail/storefront on "
+            "GitHub): a new payment form and a new order confirmation flow. Work is delivered as pull requests into the "
+            "Client's repository, reviewed and merged by the Client's engineers."
+        ),
+        p("2. Fees", "h"),
+        p(
+            "The total fee is <b>six thousand US dollars (USD 6,000.00)</b>, fixed price, invoiced per milestone as set out "
+            "in Section 3. Invoices are payable within 7 days of issue by PayPal to the Contractor's business account."
+        ),
+        p("3. Milestones and acceptance", "h"),
+        p(
+            "<b>3.1 Milestone 1 — Payment form: USD 3,500.00.</b> Due March 15, 2027. Accepted, and the invoice issued, "
+            "when the payment form pull request is merged into the main branch of the Client's repository with every "
+            "continuous-integration check passing on the merged commit."
+        ),
+        p(
+            "<b>3.2 Milestone 2 — Order confirmation: USD 2,500.00.</b> Due April 15, 2027. Accepted, and the invoice "
+            "issued, when the order confirmation pull request (confirmation page and email) is merged into the main "
+            "branch of the Client's repository with every continuous-integration check passing on the merged commit."
+        ),
+        p(
+            "<b>3.3 Acceptance is automatic</b> on the merged commit's CI results; no further sign-off by the Client is "
+            "required. A pull request merged with failing or missing checks is not accepted."
+        ),
+        p("4. Change requests", "h"),
+        p(
+            "Changes to scope are agreed in writing as a new milestone under this SOW or a new SOW; they never alter "
+            "the acceptance condition of a milestone already in progress."
+        ),
+        p("5. Intellectual property", "h"),
+        p(
+            "Code merged into the Client's repository is the Client's property on payment of the milestone it belongs "
+            "to. Until then the Contractor grants the Client a licence to review and test it."
+        ),
+        p("6. Term", "h"),
+        p(
+            "This SOW ends when both milestones are paid, or on 30 days' written notice by either party for unfinished work."
+        ),
+        Spacer(1, 24),
+        _table(
+            [
+                [f"For {CLIENT}", f"For {CONTRACTOR}"],
+                [
+                    "Priya Raman\nHead of Engineering\nDate: February 1, 2027",
+                    "Jonah Whitaker\nPrincipal\nDate: February 1, 2027",
+                ],
+            ],
+            col_widths=[3.1 * inch, 3.1 * inch],
+        ),
+    ]
+    return _pdf(story, "Statement of Work AR-2027-03: checkout redesign", CLIENT, SOW_DATE)
 
 
 # --- the grantee's evidence --------------------------------------------------------------
@@ -514,6 +589,7 @@ def write_all(out: Path = OUT) -> list[Path]:
     out.mkdir(parents=True, exist_ok=True)
     files = {
         AGREEMENT: grant_agreement(),
+        SOW: sow_agreement(),
         SIGN_IN: sign_in_sheet().encode(),
         SIGN_IN_PDF: sign_in_pdf(),
         BUDGET: budget_sheet().encode(),

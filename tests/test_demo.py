@@ -166,7 +166,7 @@ def upload(client, mid, token, org, *files, **form):
 def test_demo_files_are_listed_served_and_up_to_date(client, tmp_path):
     listed = client.get("/demo/files").json()
     assert [f["key"] for f in listed] == [f.key for f in FILES]
-    assert [f["role"] for f in listed] == ["agreement"] + ["evidence"] * 6
+    assert [f["role"] for f in listed] == ["agreement"] * 2 + ["evidence"] * 6
     assert all(f["size"] > 0 for f in listed)
     _name, data, media = demo_file(client, "sign_in")
     assert media == "text/csv" and data.count(b"\n") == 215  # header + 214 attendees
@@ -253,3 +253,67 @@ def test_evidence_fixtures_go_through_upload_and_the_checks_as_the_script_says(c
 
     text = " ".join(p.extract_text() for p in PdfReader(io.BytesIO(draft)).pages)
     assert "TODO" in text and text.count("TODO") > 40  # one per section-B student, plus the note
+
+
+def test_the_sow_reads_as_invoice_on_merge_and_a_demo_sow_can_connect_a_repo(client):
+    from pypdf import PdfReader
+
+    _, data, _ = demo_file(client, "sow")
+    text = " ".join(p.extract_text() for p in PdfReader(io.BytesIO(data)).pages).replace("\n", " ")
+    for phrase in (
+        "USD 6,000.00",
+        "USD 3,500.00",
+        "USD 2,500.00",
+        "merged into the main branch",
+        "continuous-integration check passing",
+        "Acceptance is automatic",
+    ):
+        assert phrase in text, phrase
+
+    # The way the demo page builds the SOW: invoice mode, a ci_green criterion, the contractor connects a repo.
+    people = cast(client)
+    client_, contractor = people["funder"], people["grantee"]
+    acme = new_org(client, client_["token"], "Acme Retail", "acme@example.org")
+    body = {
+        "title": "Checkout redesign SOW",
+        "total_amount": "3500.00",
+        "currency": "USD",
+        "settlement_mode": "invoice_on_verify",
+        "counterparty_email": contractor["email"],
+        "milestones": [
+            {
+                "title": "Milestone 1: payment form",
+                "amount": "3500.00",
+                "criteria": [
+                    {
+                        "statement": "The payment form PR is merged with every CI check passing",
+                        "measure": {"metric": "CI check runs", "comparator": "exists"},
+                        "evidence_required": ["code_change"],
+                        "evidence_description": "Merged pull request with passing CI on its head commit",
+                        "verification": "check",
+                        "check_id": "ci_green",
+                    }
+                ],
+            }
+        ],
+    }
+    r = client.post(f"/orgs/{acme}/agreements", json=body, headers=h(client_["token"]))
+    assert r.status_code == 201, r.text
+    aid = r.json()["agreement"]["id"]
+    [inv] = client.get("/me", headers=h(contractor["token"])).json()["invitations"]
+    org = {"name": "Dev Co", "paypal_email": "dev@example.org"}
+    r = client.post(f"/invitations/{inv['id']}/accept", json={"new_org": org}, headers=h(contractor["token"]))
+    assert r.status_code == 200, r.text
+    devco = r.json()["organization"]["id"]
+    r = client.post(
+        f"/agreements/{aid}/integrations/github",
+        json={"repo": "acme-retail/storefront"},
+        headers=h(contractor["token"], devco),
+    )
+    assert r.status_code == 200, r.text
+    g = r.json()
+    assert (
+        g["via_app"] is False and g["webhook_url"].endswith(f"/webhooks/github/{g['integration_id']}") and g["secret"]
+    )
+    a = client.get(f"/agreements/{aid}", headers=h(client_["token"], acme)).json()
+    assert [lbl["label"] for lbl in g["labels"]] == [f"mde-{m['id']}" for m in a["milestones"]]

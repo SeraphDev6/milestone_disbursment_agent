@@ -10,8 +10,8 @@ import { useTitle } from "@/app/RouteAnnouncer";
 import { sessions, useSessions } from "@/auth/session";
 import { money } from "@/domain/format";
 import { MILESTONE_STAMPS } from "@/domain/status";
-import { Busy, Button, Callout, clearToasts, CopyButton, Facts, Glyph, layout, NumberField, PageHeader, RadioGroup, Sheet, Stamp, toast } from "@/design/components";
-import { demoStore, fetchDemoFile, seedDemo, SIGN_IN_DATE, type DemoPerson, type DemoRecord } from "./seed";
+import { Busy, Button, Callout, clearToasts, CopyButton, Facts, Glyph, layout, NumberField, PageHeader, RadioGroup, Sheet, Stamp, TextField, toast } from "@/design/components";
+import { demoStore, fetchDemoFile, seedDemo, SIGN_IN_DATE, type DemoKind, type DemoPerson, type DemoRecord } from "./seed";
 import s from "./Demo.module.css";
 
 /**
@@ -40,13 +40,14 @@ export function Demo() {
       <PageHeader
         eyebrow="Demo · sandbox"
         title="Try the whole loop in three minutes"
-        lede="A literacy grant between a funder and a grantee, with an independent reviewer. The grant comes from a real agreement document, the evidence is real files, and the money moves in PayPal's sandbox. You play all three people in this browser; nothing real is charged."
+        lede="A literacy grant between a funder and a grantee with an independent reviewer, or a contractor's SOW paid by invoice when pull requests merge. The agreements come from real documents, the evidence is real files, and the money moves in PayPal's sandbox. You play every person in this browser; nothing real is charged."
       />
       <div className={layout.split}>
         <div className={layout.stackLg}>
           <LoadDemo onLoaded={setRecord} hasRecord={!!record} />
           {record && <Cast record={record} />}
           {record?.extraction && <Proposed record={record} />}
+          {record?.kind === "sow" && <GitHubSheet record={record} />}
           {record && <Shortcuts record={record} />}
         </div>
         <div className={layout.stack}>
@@ -83,17 +84,21 @@ function LoadDemo({ onLoaded, hasRecord }: { onLoaded: (r: DemoRecord) => void; 
   const [source, setSource] = useState<"document" | "ready">("document");
   const [signed, setSigned] = useState<"signed" | "unsigned">("signed");
   const [windowDays, setWindowDays] = useState<number>(0);
-  const [kind, setKind] = useState<"grant" | "withheld">("grant");
+  const [kind, setKind] = useState<DemoKind>("grant");
+  const [repo, setRepo] = useState("");
+  const [repoError, setRepoError] = useState<string | null>(null);
   const [step, setStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   async function run() {
     setError(null);
+    if (kind === "sow" && repo.trim() && !/^[\w.-]+\/[\w.-]+$/.test(repo.trim())) return setRepoError("Enter the repository as owner/name, or leave it empty.");
+    setRepoError(null);
     try {
-      const r = await seedDemo({ source, signed: signed === "signed", disputeWindowDays: windowDays, withheld: kind === "withheld" }, setStep);
+      const r = await seedDemo({ source, signed: signed === "signed", disputeWindowDays: windowDays, kind, repo: kind === "sow" ? repo : undefined }, setStep);
       qc.clear();
       clearToasts();
       onLoaded(r.record);
-      toast("Demo grant ready", {
+      toast(kind === "sow" ? "Demo SOW ready" : "Demo grant ready", {
         body: r.record.extraction
           ? `${r.record.extraction.tranches} tranches and ${r.record.extraction.criteria} criteria proposed from the agreement document. You're the funder.`
           : "You're the funder. Switch people below or from the account menu.",
@@ -106,9 +111,14 @@ function LoadDemo({ onLoaded, hasRecord }: { onLoaded: (r: DemoRecord) => void; 
     }
   }
   return (
-    <Sheet title={hasRecord ? "Load a fresh demo grant" : "Load the demo grant"}>
+    <Sheet title={hasRecord ? "Load a fresh demo" : "Load the demo"}>
       <div className={layout.stack}>
-        <p>Creates Harbor Foundation (funder), Riverside Reads (grantee) and Sponsor Audit Partners (reviewer), the USD 30,000 Riverside literacy grant between them, and signs all three people into this browser. No email involved: the people are the demo's own.</p>
+        <p>
+          {kind === "sow"
+            ? "Creates Acme Retail (client) and Dev Co (contractor), the USD 6,000 checkout redesign SOW between them, and signs both people into this browser. Invoice on verify: a milestone's invoice goes out when its labelled pull request merges with CI green."
+            : "Creates Harbor Foundation (funder), Riverside Reads (grantee) and Sponsor Audit Partners (reviewer), the USD 30,000 Riverside literacy grant between them, and signs all three people into this browser."}{" "}
+          No email involved: the people are the demo's own.
+        </p>
         <div className={layout.grid2}>
           <RadioGroup
             label="The grant comes from"
@@ -129,29 +139,42 @@ function LoadDemo({ onLoaded, hasRecord }: { onLoaded: (r: DemoRecord) => void; 
             ]}
           />
           <RadioGroup
-            label="Who sees the work when"
+            label="The agreement"
             value={kind}
             onChange={(v) => {
               setKind(v);
               if (v === "withheld" && windowDays < 3) setWindowDays(3);
             }}
             options={[
-              { id: "grant", label: "Grant: funder sees evidence as it arrives", description: "Auto-release off; the funder or reviewer approves." },
-              { id: "withheld", label: "SOW-style: funder sees the work once paid", description: "Auto-release on with the skeptic's second opinion, and at least a 3-day dispute window after the work opens." },
+              { id: "grant", label: "Grant: funder sees evidence as it arrives", description: "Escrow; auto-release off, the funder or reviewer approves." },
+              { id: "withheld", label: "Grant, SOW-style: funder sees the work once paid", description: "Escrow; auto-release on with the skeptic's second opinion, and at least a 3-day dispute window after the work opens." },
+              { id: "sow", label: "SOW: invoice when a pull request merges green", description: "Invoice on verify; evidence comes from GitHub, not uploads. The same engine, a different trade." },
             ]}
           />
-          <NumberField
-            label="Dispute window"
-            minValue={kind === "withheld" ? 3 : 0}
-            maxValue={14}
-            value={windowDays}
-            onChange={(v) => setWindowDays(v ?? 0)}
-            description="Days a released payment waits before reaching the grantee, so the funder or reviewer can contest it. 0 pays at once."
-          />
+          {kind === "sow" ? (
+            <TextField
+              label="GitHub repository (optional)"
+              placeholder="owner/name"
+              value={repo}
+              onChange={setRepo}
+              error={repoError}
+              figures
+              description="A repo you can merge a pull request in. The contractor connects it and the page shows the webhook and labels to add. Leave empty to connect one later under Integrations."
+            />
+          ) : (
+            <NumberField
+              label="Dispute window"
+              minValue={kind === "withheld" ? 3 : 0}
+              maxValue={14}
+              value={windowDays}
+              onChange={(v) => setWindowDays(v ?? 0)}
+              description="Days a released payment waits before reaching the grantee, so the funder or reviewer can contest it. 0 pays at once."
+            />
+          )}
         </div>
         {error && <Callout tone="error" title="The demo didn't load" live>{error}</Callout>}
         <div role="status" aria-live="polite" className={s.progress}>{step ? `${step}…` : ""}</div>
-        <div><Button variant="primary" icon="play" onPress={run} isPending={!!step}>Load demo grant</Button></div>
+        <div><Button variant="primary" icon="play" onPress={run} isPending={!!step}>{kind === "sow" ? "Load demo SOW" : "Load demo grant"}</Button></div>
       </div>
     </Sheet>
   );
@@ -249,7 +272,7 @@ function Shortcuts({ record }: { record: DemoRecord }) {
     try {
       const r = await call(api.POST("/orgs/{org_id}/paypal/connect", { params: { path: { org_id: grantee.orgId } }, headers: { Authorization: `Bearer ${token}` } }));
       window.open(r.onboarding_url, "_blank", "noopener");
-      toast("PayPal sandbox onboarding opened", { body: "Sign in there as the payee's sandbox business account and finish connecting. Tranches funded from then on pay Riverside Reads directly." });
+      toast("PayPal sandbox onboarding opened", { body: `Sign in there as the payee's sandbox business account and finish connecting. Payments from then on go to ${grantee.orgName} directly.` });
     } catch (e) {
       toast("Couldn't start PayPal onboarding", { body: errorMessage(e), tone: "error" });
     } finally {
@@ -279,7 +302,7 @@ function Shortcuts({ record }: { record: DemoRecord }) {
                     size="sm"
                     icon="check"
                     isPending={busy === m.id}
-                    isDisabled={a.status !== "active" || !["pending", "funded", "evidence_received", "needs_review"].includes(m.status)}
+                    isDisabled={a.status !== "active" || !["pending", "funded", "overdue", "evidence_received", "needs_review"].includes(m.status)}
                     onPress={() => markVerified(m.id, m.title)}
                   >
                     Mark verified<span className="sr-only">: {m.title}</span>
@@ -289,7 +312,7 @@ function Shortcuts({ record }: { record: DemoRecord }) {
             </ul>
             <div className={s.shortcut}>
               <span className={s.shortcutTitle}>
-                <strong>Riverside Reads' PayPal</strong>
+                <strong>{grantee.orgName}'s PayPal</strong>
                 <span className={s.muted}>{payee?.paypal_connected ? "Connected: paid directly." : "Not connected: paid through the platform with a Payout."}</span>
               </span>
               <span />
@@ -311,6 +334,7 @@ function Script() {
     ["Submit", "Upload the signed sign-in sheets, their register and the budget report, dated 2027-05-22, and submit. The checks count 214 rows and total USD 9,800.50."],
     ["Review", "As the funder or reviewer, read the verdict and its citations, then approve. The hold is captured. For tranche 2, the finished report is met and cited; the draft with its TODOs lands in review."],
     ["Window", "With a dispute window, the payment waits there: contest it as the reviewer, or pay now as the funder."],
+    ["Same engine", "Load the SOW with a repo of yours. As the contractor, merge a pull request carrying the milestone's label; CI green verifies it and the invoice goes out. As the client, open the pay link and pay it in PayPal's sandbox."],
     ["Record", "Open the ledger, the activity log and the compliance packet: every step, cited and timestamped."],
   ];
   return (
@@ -357,6 +381,54 @@ function Account({ label, email, password }: { label: string; email: string; pas
         <span className={layout.row}><code>{password}</code><CopyButton value={password} label={`Copy the ${label} password`} /></span>
       </dd>
     </div>
+  );
+}
+
+/** The SOW's evidence source: the repo the contractor connected, and what to add on GitHub so a merge arrives. */
+function GitHubSheet({ record }: { record: DemoRecord }) {
+  const g = record.github;
+  const contractor = record.people.find((p) => p.key === "grantee")!;
+  return (
+    <Sheet title="GitHub: where the SOW's evidence comes from">
+      <div className={layout.stack}>
+        {!g ? (
+          <p>
+            No repository connected yet. As the contractor, open the SOW's <Link to={`${paths.agreement(contractor.orgId, record.agreementId)}/integrations`}>Integrations</Link> tab and connect one (through the GitHub App, or a webhook on any repo you can merge in). Without a repo, use "Mark verified" below to see the invoice and the pay link.
+          </p>
+        ) : (
+          <>
+            <Facts items={[["Repository", <code key="r">{g.repo}</code>], ["Connected", g.via_app ? "Through the GitHub App: nothing to configure on the repo." : "By webhook: add it on the repo (Settings → Webhooks) with the values below."]]} />
+            {!g.via_app && g.webhook_url && (
+              <dl className={s.accounts}>
+                <div className={s.account}>
+                  <dt>Payload URL</dt>
+                  <dd><span className={layout.row}><code>{g.webhook_url}</code><CopyButton value={g.webhook_url} label="Copy the payload URL" /></span></dd>
+                </div>
+                {g.secret && (
+                  <div className={s.account}>
+                    <dt>Secret</dt>
+                    <dd><span className={layout.row}><code>{g.secret}</code><CopyButton value={g.secret} label="Copy the webhook secret" /></span></dd>
+                  </div>
+                )}
+                <div className={s.account}>
+                  <dt>Content type and events</dt>
+                  <dd><code>application/json</code>, "Pull requests" only.</dd>
+                </div>
+              </dl>
+            )}
+            <p className={s.muted}>Then open a pull request with a milestone's label, let CI finish, and merge it. The merge commit, its CI runs and the changed files arrive as that milestone's evidence; green CI verifies it and the invoice goes out.</p>
+            <dl className={s.accounts}>
+              {g.labels.map((l) => (
+                <div key={l.milestone_id} className={s.account}>
+                  <dt>{l.title}</dt>
+                  <dd><span className={layout.row}><code>{l.label}</code><CopyButton value={l.label} label={`Copy the label for ${l.title}`} /></span></dd>
+                </div>
+              ))}
+            </dl>
+          </>
+        )}
+      </div>
+    </Sheet>
   );
 }
 
