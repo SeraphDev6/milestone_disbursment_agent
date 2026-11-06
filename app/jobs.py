@@ -27,6 +27,7 @@ from app.services.github_app import publish_checks
 from app.services.handover import run as run_handovers
 from app.services.notifications import NOTIFIER, Notifier
 from app.services.outbound import deliver_due
+from app.services.paylinks import PAY_LINKS, PayLinks
 from app.services.settlement import disburse_due, expire_stale_holds, expire_stale_invoices
 from app.services.verification import mark_overdue
 
@@ -49,7 +50,8 @@ def main(argv: list[str]) -> int:
     built = has_build() if settings.web_app_built is None else settings.web_app_built
     app_url = settings.public_app_url or (settings.public_base_url if built else None)
     notifier = Notifier(make_mailer(settings), settings.api_base_url, app_url)
-    with make_sessionmaker(engine, info={NOTIFIER: notifier})() as session:
+    info = {NOTIFIER: notifier, PAY_LINKS: PayLinks.from_settings(settings)}
+    with make_sessionmaker(engine, info=info)() as session:
         now = utcnow()
         if argv[0] == "daily":
             holds = expire_stale_holds(session, now)

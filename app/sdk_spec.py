@@ -11,7 +11,7 @@ import json
 import sys
 from pathlib import Path
 
-CORE_VERSION = "0.1.0"
+CORE_VERSION = "0.2.0"  # 0.2.0: POST /milestones/{id}/pay-link (reissue a signed pay link)
 CORE_TAG = "x-sdk-core"
 OUTPUT = Path(__file__).resolve().parent.parent / "sdk" / "openapi-core.json"
 
