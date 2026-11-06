@@ -1136,6 +1136,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agreements/{agreement_id}/integrations/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Payee gets an address to forward evidence to; the subject tag picks the tranche */
+        post: operations["register_email_agreements__agreement_id__integrations_email_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/email/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resend receiving webhook (Svix-signed) */
+        post: operations["resend_webhook_webhooks_email_resend_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agreements/{agreement_id}/audit": {
         parameters: {
             query?: never;
@@ -1879,7 +1913,7 @@ export interface components {
              * Key
              * @enum {string}
              */
-            key: "agreement" | "sign_in_pdf" | "sign_in" | "budget" | "report" | "report_draft" | "thin";
+            key: "agreement" | "sow" | "sign_in_pdf" | "sign_in" | "budget" | "report" | "report_draft" | "thin";
             /**
              * Name
              * @description File name; GET /demo/files/{name} serves it.
@@ -2032,6 +2066,18 @@ export interface components {
             pack: {
                 [key: string]: unknown;
             };
+        };
+        /** EmailIntegration */
+        EmailIntegration: {
+            /** Integration Id */
+            integration_id: string;
+            /**
+             * Address
+             * @description Forward evidence here, from an address that belongs to a member of your org.
+             */
+            address: string;
+            /** Tags */
+            tags: components["schemas"]["MilestoneTag"][];
         };
         /**
          * EvidenceAccepted
@@ -2945,6 +2991,18 @@ export interface components {
          * @enum {string}
          */
         MilestoneStatus: "pending" | "funded" | "evidence_received" | "verifying" | "needs_review" | "verified" | "settling" | "held" | "contested" | "settled" | "refunded" | "settlement_failed" | "payout_failed" | "disputed" | "overdue";
+        /** MilestoneTag */
+        MilestoneTag: {
+            /** Milestone Id */
+            milestone_id: string;
+            /** Title */
+            title: string;
+            /**
+             * Tag
+             * @description Put this in the subject so the mail counts as evidence for the tranche.
+             */
+            tag: string;
+        };
         /** MilestonesUpdate */
         MilestonesUpdate: {
             /**
@@ -6232,6 +6290,74 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    register_email_agreements__agreement_id__integrations_email_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Which of your orgs you act for, if you belong to several. */
+                "X-Org-Id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                agreement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailIntegration"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resend_webhook_webhooks_email_resend_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "svix-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
             };
             /** @description Validation Error */
             422: {

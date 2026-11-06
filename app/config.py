@@ -113,6 +113,10 @@ class Settings(BaseSettings):
     email_provider: Literal["console", "resend", "smtp"] = "console"
     email_from: str = "Milestone Engine <no-reply@localhost>"
     resend_api_key: SecretStr | None = None
+    # Inbound email as evidence (Resend receiving): the domain whose evidence-<id>@ addresses reach the app, and the
+    # signing secret of the receiving webhook pointed at /api/webhooks/email/resend. Both unset: no email adapter.
+    email_inbox_domain: str | None = None
+    resend_webhook_secret: SecretStr | None = None
     smtp_host: str | None = None
     smtp_port: int = 587
     smtp_username: str | None = None
@@ -152,6 +156,8 @@ class Settings(BaseSettings):
             raise ValueError("EMAIL_PROVIDER=resend requires RESEND_API_KEY")
         if self.email_provider == "smtp" and not self.smtp_host:
             raise ValueError("EMAIL_PROVIDER=smtp requires SMTP_HOST")
+        if self.email_inbox_domain and not (self.resend_api_key and self.resend_webhook_secret):
+            raise ValueError("EMAIL_INBOX_DOMAIN requires RESEND_API_KEY and RESEND_WEBHOOK_SECRET")
         if self.mode is Mode.live:
             if not self.public_base_url.startswith("https://"):
                 raise ValueError("MODE=live requires an https PUBLIC_BASE_URL")

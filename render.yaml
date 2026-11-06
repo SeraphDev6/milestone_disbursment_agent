@@ -39,6 +39,11 @@ services:
         sync: false
       - key: RESEND_API_KEY
         sync: false
+      # Inbound email as evidence (Resend receiving); leave blank to go without the email adapter.
+      - key: EMAIL_INBOX_DOMAIN
+        sync: false
+      - key: RESEND_WEBHOOK_SECRET
+        sync: false
       # Throwaway PayPal sandbox accounts the demo page shows visitors (payer approves holds; payee, a business
       # account, connects as the grantee). Leave blank to make visitors bring their own.
       - key: PAYPAL_TEST_PAYER_EMAIL

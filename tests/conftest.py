@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.config import hermetic_settings
 from app.integrations.email import ConsoleMailer
 from app.integrations.github_app import MockGitHubApp
+from app.integrations.inbound_email import MockInbox
 from app.integrations.paypal import MockPayPal
 from app.main import create_app
 
@@ -87,6 +88,7 @@ def hermetic_app(**overrides) -> FastAPI:
         paypal=MockPayPal(base_url=settings.api_base_url),
         mailer=ConsoleMailer(),
         github_app=MockGitHubApp(base_url=settings.api_base_url),
+        inbox=MockInbox(),
     )
 
 

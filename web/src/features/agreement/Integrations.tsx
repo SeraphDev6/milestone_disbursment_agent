@@ -1,7 +1,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 import type { ColDef } from "ag-grid-community";
-import { useConnectGitHub, useGitHubRepos, useGitHubStatus, useSubscribe, useSubscriptions, useUnsubscribe } from "@/api/queries";
-import type { GitHubIntegration, SubscriptionCreated, SubscriptionRead } from "@/api/types";
+import { useConnectEmail, useConnectGitHub, useGitHubRepos, useGitHubStatus, useSubscribe, useSubscriptions, useUnsubscribe } from "@/api/queries";
+import type { EmailIntegration, GitHubIntegration, SubscriptionCreated, SubscriptionRead } from "@/api/types";
 import { errorMessage } from "@/api/errors";
 import { Link } from "react-router";
 import { paths, useAgreementCtx, useOrgCtx } from "@/app/context";
@@ -18,6 +18,7 @@ export function Integrations() {
   return (
     <div className={layout.stackLg}>
       <GitHub />
+      <Email />
       <Webhooks />
     </div>
   );
@@ -185,6 +186,56 @@ function GitHub() {
               ))}
             </ul>
           </Callout>
+        )}
+      </div>
+    </Sheet>
+  );
+}
+
+/** Forward evidence by email: one address per agreement, a tag per tranche in the subject. */
+function Email() {
+  const { agreement: a, seat } = useAgreementCtx();
+  const org = useOrgCtx();
+  const connect = useConnectEmail(a.id, org.orgId);
+  const [result, setResult] = useState<EmailIntegration | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const allowed = can(seat, "connect_email");
+  if (seat.role !== "payee") return null;
+  async function reveal() {
+    setError(null);
+    try {
+      setResult((await connect.mutateAsync()) as EmailIntegration);
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+  return (
+    <Sheet title="Email: forward evidence to the agreement's address">
+      <div className={layout.stack}>
+        <p>
+          Forward a report, a sheet or a scan from an address that belongs to a member of {org.orgName}, with the tranche's tag anywhere in the subject. The text and every PDF, spreadsheet, image or text attachment go through the same checks and verifier as an upload. Mail without a tag, or from anyone else, is dropped and noted in the activity log, never guessed onto a tranche.
+        </p>
+        {!allowed.ok ? (
+          <PermissionNote>{allowed.reason}</PermissionNote>
+        ) : !result ? (
+          <div className={layout.row}>
+            <Button icon="inbox" onPress={reveal} isPending={connect.isPending}>Show the address and tags</Button>
+            {error && <span style={{ color: "var(--text-secondary)" }}>{error}</span>}
+          </div>
+        ) : (
+          <>
+            <Facts items={[["Address", <span key="addr" className={layout.row}><code>{result.address}</code><CopyButton value={result.address} label="Copy the evidence address" /></span>]]} />
+            <DataGrid<EmailIntegration["tags"][number]>
+              caption="Subject tags"
+              summary={`${result.tags.length} tranches, one tag each.`}
+              rows={result.tags}
+              rowId={(r) => r.milestone_id}
+              columns={[
+                { field: "title", headerName: "Tranche", flex: 2 },
+                { field: "tag", headerName: "Put this in the subject", flex: 2, cellRenderer: (p: { value: string }) => <span className={layout.row}><code>{p.value}</code><CopyButton value={p.value} label={`Copy the tag ${p.value}`} /></span> },
+              ]}
+            />
+          </>
         )}
       </div>
     </Sheet>
