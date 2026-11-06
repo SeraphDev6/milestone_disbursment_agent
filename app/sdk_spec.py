@@ -119,6 +119,13 @@ EXAMPLES: dict[str, dict] = {
         "order_id": "5O190127TN364715T",
         "approve_url": "https://www.sandbox.paypal.com/checkoutnow?token=5O190127TN364715T",
     },
+    # multipart bodies (FastAPI names them Body_<operation>); files are shown by name
+    "Body_upload_evidence_milestones__milestone_id__uploads_post": {
+        "files": ["Spring workshop sign-in sheets (register).csv", "Spring workshop budget report.csv"],
+        "note": "Register exported from the signed sheets; budget actuals from our accounting system.",
+        "dated": "2027-05-22",
+    },
+    "Body_extract_agreement_agreements_extract_post": {"file": "Riverside Literacy Grant Agreement.pdf"},
     "ReviewOutcome": {
         "milestone_status": "funded",
         "missing": [
