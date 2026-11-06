@@ -68,7 +68,17 @@ _NUMBER = re.compile(r"[-+]?\d[\d,]*(?:\.\d+)?")
 
 
 def _words(text: str) -> set[str]:
-    return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) > 3}
+    """Words worth matching on: four letters or more, plurals folded ('sheets' and 'sheet' are one word)."""
+    words = {w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) > 3}
+    return {w[:-1] if len(w) > 4 and w.endswith("s") and not w.endswith("ss") else w for w in words}
+
+
+def _covers(wanted: set[str], have: set[str]) -> bool:
+    """A file matches a metric when it carries (nearly) all of the metric's words: every word of a short metric,
+    two thirds of a long one, so 'budget report with actual spending per line item' still finds the budget report."""
+    if not wanted:
+        return False
+    return len(wanted & have) >= max(1, -(-2 * len(wanted) // 3))
 
 
 def _compare(observed: Decimal | date, comparator: Comparator, target: object) -> bool:
@@ -150,7 +160,8 @@ def evaluate(c: Criterion, evidence: Sequence[Evidence]) -> CriterionResult:
 
     if c.check_id == "file_present":
         wanted = _words(c.measure.metric)
-        hits = [e for e in usable if wanted and wanted <= _words(e.title + " " + e.content[:2000])]
+        have = {e.id: _words(e.title + " " + e.content[:2000]) for e in usable}
+        hits = sorted((e for e in usable if _covers(wanted, have[e.id])), key=lambda e: -len(wanted & have[e.id]))
         if hits:
             return _result(c, True, f"found '{hits[0].title}'", hits[:1], None)
         return _result(c, False, None, [], f"No attached file matches '{c.measure.metric}'. {need}")

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { extractAgreement, hasDemo, useCreateAgreement, useHealth, useOrg } from "@/api/queries";
+import { extractAgreement, hasDemo, useCreateAgreement, useDemoFiles, useHealth, useOrg } from "@/api/queries";
 import type { AgreementCreated, ExtractionResult } from "@/api/types";
 import { errorMessage, isApiError } from "@/api/errors";
 import { paths, useOrgCtx } from "@/app/context";
@@ -28,7 +28,7 @@ import {
   toast,
   type Problem,
 } from "@/design/components";
-import { DEMO_GRANT } from "@/features/demo/seed";
+import { DEMO_GRANT, fetchDemoFile } from "@/features/demo/seed";
 import { agreementOut, agreementProblems, blankDraft, draftFromExtraction, tranchesFrom, type DraftForm } from "./model";
 import { Steps } from "./Steps";
 import { TranchesEditor } from "./TranchesEditor";
@@ -315,14 +315,35 @@ function Nav({ onBack, onNext, nextLabel, pending, disabled }: { onBack: () => v
 
 function SourceStep({ onStart }: { onStart: (d: DraftForm, x: ExtractionResult | null) => void }) {
   const health = useHealth();
+  const demoFiles = useDemoFiles(hasDemo(health.data));
+  const demoAgreement = demoFiles.data?.find((f) => f.role === "agreement");
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const ctrl = useRef<AbortController | null>(null);
 
+  /** The demo's real grant agreement, through the same extraction as a dropped file. */
+  async function runDemoDocument() {
+    if (!demoAgreement) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const f = await fetchDemoFile(demoAgreement);
+      setFiles([f]);
+      await runWith(f);
+    } catch (e) {
+      setError(errorMessage(e));
+      setBusy(false);
+    }
+  }
+
   async function run() {
     const f = files[0];
     if (!f) return;
+    await runWith(f);
+  }
+
+  async function runWith(f: File) {
     if (f.size > 20 * 1024 * 1024) {
       setError("Agreements can be up to 20 MB.");
       return;
@@ -362,7 +383,12 @@ function SourceStep({ onStart }: { onStart: (d: DraftForm, x: ExtractionResult |
         </Sheet>
         {hasDemo(health.data) && (
           <Sheet title="Sample grant" titleLevel={3}>
-            <p>A two-tranche literacy grant with clean criteria, for trying the flow.</p>
+            <p>The demo's Riverside literacy grant. Read it from the real agreement document, or start from the typed-in version with clean criteria.</p>
+            {demoAgreement && (
+              <Button variant="primary" icon="arrow" onPress={runDemoDocument} isPending={busy}>
+                Extract from “{demoAgreement.name}”
+              </Button>
+            )}
             <Button
               onPress={() =>
                 onStart({ ...blankDraft(), title: DEMO_GRANT.title, total_amount: String(DEMO_GRANT.total_amount), currency: DEMO_GRANT.currency ?? "USD", milestones: tranchesFrom(DEMO_GRANT.milestones) }, null)

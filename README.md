@@ -26,7 +26,7 @@ The product is the same everywhere; `MODE` only says which PayPal it is connecte
 - **`sandbox`** (the default): PayPal's sandbox API. Payees connect sandbox business accounts, payers approve holds and pay links with sandbox accounts, and no real money moves. Every PayPal call goes to the sandbox host, so a live account can't be connected or charged here. This is what [app.milestone-ledger.com](https://app.milestone-ledger.com) runs.
 - **`live`**: PayPal's production API, direct route only (payer pays the connected payee; the platform never holds funds). It needs PayPal partner approval and a BN code, an https `PUBLIC_BASE_URL` and `PAYPAL_WEBHOOK_ID`. A live deployment never accepts a sandbox account.
 
-**The demo** lives at **`/demo`** on sandbox deployments (off with `DEMO=false`, never on a live one). It loads a ready-made grant with a funder, a grantee and a reviewer already signed in so a visitor can play every side, offers sample evidence files, and has two shortcuts the product doesn't (mark a tranche verified, connect the grantee's PayPal). The money part is PayPal's real sandbox: set `PAYPAL_TEST_PAYER_EMAIL`/`_PASSWORD` and `PAYPAL_TEST_PAYEE_*` to throwaway sandbox accounts and the demo page shows them to visitors, so they can approve a hold without a PayPal developer account of their own. The demo's people have addresses at a reserved domain nothing is delivered to; the server signs them in itself (`POST /demo/cast`, rate-limited) and drops any mail to them. Everything else they do is the ordinary API.
+**The demo** lives at **`/demo`** on sandbox deployments (off with `DEMO=false`, never on a live one). It loads the Riverside literacy grant with a funder, a grantee and a reviewer already signed in so a visitor can play every side, and has two shortcuts the product doesn't (mark a tranche verified, connect the grantee's PayPal). The grant is real work, not a fixture: by default the demo reads the grant agreement PDF in `demo/` through the extraction endpoint, so the tranches, criteria, lint findings and open questions on screen are what the model made of the document (the "ready-made" option types the same grant in instantly). The grantee's evidence is real files too, served by `GET /api/demo/files`: the signed sign-in sheets and their register, the budget report, the final outcomes report (and a draft of it with gaps), and a thin note that fails everything. `scripts/demo_fixtures.py` writes them deterministically; `uv run pytest -m eval tests/evals -s` runs the agreement and the evidence through the real model as a [pydantic-evals](https://ai.pydantic.dev/evals/) dataset and reports each beat of the demo script as a pass or fail. The money part is PayPal's real sandbox: set `PAYPAL_TEST_PAYER_EMAIL`/`_PASSWORD` and `PAYPAL_TEST_PAYEE_*` to throwaway sandbox accounts and the demo page shows them to visitors, so they can approve a hold without a PayPal developer account of their own. The demo's people have addresses at a reserved domain nothing is delivered to; the server signs them in itself (`POST /demo/cast`, rate-limited) and drops any mail to them. Everything else they do is the ordinary API.
 
 There is no keyless mode. Tests, and `scripts/dev_server.py` for working on the web app, build the sandbox-mode app with a stand-in PayPal, an in-memory mailer and a stand-in GitHub App instead (`create_app(settings, paypal=..., mailer=..., github_app=...)`).
 
@@ -116,16 +116,27 @@ app/
                    (console, Resend, SMTP), GitHub, OIDC, file uploads
 scripts/           paypal_sandbox_check.py: verify PayPal credentials and webhook setup from .env
                    sandbox_walkthrough.py: run the full wallet flow through the app against PayPal sandbox
+                   demo_fixtures.py: write the demo's grant agreement and evidence files to demo/
+demo/              the demo's documents (grant agreement PDF, sign-in sheets, budget report, outcomes report)
+tests/evals/       the demo's documents through the real model (pydantic-evals; `uv run pytest -m eval tests/evals -s`)
 web/               React app (Vite, React Aria, AG Grid); served at / from web/dist (API under /api, MCP at /mcp)
 ```
 
 ## Develop
 
 ```sh
-uv run pytest
+uv run pytest                              # hermetic: stand-in PayPal, mailer, GitHub App and model
+uv run pytest -m eval tests/evals -s       # the demo's documents through the real model (spends credits)
 uv run ruff check . && uv run ruff format .
 uv run python -m app.sdk_spec   # after changing a core operation: rewrites sdk/openapi-core.json
 ```
+
+### SDK helpers
+
+`sdk/python` and `sdk/typescript` are small dependency-free packages (`milestone-ledger`) with `verify_webhook` /
+`verifyWebhook`: signature and timestamp checks for outbound webhooks, constant-time, with stable error codes and a
+typed event. Both are tested against deliveries signed by the engine's own signer (`sdk/fixtures/webhooks.json`, from
+`scripts/sdk_fixtures.py`), so they can't drift from `app/services/outbound.py`. See `sdk/README.md`.
 
 ### SDK core spec
 

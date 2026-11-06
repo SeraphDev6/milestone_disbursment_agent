@@ -72,6 +72,11 @@ export function useDemoInfo(enabled: boolean) {
   return useQuery({ queryKey: ["demo"], queryFn: () => call(api.GET("/demo")), enabled, staleTime: Infinity });
 }
 
+/** The demo's documents (the grant agreement and the grantee's evidence), served by the API from demo/. */
+export function useDemoFiles(enabled: boolean) {
+  return useQuery({ queryKey: ["demo", "files"], queryFn: () => call(api.GET("/demo/files")), enabled, staleTime: Infinity });
+}
+
 export function useMe(enabled = true) {
   return useQuery({ queryKey: keys.me, queryFn: () => call(api.GET("/me")), enabled, staleTime: 30_000 });
 }

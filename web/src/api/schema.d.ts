@@ -1207,6 +1207,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/demo/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The demo's documents: the grant agreement and the grantee's evidence */
+        get: operations["files_demo_files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/demo/files/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One demo document, to upload as the agreement or as evidence */
+        get: operations["file_demo_files__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/demo/cast": {
         parameters: {
             query?: never;
@@ -1799,6 +1833,33 @@ export interface components {
             code: string;
             /** People */
             people: components["schemas"]["DemoPerson"][];
+        };
+        /** DemoFile */
+        DemoFile: {
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "agreement" | "sign_in_pdf" | "sign_in" | "budget" | "report" | "report_draft" | "thin";
+            /**
+             * Name
+             * @description File name; GET /demo/files/{name} serves it.
+             */
+            name: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "agreement" | "evidence";
+            /**
+             * What
+             * @description What it is and what the engine makes of it.
+             */
+            what: string;
+            /** Media Type */
+            media_type: string;
+            /** Size */
+            size: number;
         };
         /** DemoInfo */
         DemoInfo: {
@@ -6095,6 +6156,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DemoInfo"];
+                };
+            };
+        };
+    };
+    files_demo_files_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoFile"][];
+                };
+            };
+        };
+    };
+    file_demo_files__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
