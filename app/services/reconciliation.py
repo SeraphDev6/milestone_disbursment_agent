@@ -24,6 +24,7 @@ from app.models import (
     AuditEvent,
     Disbursement,
     DisbursementKind,
+    Hold,
     Milestone,
     MilestoneStatus,
     PayoutRoute,
@@ -33,8 +34,10 @@ from app.models import (
 )
 from app.services import settlement
 
-# Tranche statuses in which the payer's authorization should still be a live hold at PayPal.
+# Tranche statuses in which a funder's authorization should still be a live hold at PayPal (pending: a co-funded
+# tranche some funders have held and others haven't).
 HOLD_LIVE = {
+    MilestoneStatus.pending,
     MilestoneStatus.funded,
     MilestoneStatus.evidence_received,
     MilestoneStatus.verifying,
@@ -154,15 +157,14 @@ def reconcile(
     def payout(ref: str) -> str:
         return gw.payout_status(ref).status
 
-    holds = session.exec(
-        select(Milestone).where(
-            col(Milestone.paypal_authorization_id).is_not(None), col(Milestone.status).in_(tuple(HOLD_LIVE))
-        )
-    ).all()
-    for m in holds:
+    holds = session.exec(select(Hold).where(col(Hold.paypal_authorization_id).is_not(None))).all()
+    for h in holds:
+        m = h.milestone
+        if m.status not in HOLD_LIVE:
+            continue
         # PARTIALLY_CAPTURED: a partial release took a share with final_capture=false; the rest is still held.
-        ok = {"CREATED", "PARTIALLY_CAPTURED"} if settlement.released(m) else {"CREATED"}
-        check(m, "authorization", m.paypal_authorization_id or "", f"hold ({m.status})", authorization, ok)
+        ok = {"CREATED", "PARTIALLY_CAPTURED"} if settlement.hold_released(h) else {"CREATED"}
+        check(m, "authorization", h.paypal_authorization_id or "", f"hold ({m.status})", authorization, ok)
 
     settlements = session.exec(select(Settlement).where(col(Settlement.paypal_ref).is_not(None))).all()
     for s in settlements:

@@ -29,6 +29,7 @@ from app.models import (
     OrgRole,
     Party,
     Role,
+    SettlementMode,
 )
 from app.models.identity import EMAIL_PATTERN
 from app.services import identity
@@ -53,8 +54,10 @@ class AgreementCreated(SQLModel):
 
 class InviteToAgreement(SQLModel):
     email: str = Field(max_length=320, schema_extra={"pattern": EMAIL_PATTERN}, description="Who to invite.")
-    kind: Literal["counterparty", "reviewer"] = Field(
-        default="reviewer", description="counterparty: the payee (replaces a pending payee invitation); reviewer."
+    kind: Literal["counterparty", "reviewer", "funder"] = Field(
+        default="reviewer",
+        description="counterparty: the payee (replaces a pending payee invitation); reviewer; funder: another payer "
+        "for a co-funded grant (while the agreement is still a draft, so its tranche shares can be set).",
     )
 
 
@@ -152,14 +155,18 @@ def create_agreement(
         draft.model_dump(exclude={"milestones", "counterparty_email", "reviewer_emails"}), update={"created_by": actor}
     )
     row.milestones = milestone_rows(draft.milestones)
-    row.parties = [Party(role=Role.payer, org_id=org_id, display_name=org.name, paypal_email=org.paypal_email)]  # type: ignore[union-attr]
+    row.parties = [
+        Party(role=Role.payer, org_id=org_id, display_name=org.name, paypal_email=org.paypal_email, lead=True)  # type: ignore[union-attr]
+    ]
     session.add(row)
     session.flush()
     record_audit(session, row.id, actor, "agreement_created", to_status=row.status)
     base, invitations = request.app.state.settings.api_base_url, []
-    invitees = [(draft.counterparty_email, InvitationKind.counterparty)] + [
-        (e, InvitationKind.reviewer) for e in draft.reviewer_emails
-    ]
+    invitees = (
+        [(draft.counterparty_email, InvitationKind.counterparty)]
+        + [(e, InvitationKind.reviewer) for e in draft.reviewer_emails]
+        + [(e, InvitationKind.funder) for e in draft.co_funder_emails]
+    )
     for email, kind in invitees:
         inv, _ = identity.invite(
             session,
@@ -207,6 +214,13 @@ def invite_to_agreement(
         pending = identity.pending_agreement_invitations(session, a.id)
         if any(p.role == Role.payee for p in a.parties) or any(i.kind == kind for i in pending):
             raise AccessError("this agreement already has a payee or a pending payee invitation", 409)
+    if kind == InvitationKind.funder:
+        if a.status not in EDITABLE:
+            raise AccessError(
+                "co-funders join while the agreement is a draft, so each tranche can name their share", 409
+            )
+        if a.settlement_mode != SettlementMode.escrow_release:
+            raise AccessError("co-funding needs escrow: each funder places a PayPal hold on its share", 409)
     inv, _ = identity.invite(
         session,
         mailer(request),
@@ -256,6 +270,17 @@ def replace_milestones(
     row = access.party.agreement
     if row.status not in EDITABLE:
         raise AccessError(f"criteria are locked (agreement is {row.status})", 409)
+    funders = {p.invited_email.lower() for p in row.parties if p.role == Role.payer and p.invited_email} | {
+        i.email.lower()
+        for i in identity.pending_agreement_invitations(session, row.id)
+        if i.kind == InvitationKind.funder
+    }
+    for i, m in enumerate(body.milestones):
+        for sh in m.shares:
+            if sh.email.lower() not in funders:
+                raise AccessError(
+                    f"milestones[{i}].shares names {sh.email}, who isn't a co-funder on this agreement", 422
+                )
     previous = row.status
     row.milestones = milestone_rows(body.milestones)
     if body.total_amount is not None:
@@ -303,9 +328,12 @@ def confirm(agreement_id: str, body: ConfirmRequest, access: AgreementAccessDep,
     party.confirmed_criteria_hash, party.confirmed_at, party.confirmed_by = current, utcnow(), access.actor
     if body.auto_release_enabled is not None:
         row.auto_release_enabled = body.auto_release_enabled
-    record_audit(
-        session, row.id, access.actor, "criteria_confirmed", detail={"criteria_hash": current, "role": party.role}
-    )
+    detail = {"criteria_hash": current, "role": party.role}
+    if party.role == Role.payer and any(m.shares for m in row.milestones):
+        from app.services.settlement import share_of  # what this funder signs up to pay, tranche by tranche
+
+        detail["shares"] = {m.id: str(share_of(m, party)) for m in row.milestones}
+    record_audit(session, row.id, access.actor, "criteria_confirmed", detail=detail)
 
     # Live only when the payee has joined, every party (incl. reviewers) signed, and nobody invited is pending.
     everyone_signed = all(p.confirmed_criteria_hash == current for p in row.parties)

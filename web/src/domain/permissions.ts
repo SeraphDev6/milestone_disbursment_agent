@@ -24,7 +24,9 @@ export type Action =
   | "assign"
   | "contest"
   | "resolve_for_payee"
-  | "resolve_for_payer";
+  | "resolve_for_payer"
+  | "resolve_shortfall"
+  | "accept_shortfall";
 
 const RANK: Record<OrgRole, number> = { viewer: 0, member: 1, admin: 2, owner: 3 };
 export const atLeast = (have: OrgRole, need: OrgRole) => RANK[have] >= RANK[need];
@@ -50,7 +52,13 @@ export const RULES: Record<Action, Partial<Record<Role, OrgRole>>> = {
   contest: { payer: "admin", reviewer: "member" },
   resolve_for_payee: { payer: "admin", reviewer: "member" },
   resolve_for_payer: { payee: "admin", reviewer: "member" },
+  resolve_shortfall: { payer: "admin" },
+  accept_shortfall: { payee: "admin" },
 };
+
+// CO_FUNDER_ACTIONS in app/services/access.py: a payer that isn't the lead funder signs, funds its share, can
+// contest a held tranche and withdraw its own contest. Everything else stays with the lead funder.
+export const CO_FUNDER_ACTIONS: ReadonlySet<Action> = new Set<Action>(["view", "confirm_criteria", "fund", "void", "contest", "resolve_for_payee", "compliance_packet", "manage_subscriptions"]);
 
 const VERB: Record<Action, string> = {
   view: "view this agreement",
@@ -72,9 +80,14 @@ const VERB: Record<Action, string> = {
   contest: "contest a payment",
   resolve_for_payee: "pay the payee",
   resolve_for_payer: "refund the payer",
+  resolve_shortfall: "decide a funding shortfall",
+  accept_shortfall: "answer a proposal to shrink a tranche",
 };
 
-export type Seat = { role: Role; orgRole: OrgRole; orgName: string };
+/** `lead` is false for a co-funder (a payer that isn't the lead funder); undefined means the only payer. */
+export type Seat = { role: Role; orgRole: OrgRole; orgName: string; lead?: boolean };
+
+export const isCoFunder = (seat: Seat) => seat.role === "payer" && seat.lead === false;
 
 export type Decision = { ok: true } | { ok: false; reason: string };
 
@@ -82,6 +95,7 @@ export type Decision = { ok: true } | { ok: false; reason: string };
 export function can(seat: Seat, action: Action): Decision {
   const need = RULES[action][seat.role];
   if (!need) return { ok: false, reason: `As the ${seat.role} on this agreement, you can't ${VERB[action]}.` };
+  if (isCoFunder(seat) && !CO_FUNDER_ACTIONS.has(action)) return { ok: false, reason: `Only the lead funder can ${VERB[action]}. As a co-funder you fund your share and can contest a payment.` };
   if (!atLeast(seat.orgRole, need))
     return {
       ok: false,
@@ -91,9 +105,9 @@ export function can(seat: Seat, action: Action): Decision {
 }
 
 /** Tranche actions, combining the role rule with the state the server requires. */
-export type TrancheAction = "fund" | "void" | "release" | "pay_now" | "contest" | "resolve_release" | "resolve_refund" | "review" | "dispute" | "submit_evidence" | "precheck" | "reverify";
+export type TrancheAction = "fund" | "void" | "release" | "pay_now" | "contest" | "resolve_release" | "resolve_refund" | "review" | "dispute" | "submit_evidence" | "precheck" | "reverify" | "shortfall" | "answer_shortfall";
 
-const VOIDABLE: MilestoneStatus[] = ["funded"];
+const VOIDABLE: MilestoneStatus[] = ["funded", "pending", "overdue"];
 const RELEASABLE: MilestoneStatus[] = ["verified", "settlement_failed"];
 const REVIEWABLE: MilestoneStatus[] = ["needs_review", "disputed"];
 // ACCEPTS_EVIDENCE in app/services/verification.py
@@ -102,7 +116,7 @@ const EVIDENCE_OPEN: MilestoneStatus[] = ["pending", "funded", "evidence_receive
 export function canOnTranche(
   seat: Seat,
   action: TrancheAction,
-  ctx: { status: MilestoneStatus; mode: SettlementMode; agreementActive: boolean; hasHold: boolean; rejected?: boolean; windowClosed?: boolean },
+  ctx: { status: MilestoneStatus; mode: SettlementMode; agreementActive: boolean; hasHold: boolean; rejected?: boolean; windowClosed?: boolean; anyHold?: boolean; lapsed?: boolean; proposed?: boolean },
 ): Decision {
   const role = (a: Action) => can(seat, a);
   const state = (ok: boolean, why: string): Decision => (ok ? { ok: true } : { ok: false, reason: why });
@@ -113,12 +127,24 @@ export function canOnTranche(
       if (ctx.mode !== "escrow_release") return { ok: false, reason: "Invoice-mode tranches are billed when they verify; nothing is funded up front." };
       const r = role("fund");
       if (!r.ok) return r;
-      if (ctx.hasHold) return { ok: false, reason: "This tranche already has a live hold." };
+      if (ctx.hasHold) return { ok: false, reason: isCoFunder(seat) ? "Your share of this tranche is already held." : "This tranche already has a live hold." };
       return state(!["settling", "held", "contested", "settled", "refunded", "payout_failed"].includes(ctx.status), "This tranche is already being paid.");
     }
     case "void": {
       const r = role("void");
-      return r.ok ? state(VOIDABLE.includes(ctx.status), "Only a held tranche with no evidence yet can be cancelled.") : r;
+      if (!r.ok) return r;
+      if (!VOIDABLE.includes(ctx.status)) return { ok: false, reason: "Only a held tranche with no evidence yet can be cancelled." };
+      return state(isCoFunder(seat) ? ctx.hasHold : !!(ctx.anyHold ?? ctx.hasHold), isCoFunder(seat) ? "You haven't held your share yet." : "There is no live hold to cancel.");
+    }
+    case "shortfall": {
+      const r = role("resolve_shortfall");
+      if (!r.ok) return r;
+      if (!["pending", "overdue"].includes(ctx.status) || !ctx.anyHold) return { ok: false, reason: "A shortfall is decided while some funders have held their share and others haven't." };
+      return state(!ctx.proposed, "A proposal to shrink this tranche is waiting for the payee.");
+    }
+    case "answer_shortfall": {
+      const r = role("accept_shortfall");
+      return r.ok ? state(!!ctx.proposed, "No proposal to shrink this tranche is open.") : r;
     }
     case "release": {
       const r = role("release");

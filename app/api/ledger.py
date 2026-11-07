@@ -33,6 +33,7 @@ class SettlementAttempt(SQLModel):
     amount: Decimal = Field(description="What this attempt captures or invoices (a share, with partial release).")
     final: bool = Field(description="Escrow: whether this capture closes the hold. False for a partial share.")
     criterion_ids: list[str] = Field(description="The criteria this capture pays for.")
+    funder: str | None = Field(default=None, description="Escrow: whose hold this capture takes from.")
     error: str | None = Field(description="PayPal's error when the attempt failed.")
     created_at: datetime = Field(description="When the attempt started.")
     updated_at: datetime = Field(description="Last change.")
@@ -85,6 +86,11 @@ def ledger(agreement_id: str, access: AgreementAccessDep, session: SessionDep) -
     return LedgerView(
         currency=a.currency,
         entries=[LedgerEntryRead.model_validate(e) for e in entries],
-        settlements=[SettlementAttempt.model_validate(s) for s in attempts],
+        settlements=[
+            SettlementAttempt.model_validate(
+                s, update={"funder": s.hold.party.display_name if s.hold is not None and s.hold.party else None}
+            )
+            for s in attempts
+        ],
         disbursements=[DisbursementAttempt.model_validate(d) for d in disbursements],
     )

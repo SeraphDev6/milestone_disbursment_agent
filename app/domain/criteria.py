@@ -273,6 +273,18 @@ def lint_agreement(agreement: AgreementBase, *, reviewer_invited: bool = False) 
     report = lint_tranches(agreement.total_amount, agreement.milestones, partial_release=partial)  # type: ignore[attr-defined]
     on_capture = getattr(agreement, "deliverable_release", None) == DeliverableRelease.on_capture
     mode = getattr(agreement, "settlement_mode", None)
+    co_funded = any(getattr(m, "shares", None) for m in agreement.milestones)  # type: ignore[attr-defined]
+    if co_funded and mode == SettlementMode.invoice_on_verify:
+        report.issues.append(
+            _issue(
+                LintLevel.error,
+                "co_funding_needs_escrow",
+                "settlement_mode",
+                "Co-funders each place a PayPal hold on their share; invoice mode has nothing to hold.",
+                "Use escrow, or remove the shares so one payer is invoiced.",
+            )
+        )
+        report.ok = False
     if partial and mode == SettlementMode.invoice_on_verify:
         report.issues.append(
             _issue(
@@ -383,6 +395,23 @@ def lint_tranches(
     issues: list[LintIssue] = []
 
     for mi, m in enumerate(milestones):
+        shares = list(getattr(m, "shares", None) or [])
+        share_sum = sum((sh.amount for sh in shares), start=Decimal(0))
+        if share_sum > m.amount:
+            issues.append(
+                _issue(
+                    E,
+                    "shares_exceed_tranche",
+                    f"milestones[{mi}].shares",
+                    f"Co-funders' shares add up to {share_sum}, more than the tranche's {m.amount}.",
+                    "Lower a share or raise the tranche; the lead funder covers whatever the shares leave.",
+                )
+            )
+        emails = [sh.email.lower() for sh in shares]
+        for dup in sorted({e for e in emails if emails.count(e) > 1}):
+            issues.append(
+                _issue(E, "share_funder_repeated", f"milestones[{mi}].shares", f"{dup} has two shares of this tranche.")
+            )
         weights = {Decimal(str(c.weight)) for c in m.criteria}
         if len(weights) > 1 and not partial_release:
             issues.append(
@@ -462,10 +491,12 @@ def criteria_hash(
 ) -> str:
     """Hash of everything a party signs off on: tranche order and MilestoneBase's fields (title, amount, due date,
     criteria), plus deliverable_release and min_evidence_visibility when deliverable_release isn't the default, and
-    partial_release when it is on. Works on request bodies and stored rows alike, since both are MilestoneBase."""
+    partial_release when it is on. Works on request bodies and stored rows alike, since both are MilestoneBase.
+    A tranche's funder `shares` are left out: the split between funders is their business (each signs with the share
+    shown and recorded), and covering a shortfall changes it without the payee re-signing."""
     payload: list = []
     for m in milestones:
-        data = MilestoneBase.model_validate(m).model_dump(mode="json")
+        data = MilestoneBase.model_validate(m).model_dump(mode="json", exclude={"shares"})
         data["amount"] = f"{m.amount:.2f}"  # '10000' and '10000.00' (as read back from the DB) must hash the same
         for c, raw in zip(m.criteria, data["criteria"], strict=True):
             # Weights are signed too. Shortest form, so '1', '1.0' and '1.00' hash the same and the default weight

@@ -42,3 +42,23 @@
 
 .actions { display: grid; gap: var(--space-3); }
 .action { display: grid; gap: var(--space-1); }
+
+.funders {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+.funders th,
+.funders td {
+  text-align: left;
+  padding: var(--space-1) var(--space-2) var(--space-1) 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+.funders th {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.funders tr:last-child td {
+  border-bottom: 0;
+}

@@ -56,18 +56,36 @@ def notify_side(
     link: str | None = None,
     *,
     tone: str = "neutral",
+    all_funders: bool = False,
 ) -> int:
     """Email one side of the tranche's agreement. `tone` picks the stamp ink (settled, held, review, alert,
-    neutral), meaning what it means in the app. Returns how many addresses were written to."""
+    neutral), meaning what it means in the app. On the payer side, the lead funder hears everything; co-funders
+    only what concerns their money (`all_funders`). Returns how many addresses were written to."""
     notifier = notifier_for(session)
     if notifier is None:
         return 0
     count = 0
-    for party in (p for p in m.agreement.parties if p.role == role):
+    parties = [p for p in m.agreement.parties if p.role == role and (role != Role.payer or p.lead or all_funders)]
+    for party in parties:
         target = link or notifier.tranche_link(m, party.org_id or "")
         for email in _recipients(session, m, party):
             notifier.mailer.send(email, subject, body, target, tone=tone)
             count += 1
+    return count
+
+
+def notify_party(
+    session: Session, m: Milestone, party: Party, subject: str, body: str, *, tone: str = "neutral"
+) -> int:
+    """Email one party (a co-funder about its own share)."""
+    notifier = notifier_for(session)
+    if notifier is None:
+        return 0
+    target = notifier.tranche_link(m, party.org_id or "")
+    count = 0
+    for email in _recipients(session, m, party):
+        notifier.mailer.send(email, subject, body, target, tone=tone)
+        count += 1
     return count
 
 

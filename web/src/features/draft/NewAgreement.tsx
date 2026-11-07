@@ -236,10 +236,30 @@ export function NewAgreement() {
               </div>
             </div>
           </Sheet>
+          <Sheet title="Co-funders" titleLevel={2}>
+            <div className={layout.stack}>
+              <p style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)", margin: 0 }}>
+                Other funders paying part of this grant. Each joins as a payer with its own organization, signs the criteria, and places its own PayPal hold on the share you give it in each tranche below. Your organization is the lead funder: you review, release and decide a shortfall; co-funders can contest a payment.
+                {draft.settlement_mode !== "escrow_release" && " Co-funding needs escrow."}
+              </p>
+              {draft.co_funder_emails.map((e, i) => (
+                <div key={i} className={layout.row} style={{ alignItems: "flex-end" }}>
+                  <TextField id={`ag-funder-${i}`} className="grow" label={`Co-funder ${i + 1} email`} type="email" value={e} onChange={(v) => set({ co_funder_emails: draft.co_funder_emails.map((x, n) => (n === i ? v : x)) })} error={problems.find((p) => p.href === `#ag-funder-${i}`)?.message} />
+                  <Button variant="quiet" icon="trash" onPress={() => set({ co_funder_emails: draft.co_funder_emails.filter((_, n) => n !== i), milestones: draft.milestones.map((m) => ({ ...m, shares: m.shares.filter((sh) => sh.email.trim().toLowerCase() !== e.trim().toLowerCase()) })) })}>Remove</Button>
+                </div>
+              ))}
+              <div className={layout.row} style={{ alignItems: "flex-end" }}>
+                <Button icon="plus" isDisabled={draft.settlement_mode !== "escrow_release"} onPress={() => set({ co_funder_emails: [...draft.co_funder_emails, ""] })}>Add a co-funder</Button>
+                {draft.co_funder_emails.length > 0 && (
+                  <NumberField label="Funding window" minValue={1} maxValue={28} step={1} value={draft.funding_window_days} onChange={(v) => set({ funding_window_days: v ?? 14 })} description="Days after the first hold on a tranche for the other funders to hold theirs. Past it you can cancel the holds, shrink the tranche or ask the others to cover the gap. PayPal holds last 29 days." />
+                )}
+              </div>
+            </div>
+          </Sheet>
           <section aria-labelledby="tranches-h" className={layout.stack}>
             <h2 id="tranches-h">Tranches and criteria</h2>
             <p style={{ color: "var(--text-secondary)" }}>Every criterion names what's counted and the target, so “done” is never a judgement call. The lint beside each one is the same check that blocks signing.</p>
-            <TranchesEditor tranches={draft.milestones} onChange={(ms) => set({ milestones: ms })} currency={draft.currency} total={draft.total_amount} lint={report} lintPending={pending} problems={problems} provenance={provenance} />
+            <TranchesEditor tranches={draft.milestones} onChange={(ms) => set({ milestones: ms })} currency={draft.currency} total={draft.total_amount} lint={report} lintPending={pending} problems={problems} provenance={provenance} coFunders={draft.co_funder_emails} />
           </section>
           <Nav onBack={() => go(0)} onNext={() => go(2)} nextLabel="Next: people" />
         </div>
@@ -291,6 +311,7 @@ export function NewAgreement() {
                 ["Partial release", draft.partial_release && draft.settlement_mode === "escrow_release" ? "On: each criterion's weighted share pays as it is met" : "Off: a tranche pays in full once every criterion is met"],
                 ["Payee invite", draft.counterparty_email],
                 ["Reviewers", draft.reviewer_emails.filter(Boolean).join(", ") || "None"],
+                ...(draft.co_funder_emails.some(Boolean) ? [["Co-funders", `${draft.co_funder_emails.filter(Boolean).join(", ")}; ${draft.funding_window_days}-day funding window`] as [string, string]] : []),
               ]}
             />
           </Sheet>
@@ -301,7 +322,7 @@ export function NewAgreement() {
           )}
           <Callout tone="note" title="What happens next">
             <ol style={{ margin: 0 }}>
-              <li>The payee and reviewers get an email invitation.</li>
+              <li>The payee, reviewers and any co-funders get an email invitation.</li>
               <li>Everyone reviews the criteria. Only your organization can edit them, and any edit clears all signatures.</li>
               <li>When every party has signed the same criteria, they lock and the agreement goes live.</li>
             </ol>

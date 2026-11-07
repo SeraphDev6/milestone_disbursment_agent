@@ -15,7 +15,7 @@ import pytest
 
 from app.services.settlement import CAPTURE_EVENTS, DISPUTE_EVENTS, PAYOUT_ITEM_EVENTS, REFERENCED_PAYOUT_EVENTS
 from tests.helpers import connect_paypal, create_active, h
-from tests.test_escrow import fund, gw, webhook
+from tests.test_escrow import auth_id, fund, gw, webhook
 from tests.test_payouts import captured, tranche
 
 FIXTURES = Path(__file__).parent / "fixtures" / "paypal_simulator"
@@ -65,7 +65,7 @@ def test_authorization_sample_without_related_ids_matches_the_hold_we_have(clien
     fund(client, m1, ctx)
     event = sample("PAYMENT.AUTHORIZATION.CREATED", "WH-S-A1")
     assert "supplementary_data" not in event["resource"]  # as PayPal's v2 sample has it
-    event["resource"]["id"] = tranche(client, m1).paypal_authorization_id
+    event["resource"]["id"] = auth_id(client, m1)
     assert webhook(client, event).json() == {"outcome": "already funded"}
 
 

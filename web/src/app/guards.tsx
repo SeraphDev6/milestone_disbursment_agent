@@ -1,3 +1,4 @@
+import type { PartyRead } from "@/api/types";
 import { Navigate, Outlet, useLocation, useParams } from "react-router";
 import { useAgreement, useMe } from "@/api/queries";
 import { isApiError } from "@/api/errors";
@@ -70,11 +71,11 @@ export function AgreementRoute() {
     );
   }
   const a = q.data;
-  const party = a.parties.find((p) => p.org_id === org.orgId);
+  const party = a.parties.find((p) => p.org_id === org.orgId) as PartyRead | undefined;
   if (!party) return <Callout tone="error" title="Not a party">{org.orgName} has no seat on this agreement.</Callout>;
   return (
     <AgreementContext.Provider
-      value={{ agreement: a, party, side: party.role, seat: { role: party.role, orgRole: org.role, orgName: org.orgName }, base: paths.agreement(org.orgId, a.id) }}
+      value={{ agreement: a, party, side: party.role, seat: { role: party.role, orgRole: org.role, orgName: org.orgName, lead: party.role === "payer" ? party.lead : undefined }, base: paths.agreement(org.orgId, a.id) }}
     >
       <Outlet />
     </AgreementContext.Provider>

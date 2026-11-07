@@ -1,5 +1,5 @@
 import { DEMO_GRANT } from "@/features/demo/seed";
-import { agreementOut, agreementProblems, blankDraft, criterionOut, tranchesFrom, tranchesProblems, type CriterionForm } from "./model";
+import { agreementOut, agreementProblems, blankDraft, criterionOut, leadShare, tranchesFrom, tranchesOut, tranchesProblems, type CriterionForm } from "./model";
 
 const base: CriterionForm = {
   key: "k",
@@ -38,7 +38,18 @@ test("shape problems point at the exact field", () => {
   expect(p[0]!.href).toBe("#f-milestones-0-amount");
 });
 
-test("payee and reviewers must be different people", () => {
+test("payee, reviewers and co-funders must be different people", () => {
   const d = { ...blankDraft(), counterparty_email: "a@x.org", reviewer_emails: ["A@x.org"] };
-  expect(agreementProblems(d, "parties").map((p) => p.message)).toContain("The payee and reviewers must be different people");
+  expect(agreementProblems(d, "parties").map((p) => p.message)).toContain("The payee, reviewers and co-funders must be different people");
+  const invoiced = { ...blankDraft(), settlement_mode: "invoice_on_verify" as const, counterparty_email: "a@x.org", co_funder_emails: ["b@x.org"] };
+  expect(agreementProblems(invoiced, "parties").map((p) => p.message)).toContain("Co-funding needs escrow: each funder places a PayPal hold on its share");
+});
+
+test("co-funders' shares leave the lead the rest, and are dropped when empty", () => {
+  const [t] = tranchesFrom(DEMO_GRANT.milestones);
+  const shared = { ...t!, amount: "10000.00", shares: [{ email: "b@x.org", amount: "4000" }, { email: "c@x.org", amount: "" }] };
+  expect(leadShare(shared)).toBe(6000);
+  expect(tranchesOut([shared])[0]!.shares).toEqual([{ email: "b@x.org", amount: "4000.00" }]);
+  const over = { ...shared, shares: [{ email: "b@x.org", amount: "12000" }] };
+  expect(tranchesProblems([over]).map((p) => p.path)).toContain("milestones[0].shares");
 });

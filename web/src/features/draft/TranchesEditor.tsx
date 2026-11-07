@@ -21,7 +21,7 @@ import {
   TextField,
   type Problem,
 } from "@/design/components";
-import { blankCriterion, blankTranche, sumAmounts, type CriterionForm, type TrancheForm } from "./model";
+import { blankCriterion, blankTranche, leadShare, sumAmounts, type CriterionForm, type TrancheForm } from "./model";
 import s from "./Editor.module.css";
 
 type Props = {
@@ -34,6 +34,8 @@ type Props = {
   problems: Problem[];
   /** path ("milestones[0].criteria[1]") -> quote from the source document */
   provenance?: Record<string, string>;
+  /** Co-funders' emails (from the draft); each tranche then names what each one funds. */
+  coFunders?: string[];
 };
 
 const COMPARATORS = (Object.keys(COMPARATOR_LABEL) as (keyof typeof COMPARATOR_LABEL)[]).map((id) => ({ id, label: COMPARATOR_LABEL[id] }));
@@ -44,8 +46,15 @@ const VERIFICATION = [
   { id: "human" as const, label: VERIFICATION_LABEL.human, description: "Always goes to the payer side; this tranche can never auto-release." },
 ];
 
-export function TranchesEditor({ tranches, onChange, currency, total, lint, lintPending, problems, provenance = {} }: Props) {
+export function TranchesEditor({ tranches, onChange, currency, total, lint, lintPending, problems, provenance = {}, coFunders = [] }: Props) {
   const err = (path: string) => problems.find((p) => p.path === path)?.message ?? null;
+  const funders = coFunders.map((e) => e.trim()).filter(Boolean);
+  const shareOf = (t: TrancheForm, email: string) => t.shares.find((s) => s.email.trim().toLowerCase() === email.toLowerCase())?.amount ?? "";
+  const setShare = (i: number, email: string, amount: string) => {
+    const t = tranches[i]!;
+    const rest = t.shares.filter((s) => s.email.trim().toLowerCase() !== email.toLowerCase());
+    setT(i, { shares: amount === "" ? rest : [...rest, { email, amount }] });
+  };
   const issues = lint?.issues ?? [];
   const sum = sumAmounts(tranches);
   const totalN = Number(total) || 0;
@@ -88,6 +97,30 @@ export function TranchesEditor({ tranches, onChange, currency, total, lint, lint
                   <DateField id={fieldId(`${base}.due_date`)} label="Due" optional value={t.due_date} onChange={(v) => setT(i, { due_date: v })} description="Passing it with no evidence marks the tranche overdue." />
                 </div>
               </div>
+              {funders.length > 0 && (
+                <fieldset style={{ border: 0, padding: 0, margin: 0 }} className={layout.stack}>
+                  <legend style={{ fontWeight: 700, marginBottom: "var(--space-1)" }}>Funded by</legend>
+                  <div className={layout.grid2}>
+                    {funders.map((email, k) => (
+                      <NumberField
+                        key={email}
+                        id={fieldId(`${base}.shares[${k}]`)}
+                        label={email}
+                        optional
+                        prefix={currency}
+                        fractionDigits={2}
+                        minValue={0}
+                        value={shareOf(t, email) === "" ? null : Number(shareOf(t, email))}
+                        onChange={(v) => setShare(i, email, v === null ? "" : v.toFixed(2))}
+                        description={k === 0 ? "Leave empty if this funder isn't in this tranche." : undefined}
+                      />
+                    ))}
+                  </div>
+                  <p id={fieldId(`${base}.shares`)} style={{ margin: 0, fontSize: "var(--text-sm)", color: leadShare(t) < 0 ? "var(--danger)" : "var(--text-secondary)" }} role={leadShare(t) < 0 ? "alert" : undefined}>
+                    {leadShare(t) < 0 ? `Shares add up to more than the tranche by ${money(-leadShare(t), currency)}.` : `You fund the rest: ${money(leadShare(t), currency)}. Each funder places its own PayPal hold; the tranche is funded once every share is held.`}
+                  </p>
+                </fieldset>
+              )}
               {trancheIssues.length > 0 && <Notes issues={trancheIssues} />}
               <ol className={s.criteria} aria-label={`Criteria for tranche ${i + 1}`}>
                 {t.criteria.map((c, j) => (

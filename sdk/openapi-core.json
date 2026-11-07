@@ -68,6 +68,14 @@
             "title": "Auto Release Threshold",
             "type": "number"
           },
+          "co_funder_emails": {
+            "description": "Co-funded grants: other funders to invite. Each joins as a payer with its own organization and funds the share each tranche's `shares` give it; your organization is the lead funder.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Co Funder Emails",
+            "type": "array"
+          },
           "counterparty_email": {
             "description": "Email of the person invited to accept for the payee organization.",
             "maxLength": 320,
@@ -94,6 +102,14 @@
             "maximum": 14.0,
             "minimum": 0.0,
             "title": "Dispute Window Days",
+            "type": "integer"
+          },
+          "funding_window_days": {
+            "default": 14,
+            "description": "Co-funded grants: days after the first funder holds its share of a tranche for the others to hold theirs. Past it, the lead funder can void the holds, shrink the tranche to what was funded (the payee accepts) or ask the funders who agree to cover the gap. PayPal holds last 29 days.",
+            "maximum": 28.0,
+            "minimum": 1.0,
+            "title": "Funding Window Days",
             "type": "integer"
           },
           "milestones": {
@@ -249,6 +265,14 @@
           },
           "funding": {
             "$ref": "#/components/schemas/FundingSummary"
+          },
+          "funding_window_days": {
+            "default": 14,
+            "description": "Co-funded grants: days after the first funder holds its share of a tranche for the others to hold theirs. Past it, the lead funder can void the holds, shrink the tranche to what was funded (the payee accepts) or ask the funders who agree to cover the gap. PayPal holds last 29 days.",
+            "maximum": 28.0,
+            "minimum": 1.0,
+            "title": "Funding Window Days",
+            "type": "integer"
           },
           "id": {
             "description": "Agreement id.",
@@ -542,6 +566,40 @@
           "criteria_hash"
         ],
         "title": "ConfirmRequest",
+        "type": "object"
+      },
+      "CoverShare": {
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "How much of the gap they take on.",
+            "title": "Amount"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The co-funder (by invited email) taking on this part of the gap; null for the lead.",
+            "title": "Email"
+          }
+        },
+        "required": [
+          "amount"
+        ],
+        "title": "CoverShare",
         "type": "object"
       },
       "Criterion-Input": {
@@ -1263,6 +1321,60 @@
         "title": "ExtractionResult",
         "type": "object"
       },
+      "FunderShare-Input": {
+        "description": "A co-funder's part of one tranche, named by the email its invitation went to.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "What this funder holds and pays of the tranche.",
+            "title": "Amount"
+          },
+          "email": {
+            "description": "The co-funder's invited email.",
+            "maxLength": 320,
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "amount"
+        ],
+        "title": "FunderShare",
+        "type": "object"
+      },
+      "FunderShare-Output": {
+        "description": "A co-funder's part of one tranche, named by the email its invitation went to.",
+        "properties": {
+          "amount": {
+            "description": "What this funder holds and pays of the tranche.",
+            "title": "Amount",
+            "type": "string"
+          },
+          "email": {
+            "description": "The co-funder's invited email.",
+            "maxLength": 320,
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "amount"
+        ],
+        "title": "FunderShare",
+        "type": "object"
+      },
       "FundingStarted": {
         "examples": [
           {
@@ -1346,11 +1458,88 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HoldRead": {
+        "description": "One funder's PayPal hold on a tranche.",
+        "properties": {
+          "amount": {
+            "description": "The share this hold covers.",
+            "title": "Amount",
+            "type": "string"
+          },
+          "awaiting_approval": {
+            "default": false,
+            "description": "A funding order exists and PayPal is waiting for this funder to approve it.",
+            "title": "Awaiting Approval",
+            "type": "boolean"
+          },
+          "funded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When this hold was placed.",
+            "title": "Funded At"
+          },
+          "funder": {
+            "description": "The funder's organization name.",
+            "title": "Funder",
+            "type": "string"
+          },
+          "id": {
+            "description": "Hold id.",
+            "title": "Id",
+            "type": "string"
+          },
+          "lead": {
+            "description": "Whether this is the lead funder's hold.",
+            "title": "Lead",
+            "type": "boolean"
+          },
+          "party_id": {
+            "description": "The funder's party on the agreement.",
+            "title": "Party Id",
+            "type": "string"
+          },
+          "paypal_authorization_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The live authorization, when held.",
+            "title": "Paypal Authorization Id"
+          },
+          "remaining": {
+            "description": "What the hold still has to cover: the share less what partial releases captured.",
+            "title": "Remaining",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "party_id",
+          "funder",
+          "lead",
+          "amount",
+          "remaining"
+        ],
+        "title": "HoldRead",
+        "type": "object"
+      },
       "InvitationKind": {
-        "description": "counterparty (join as the payee), reviewer (join as a reviewer), member (join an organization).",
+        "description": "counterparty (join as the payee), reviewer (join as a reviewer), funder (join as a co-funder), member (join an organization).",
         "enum": [
           "counterparty",
           "reviewer",
+          "funder",
           "member"
         ],
         "title": "InvitationKind",
@@ -1495,10 +1684,11 @@
           },
           "kind": {
             "default": "reviewer",
-            "description": "counterparty: the payee (replaces a pending payee invitation); reviewer.",
+            "description": "counterparty: the payee (replaces a pending payee invitation); reviewer; funder: another payer for a co-funded grant (while the agreement is still a draft, so its tranche shares can be set).",
             "enum": [
               "counterparty",
-              "reviewer"
+              "reviewer",
+              "funder"
             ],
             "title": "Kind",
             "type": "string"
@@ -1819,6 +2009,14 @@
             "description": "Target date; passing it without evidence marks the milestone overdue.",
             "title": "Due Date"
           },
+          "shares": {
+            "description": "Co-funded grants: each co-funder's part of this tranche, by invited email; the lead funder covers the rest. Empty when one payer funds it all. Every funder places its own PayPal hold and the tranche is funded once every share is held; a release captures each hold's part. Not part of the criteria hash: a shortfall can be covered by the funders who agree without the payee re-signing.",
+            "items": {
+              "$ref": "#/components/schemas/FunderShare-Input"
+            },
+            "title": "Shares",
+            "type": "array"
+          },
           "title": {
             "description": "Short name of the tranche or deliverable.",
             "maxLength": 200,
@@ -1863,6 +2061,14 @@
             ],
             "description": "Target date; passing it without evidence marks the milestone overdue.",
             "title": "Due Date"
+          },
+          "shares": {
+            "description": "Co-funded grants: each co-funder's part of this tranche, by invited email; the lead funder covers the rest. Empty when one payer funds it all. Every funder places its own PayPal hold and the tranche is funded once every share is held; a release captures each hold's part. Not part of the criteria hash: a shortfall can be covered by the funders who agree without the payee re-signing.",
+            "items": {
+              "$ref": "#/components/schemas/FunderShare-Output"
+            },
+            "title": "Shares",
+            "type": "array"
           },
           "title": {
             "description": "Short name of the tranche or deliverable.",
@@ -1942,6 +2148,12 @@
             "description": "Target date; passing it without evidence marks the milestone overdue.",
             "title": "Due Date"
           },
+          "funded_amount": {
+            "default": "0.00",
+            "description": "Covered by live holds. The tranche is funded when this reaches `amount`.",
+            "title": "Funded Amount",
+            "type": "string"
+          },
           "funded_at": {
             "anyOf": [
               {
@@ -1952,8 +2164,22 @@
                 "type": "null"
               }
             ],
-            "description": "When the original hold was placed.",
+            "description": "When the tranche became fully held.",
             "title": "Funded At"
+          },
+          "funding_lapsed": {
+            "default": false,
+            "description": "Co-funded: some funders held their share more than `funding_window_days` ago and others still haven't. The lead funder decides: void the holds, shrink the tranche (payee accepts) or cover the gap.",
+            "title": "Funding Lapsed",
+            "type": "boolean"
+          },
+          "holds": {
+            "description": "Every funder's hold on this tranche (live or not).",
+            "items": {
+              "$ref": "#/components/schemas/HoldRead"
+            },
+            "title": "Holds",
+            "type": "array"
           },
           "id": {
             "description": "Tranche (milestone) id.",
@@ -2016,13 +2242,25 @@
                 "type": "null"
               }
             ],
-            "description": "Live PayPal hold for this tranche.",
+            "description": "The live PayPal hold, when one funder holds the tranche. Co-funded: see `holds`.",
             "title": "Paypal Authorization Id"
           },
           "position": {
             "description": "0-based order within the agreement.",
             "title": "Position",
             "type": "integer"
+          },
+          "proposed_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Co-funded: the lead funder proposed shrinking the tranche to what was funded; waits for the payee to accept or decline.",
+            "title": "Proposed Amount"
           },
           "refund_failed": {
             "default": false,
@@ -2055,6 +2293,14 @@
             ],
             "description": "deliverable_release=on_capture: when the payer's money was captured and the full evidence opened to the payer side. Unset while the evidence is withheld.",
             "title": "Revealed At"
+          },
+          "shares": {
+            "description": "Co-funded grants: each co-funder's part of this tranche, by invited email; the lead funder covers the rest. Empty when one payer funds it all. Every funder places its own PayPal hold and the tranche is funded once every share is held; a release captures each hold's part. Not part of the criteria hash: a shortfall can be covered by the funders who agree without the payee re-signing.",
+            "items": {
+              "$ref": "#/components/schemas/FunderShare-Output"
+            },
+            "title": "Shares",
+            "type": "array"
           },
           "status": {
             "$ref": "#/components/schemas/MilestoneStatus",
@@ -2130,6 +2376,25 @@
             "description": "Party id.",
             "title": "Id",
             "type": "string"
+          },
+          "invited_email": {
+            "anyOf": [
+              {
+                "maxLength": 320,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Co-funder: the email its invitation went to, which each tranche's `shares` name.",
+            "title": "Invited Email"
+          },
+          "lead": {
+            "default": false,
+            "description": "Payer only: the lead funder (the org that created the agreement) drafts, reviews, releases and decides a funding shortfall. Other payers are co-funders: they fund their share and can contest.",
+            "title": "Lead",
+            "type": "boolean"
           },
           "org_id": {
             "description": "The organization acting in this role.",
@@ -2360,6 +2625,18 @@
             "title": "Final",
             "type": "boolean"
           },
+          "funder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Escrow: whose hold this capture takes from.",
+            "title": "Funder"
+          },
           "id": {
             "description": "Settlement attempt id.",
             "title": "Id",
@@ -2528,6 +2805,79 @@
         ],
         "title": "SettlementStatus",
         "type": "string"
+      },
+      "ShortfallAnswer": {
+        "examples": [
+          {
+            "accept": true,
+            "note": "Fine at the funded amount."
+          }
+        ],
+        "properties": {
+          "accept": {
+            "description": "true: the tranche shrinks to the funded amount; false: the proposal is dropped.",
+            "title": "Accept",
+            "type": "boolean"
+          },
+          "note": {
+            "default": "",
+            "description": "Kept in the audit record and sent to the lead funder.",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "accept"
+        ],
+        "title": "ShortfallAnswer",
+        "type": "object"
+      },
+      "ShortfallIn": {
+        "examples": [
+          {
+            "cover": [
+              {
+                "amount": "6000.00",
+                "email": "grants@second.example.org"
+              }
+            ],
+            "decision": "cover",
+            "note": "Harbor can't fund this tranche this quarter; Second Foundation agreed to cover it."
+          }
+        ],
+        "properties": {
+          "cover": {
+            "description": "cover: who takes how much of the gap.",
+            "items": {
+              "$ref": "#/components/schemas/CoverShare"
+            },
+            "title": "Cover",
+            "type": "array"
+          },
+          "decision": {
+            "description": "void releases every hold placed so far (the tranche goes back to pending); shrink proposes the tranche at what was funded, for the payee to accept; cover reassigns the unfunded part to the funders named in `cover`, who agree by funding it.",
+            "enum": [
+              "void",
+              "shrink",
+              "cover"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "description": "Kept in the audit record and sent with the notices.",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ShortfallIn",
+        "type": "object"
       },
       "SkepticPass": {
         "description": "A second verifier run told to look for reasons each criterion is NOT met. Auto-release needs both passes\nto agree that every model-judged criterion is met.",
@@ -2880,7 +3230,7 @@
       "name": "AGPL-3.0-only"
     },
     "title": "Milestone Disbursement Engine (core)",
-    "version": "0.2.0"
+    "version": "0.3.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -4278,7 +4628,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Payer starts a PayPal hold for one tranche",
+        "summary": "Payer starts a PayPal hold for one tranche (co-funded: for this funder's share of it)",
         "tags": [
           "settlement"
         ]
@@ -4917,6 +5267,268 @@
         "summary": "Payer (admin) or reviewer approves, rejects, or pays the met share of a verdict in review",
         "tags": [
           "evidence"
+        ]
+      }
+    },
+    "/milestones/{milestone_id}/shortfall": {
+      "post": {
+        "operationId": "resolveShortfall",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "milestone_id",
+            "required": true,
+            "schema": {
+              "title": "Milestone Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShortfallIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgreementRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "The request body or parameters failed validation."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Co-funded: the lead funder decides a tranche some funders never held (after the funding window)",
+        "tags": [
+          "settlement"
+        ]
+      }
+    },
+    "/milestones/{milestone_id}/shortfall/answer": {
+      "post": {
+        "operationId": "answerShortfall",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "milestone_id",
+            "required": true,
+            "schema": {
+              "title": "Milestone Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which of your orgs you act for, if you belong to several.",
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which of your orgs you act for, if you belong to several.",
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShortfallAnswer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgreementRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No, invalid or expired bearer token."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller's organization or role may not do this (e.g. the payee can't release; a payer can't approve withheld work)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No such agreement, tranche or subscription, or the caller's organization isn't a party to it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The resource isn't in a state that allows this; `detail` says which state it is in."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "The request body or parameters failed validation."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Co-funded: the payee accepts or declines the lead funder's proposal to shrink a tranche",
+        "tags": [
+          "settlement"
         ]
       }
     },

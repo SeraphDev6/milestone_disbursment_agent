@@ -11,7 +11,33 @@ from app.models.columns import enum_type, fk, id_field, timestamp, utcnow
 from app.models.enums import DisbursementKind, MilestoneStatus, SettlementMode, SettlementStatus
 
 if TYPE_CHECKING:
-    from app.models.agreements import Milestone
+    from app.models.agreements import Milestone, Party
+
+
+class Hold(SQLModel, table=True):
+    """One funder's PayPal authorization on one tranche. A single-payer tranche has one; a co-funded tranche has one
+    per funder (and another when a funder covers part of a shortfall). The row outlives the authorization: an expired
+    or voided hold keeps its share and is funded again through the same row."""
+
+    __tablename__ = "holds"
+
+    id: str = id_field()
+    milestone_id: str | None = fk("milestones.id")
+    party_id: str | None = fk("parties.id")  # the funder
+    amount: Decimal = Field(max_digits=14, decimal_places=2)  # the share this hold covers
+    paypal_order_id: str | None = Field(default=None, max_length=64, index=True)  # latest funding order
+    paypal_authorization_id: str | None = Field(default=None, max_length=64, index=True)  # current live hold
+    funded_at: datetime | None = timestamp(optional=True)  # when this authorization was placed
+    reauthorized_at: datetime | None = timestamp(optional=True)
+    created_at: datetime = timestamp()
+
+    milestone: "Milestone" = Relationship(back_populates="holds")
+    party: "Party" = Relationship()
+    settlements: list["Settlement"] = Relationship(back_populates="hold")
+
+    @property
+    def live(self) -> bool:
+        return self.paypal_authorization_id is not None
 
 
 class SettlementBase(SQLModel):
@@ -49,6 +75,7 @@ class Settlement(SettlementBase, table=True):
 
     id: str = id_field()
     milestone_id: str | None = fk("milestones.id")
+    hold_id: str | None = fk("holds.id", optional=True)  # escrow: the funder's hold this capture takes from
     error: str | None = Field(default=None, max_length=500)
     payer_url: str | None = Field(default=None, max_length=500)  # invoice mode: PayPal's invoice page for the payer
     created_at: datetime = timestamp()
@@ -57,6 +84,7 @@ class Settlement(SettlementBase, table=True):
     )
 
     milestone: "Milestone" = Relationship(back_populates="settlements")
+    hold: Optional["Hold"] = Relationship(back_populates="settlements")
     disbursements: list["Disbursement"] = Relationship(back_populates="settlement")
 
 

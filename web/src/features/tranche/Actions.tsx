@@ -5,8 +5,8 @@ import type { AgreementRead, MilestoneRead, VerdictRead } from "@/api/types";
 import { errorMessage } from "@/api/errors";
 import type { useTrancheActions } from "@/api/queries";
 import { dateTime, money } from "@/domain/format";
-import { approveBlockedByReviewerRule, canOnTranche, type Seat, type TrancheAction } from "@/domain/permissions";
-import { Button, ButtonLink, Callout, ConfirmDialog, PermissionNote, Sheet, TextArea, toast } from "@/design/components";
+import { approveBlockedByReviewerRule, canOnTranche, isCoFunder, type Seat, type TrancheAction } from "@/domain/permissions";
+import { Button, ButtonLink, Callout, ConfirmDialog, PermissionNote, Select, Sheet, TextArea, toast } from "@/design/components";
 import s from "./Tranche.module.css";
 
 type Acts = ReturnType<typeof useTrancheActions>;
@@ -15,10 +15,12 @@ type Acts = ReturnType<typeof useTrancheActions>;
  * Everything this seat can do to this tranche now. Actions that aren't available stay listed with the
  * reason, so nobody wonders where a button went. Every money-moving action is confirmed in a dialog.
  */
-export function Actions({ a, m, seat, verdict, acts, rejected }: { a: AgreementRead; m: MilestoneRead; seat: Seat; verdict: VerdictRead | null; acts: Acts; rejected: boolean }) {
-  const [dialog, setDialog] = useState<null | "fund" | "void" | "release" | "approve" | "releaseMet" | "reject" | "dispute" | "payNow" | "contest" | "resolveRelease" | "resolveRefund">(null);
+export function Actions({ a, m, seat, verdict, acts, rejected, myPartyId }: { a: AgreementRead; m: MilestoneRead; seat: Seat; verdict: VerdictRead | null; acts: Acts; rejected: boolean; myPartyId?: string }) {
+  const [dialog, setDialog] = useState<null | "fund" | "void" | "release" | "approve" | "releaseMet" | "reject" | "dispute" | "payNow" | "contest" | "resolveRelease" | "resolveRefund" | "voidAll" | "shrink" | "cover" | "acceptShrink" | "declineShrink">(null);
   const [contestReason, setContestReason] = useState("");
   const [resolveNote, setResolveNote] = useState("");
+  const [coverBy, setCoverBy] = useState<string | null>(null);
+  const [shortfallNote, setShortfallNote] = useState("");
   const [note, setNote] = useState("");
   const [reason, setReason] = useState("");
   const [fundUrl, setFundUrl] = useState<string | null>(null);
@@ -28,10 +30,27 @@ export function Actions({ a, m, seat, verdict, acts, rejected }: { a: AgreementR
   }, [fundUrl, m.awaiting_approval]);
   const now = useNow();
   const windowClosed = !!m.release_due_at && Date.parse(m.release_due_at) <= now;
-  const ctx = { status: m.status, mode: a.settlement_mode, agreementActive: a.status === "active", hasHold: !!m.paypal_authorization_id, rejected, windowClosed };
+  // Co-funded: each funder holds its own share. "Has a hold" means this seat's share is held (the lead's share is
+  // the tranche less the co-funders'); the tranche is funded once every share is.
+  const coFunded = m.shares.length > 0;
+  const liveHolds = m.holds.filter((x) => x.paypal_authorization_id);
+  const myHolds = m.holds.filter((x) => x.party_id === myPartyId);
+  const myShare = coFunded ? (isCoFunder(seat) ? Number(m.shares.find((sh) => sh.email.toLowerCase() === (a.parties.find((p) => p.id === myPartyId)?.invited_email ?? "").toLowerCase())?.amount ?? 0) : Number(m.amount) - m.shares.reduce((n, sh) => n + Number(sh.amount), 0)) : Number(m.amount);
+  const myHeld = myHolds.filter((x) => x.paypal_authorization_id).reduce((n, x) => n + Number(x.amount), 0);
+  const myDue = Math.max(0, myShare - myHeld);
+  const hasHold = coFunded ? myDue <= 0 && myHeld > 0 : liveHolds.length > 0;
+  const fullyFunded = Number(m.funded_amount) >= Number(m.amount);
+  const gap = Math.max(0, Number(m.amount) - Number(m.funded_amount));
+  const ctx = { status: m.status, mode: a.settlement_mode, agreementActive: a.status === "active", hasHold, rejected, windowClosed, anyHold: liveHolds.length > 0, lapsed: m.funding_lapsed, proposed: m.proposed_amount != null };
   const check = (x: TrancheAction) => canOnTranche(seat, x, ctx);
   const payee = a.parties.find((p) => p.role === "payee")?.display_name ?? "the payee";
   const amt = money(m.amount, a.currency);
+  const fundAmt = money(coFunded ? myDue : Number(m.amount) - Number(m.amount_released ?? 0), a.currency);
+  // Who can take on the unfunded part: the lead, and co-funders who have held their share.
+  const coverers = [
+    { id: "__lead", label: `${a.parties.find((p) => p.role === "payer" && p.lead)?.display_name ?? "the lead funder"} (lead)` },
+    ...a.parties.filter((p) => p.role === "payer" && !p.lead && p.invited_email && liveHolds.some((x) => x.party_id === p.id)).map((p) => ({ id: p.invited_email!, label: p.display_name })),
+  ];
   const hasReviewer = a.parties.some((p) => p.role === "reviewer" && p.org_id);
   const withheldForReviewer = a.deliverable_release === "on_capture" && !m.revealed_at && a.reviewer_decides_withheld && hasReviewer;
   const reviewerOnly = approveBlockedByReviewerRule(seat, a.require_reviewer_approval, withheldForReviewer);
@@ -54,8 +73,29 @@ export function Actions({ a, m, seat, verdict, acts, rejected }: { a: AgreementR
   const add = (key: TrancheAction, button: React.ReactNode, show = true) => rows.push({ key, show, button });
 
   if (seat.role === "payer" && a.settlement_mode === "escrow_release")
-    add("fund", <Button variant="primary" icon="ledger" isDisabled={!check("fund").ok} onPress={() => setDialog("fund")}>Fund {amt}</Button>, m.status === "pending" || m.status === "overdue");
-  if (seat.role === "payer") add("void", <Button icon="close" isDisabled={!check("void").ok} onPress={() => setDialog("void")}>Cancel the hold</Button>, m.status === "funded");
+    add("fund", <Button variant="primary" icon="ledger" isDisabled={!check("fund").ok} onPress={() => setDialog("fund")}>{coFunded ? `Fund my share (${fundAmt})` : `Fund ${fundAmt}`}</Button>, (m.status === "pending" || m.status === "overdue") && !fullyFunded);
+  if (seat.role === "payer") add("void", <Button icon="close" isDisabled={!check("void").ok} onPress={() => setDialog("void")}>{coFunded ? (isCoFunder(seat) ? "Cancel my hold" : "Cancel every hold") : "Cancel the hold"}</Button>, m.status === "funded" || (coFunded && liveHolds.length > 0 && ["pending", "overdue"].includes(m.status) && (isCoFunder(seat) ? myHeld > 0 : true)));
+  if (seat.role === "payer" && coFunded && !isCoFunder(seat)) {
+    const sf = check("shortfall");
+    add("shortfall", (
+      <div className={s.action}>
+        <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+          <Button icon="arrow" isDisabled={!sf.ok || !m.funding_lapsed} onPress={() => setDialog("shrink")}>Propose {money(m.funded_amount, a.currency)} to {payee}</Button>
+          <Button icon="plus" isDisabled={!sf.ok || !m.funding_lapsed} onPress={() => setDialog("cover")}>Ask a funder to cover {money(gap, a.currency)}</Button>
+        </div>
+        {sf.ok && !m.funding_lapsed && <PermissionNote>These open once the funding window ({a.funding_window_days} days after the first hold) has passed. You can cancel every hold any time.</PermissionNote>}
+      </div>
+    ), ["pending", "overdue"].includes(m.status) && liveHolds.length > 0 && !fullyFunded);
+  }
+  if (seat.role === "payee" && m.proposed_amount != null) {
+    const an = check("answer_shortfall");
+    add("answer_shortfall", (
+      <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+        <Button variant="primary" icon="check" isDisabled={!an.ok} onPress={() => setDialog("acceptShrink")}>Accept {money(m.proposed_amount, a.currency)}</Button>
+        <Button variant="danger" icon="cross" isDisabled={!an.ok} onPress={() => setDialog("declineShrink")}>Decline</Button>
+      </div>
+    ));
+  }
   if (seat.role === "payer" || seat.role === "reviewer") {
     const r = check("review");
     add("review", (
@@ -120,8 +160,8 @@ export function Actions({ a, m, seat, verdict, acts, rejected }: { a: AgreementR
       <ConfirmDialog
         isOpen={dialog === "fund"}
         onOpenChange={(o) => !o && setDialog(null)}
-        title="Fund this tranche?"
-        summary={<p style={{ margin: 0 }}>Place a PayPal hold of <strong>{amt}</strong> for {payee}.</p>}
+        title={coFunded ? "Fund your share?" : "Fund this tranche?"}
+        summary={<p style={{ margin: 0 }}>Place a PayPal hold of <strong>{fundAmt}</strong> for {payee}.{coFunded ? ` The tranche (${amt}) is funded once every funder's share is held.` : ""}</p>}
         confirmLabel="Continue to PayPal"
         isPending={acts.fund.isPending}
         onConfirm={() =>
@@ -176,8 +216,47 @@ export function Actions({ a, m, seat, verdict, acts, rejected }: { a: AgreementR
         <p style={{ margin: 0 }}>This can't be undone from here.</p>
       </ConfirmDialog>
 
-      <ConfirmDialog isOpen={dialog === "void"} onOpenChange={(o) => !o && setDialog(null)} title="Cancel the hold?" summary={<p style={{ margin: 0 }}>Release the <strong>{amt}</strong> hold back to your PayPal account.</p>} confirmLabel="Cancel the hold" confirmVariant="danger" isPending={acts.void.isPending} onConfirm={() => run("Hold cancelled", () => acts.void.mutateAsync())}>
-        <p>The tranche goes back to pending; you can fund it again later.</p>
+      <ConfirmDialog isOpen={dialog === "void"} onOpenChange={(o) => !o && setDialog(null)} title={coFunded && !isCoFunder(seat) ? "Cancel every hold?" : "Cancel the hold?"} summary={<p style={{ margin: 0 }}>{coFunded && !isCoFunder(seat) ? <>Release <strong>{money(m.funded_amount, a.currency)}</strong> of holds back to the funders' PayPal accounts.</> : <>Release the <strong>{coFunded ? money(myHeld, a.currency) : amt}</strong> hold back to your PayPal account.</>}</p>} confirmLabel={coFunded && !isCoFunder(seat) ? "Cancel every hold" : "Cancel the hold"} confirmVariant="danger" isPending={acts.void.isPending} onConfirm={() => run("Hold cancelled", () => acts.void.mutateAsync())}>
+        <p>The tranche goes back to pending; it can be funded again later.</p>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        isOpen={dialog === "shrink"}
+        onOpenChange={(o) => !o && setDialog(null)}
+        title="Propose the tranche at what was funded?"
+        summary={<p style={{ margin: 0 }}><strong>{m.title}</strong> would become <strong>{money(m.funded_amount, a.currency)}</strong> instead of {amt}, and the agreement total drops by {money(gap, a.currency)}. {payee} has to accept; funders who held their share keep it as it is.</p>}
+        confirmLabel="Send the proposal"
+        isPending={acts.shortfall.isPending}
+        onConfirm={() => run("Proposal sent", () => acts.shortfall.mutateAsync({ decision: "shrink", note: shortfallNote.trim() }), `${payee} decides from the tranche.`)}
+      >
+        <TextArea label="Note" optional description="Shown to the payee and kept in the audit record." value={shortfallNote} onChange={setShortfallNote} rows={2} maxLength={2000} />
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        isOpen={dialog === "cover"}
+        onOpenChange={(o) => !o && setDialog(null)}
+        title="Who covers the gap?"
+        summary={<p style={{ margin: 0 }}>Reassign the unfunded <strong>{money(gap, a.currency)}</strong> of <strong>{m.title}</strong>. The funders who never held their share drop out of it; whoever covers it agrees by funding the extra.</p>}
+        confirmLabel="Reassign the gap"
+        isPending={acts.shortfall.isPending}
+        confirmDisabled={!coverBy}
+        onConfirm={() => run("Gap reassigned", () => acts.shortfall.mutateAsync({ decision: "cover", cover: [{ email: coverBy === "__lead" ? null : coverBy, amount: gap.toFixed(2) }], note: shortfallNote.trim() }), coverBy === "__lead" ? "Fund the extra from this tranche." : "They've been asked to fund it.")}
+      >
+        <Select label="Covered by" value={coverBy} onChange={setCoverBy} options={coverers} description="The lead, or a co-funder who has already held its share." />
+        <TextArea label="Note" optional description="Sent with the request and kept in the audit record." value={shortfallNote} onChange={setShortfallNote} rows={2} maxLength={2000} />
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        isOpen={dialog === "acceptShrink" || dialog === "declineShrink"}
+        onOpenChange={(o) => !o && setDialog(null)}
+        title={dialog === "acceptShrink" ? "Accept the smaller tranche?" : "Decline the proposal?"}
+        summary={<p style={{ margin: 0 }}>{dialog === "acceptShrink" ? <><strong>{m.title}</strong> becomes <strong>{money(m.proposed_amount, a.currency)}</strong> instead of {amt}; the criteria stay the same and the tranche is funded at once with the holds in place.</> : <>The tranche stays at {amt} and the funders' holds stay as they are; the lead funder can cancel them or ask the others to cover the gap.</>}</p>}
+        confirmLabel={dialog === "acceptShrink" ? `Accept ${money(m.proposed_amount, a.currency)}` : "Decline"}
+        confirmVariant={dialog === "acceptShrink" ? "primary" : "danger"}
+        isPending={acts.answerShortfall.isPending}
+        onConfirm={() => run(dialog === "acceptShrink" ? "Tranche shrunk" : "Proposal declined", () => acts.answerShortfall.mutateAsync({ accept: dialog === "acceptShrink", note: shortfallNote.trim() }))}
+      >
+        <TextArea label="Note" optional description="Sent to the lead funder and kept in the audit record." value={shortfallNote} onChange={setShortfallNote} rows={2} maxLength={2000} />
       </ConfirmDialog>
 
       <ConfirmDialog
@@ -258,6 +337,7 @@ function idleText(m: MilestoneRead, seat: Seat): string {
     case "verified": return seat.role === "payee" ? "Verified. The payer releases the payment next." : "Verified.";
     case "needs_review": return seat.role === "payee" ? "Waiting for the payer side to review." : "Waiting for a reviewer.";
     case "funded": return seat.role === "payee" ? "Funds are held. Submit evidence to get paid." : "Funded; waiting for evidence.";
+    case "pending": return m.shares.length && Number(m.funded_amount) > 0 ? "Partly funded; waiting for the other funders to hold their share." : seat.role === "payee" ? "Submit evidence when the work is done." : "Nothing to do right now.";
     default: return seat.role === "payee" ? "Submit evidence when the work is done." : "Nothing to do right now.";
   }
 }

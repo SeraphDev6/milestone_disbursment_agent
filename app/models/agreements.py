@@ -29,7 +29,7 @@ from app.models.identity import EMAIL_PATTERN
 
 if TYPE_CHECKING:
     from app.models.evidence import Evidence, Verdict
-    from app.models.settlement import Disbursement, Settlement
+    from app.models.settlement import Disbursement, Hold, Settlement
 
 
 def _money(description: str) -> Any:
@@ -49,6 +49,16 @@ class PartyBase(SQLModel):
         description="PayPal account used on this agreement (snapshot of the org's at joining). None for reviewers.",
     )
     display_name: str = Field(min_length=1, max_length=200, description="Org name at joining; shown in the record.")
+    lead: bool = Field(
+        default=False,
+        description="Payer only: the lead funder (the org that created the agreement) drafts, reviews, releases and "
+        "decides a funding shortfall. Other payers are co-funders: they fund their share and can contest.",
+    )
+    invited_email: str | None = Field(
+        default=None,
+        max_length=320,
+        description="Co-funder: the email its invitation went to, which each tranche's `shares` name.",
+    )
 
 
 class Party(PartyBase, table=True):
@@ -79,8 +89,17 @@ class PartyRead(PartyBase):
 # --- Milestone -------------------------------------------------------------------------
 
 
+class FunderShare(SQLModel):
+    """A co-funder's part of one tranche, named by the email its invitation went to."""
+
+    email: str = Field(
+        max_length=320, schema_extra={"pattern": EMAIL_PATTERN}, description="The co-funder's invited email."
+    )
+    amount: Decimal = _money("What this funder holds and pays of the tranche.")
+
+
 class MilestoneBase(SQLModel):
-    """What a tranche is. These fields (and only these) are what both parties sign via the criteria hash."""
+    """What a tranche is. These fields (except `shares`) are what both parties sign via the criteria hash."""
 
     title: str = Field(min_length=1, max_length=200, description="Short name of the tranche or deliverable.")
     amount: Decimal = _money("Amount released or invoiced when it verifies.")
@@ -91,6 +110,14 @@ class MilestoneBase(SQLModel):
         min_length=1,
         sa_type=PydanticJSON(list[Criterion]),
         description="Checkable conditions; all must be met to release this tranche.",
+    )
+    shares: list[FunderShare] = Field(
+        default_factory=list,
+        sa_type=PydanticJSON(list[FunderShare]),
+        description="Co-funded grants: each co-funder's part of this tranche, by invited email; the lead funder covers "
+        "the rest. Empty when one payer funds it all. Every funder places its own PayPal hold and the tranche is "
+        "funded once every share is held; a release captures each hold's part. Not part of the criteria hash: a "
+        "shortfall can be covered by the funders who agree without the payee re-signing.",
     )
 
 
@@ -103,20 +130,23 @@ class Milestone(MilestoneBase, table=True):
     status: MilestoneStatus = Field(default=MilestoneStatus.pending, sa_type=enum_type(MilestoneStatus))
     payer_assignee_id: str | None = fk("users.id", optional=True)  # responsible person on the payer side
     payee_assignee_id: str | None = fk("users.id", optional=True)  # responsible person on the payee side
-    paypal_order_id: str | None = Field(default=None, max_length=64, index=True)  # latest funding order
-    paypal_authorization_id: str | None = Field(default=None, max_length=64, index=True)  # current live hold
-    funded_at: datetime | None = timestamp(optional=True)  # original authorization time
-    reauthorized_at: datetime | None = timestamp(optional=True)
-    # Set when the funding order is created: the connected payee's merchant id (direct route), or None when the
-    # money goes through the platform account and PayPal Payouts.
+    # PayPal holds live in `holds`, one per funder (one for a single payer). funded_at: when the last share was held.
+    funded_at: datetime | None = timestamp(optional=True)
+    # Set when the first funding order is created and shared by every hold on the tranche: the connected payee's
+    # merchant id (direct route), or None when the money goes through the platform account and PayPal Payouts.
     payout_route: PayoutRoute | None = Field(default=None, sa_type=enum_type(PayoutRoute, 16))
     payee_merchant_id: str | None = Field(default=None, max_length=32)
+    proposed_amount: Decimal | None = Field(default=None, max_digits=14, decimal_places=2)  # shrink, awaiting payee
     captured_at: datetime | None = timestamp(optional=True)
     release_due_at: datetime | None = timestamp(optional=True)  # end of the dispute window
     revealed_at: datetime | None = timestamp(optional=True)  # on_capture: when the payer got the full evidence
     custody_ended_at: datetime | None = timestamp(optional=True)  # retention ran: originals purged or payee-only
 
     agreement: "Agreement" = Relationship(back_populates="milestones")
+    holds: list["Hold"] = Relationship(
+        back_populates="milestone",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan", "order_by": "Hold.created_at"},
+    )
     settlements: list["Settlement"] = Relationship(
         back_populates="milestone",
         sa_relationship_kwargs={"cascade": "all, delete-orphan", "order_by": "Settlement.attempt"},
@@ -137,14 +167,50 @@ class MilestoneCreate(MilestoneBase):
     pass
 
 
+class HoldRead(SQLModel):
+    """One funder's PayPal hold on a tranche."""
+
+    id: str = Field(description="Hold id.")
+    party_id: str = Field(description="The funder's party on the agreement.")
+    funder: str = Field(description="The funder's organization name.")
+    lead: bool = Field(description="Whether this is the lead funder's hold.")
+    amount: Decimal = Field(description="The share this hold covers.")
+    remaining: Decimal = Field(
+        description="What the hold still has to cover: the share less what partial releases captured."
+    )
+    paypal_authorization_id: str | None = Field(default=None, description="The live authorization, when held.")
+    funded_at: datetime | None = Field(default=None, description="When this hold was placed.")
+    awaiting_approval: bool = Field(
+        default=False, description="A funding order exists and PayPal is waiting for this funder to approve it."
+    )
+
+
 class MilestoneRead(MilestoneBase):
     id: str = Field(description="Tranche (milestone) id.")
     position: int = Field(description="0-based order within the agreement.")
     status: MilestoneStatus = Field(description="Where the tranche is in its life, pending to settled.")
-    paypal_authorization_id: str | None = Field(default=None, description="Live PayPal hold for this tranche.")
+    paypal_authorization_id: str | None = Field(
+        default=None, description="The live PayPal hold, when one funder holds the tranche. Co-funded: see `holds`."
+    )
+    holds: list[HoldRead] = Field(
+        default_factory=list, description="Every funder's hold on this tranche (live or not)."
+    )
+    funded_amount: Decimal = Field(
+        default=Decimal("0.00"), description="Covered by live holds. The tranche is funded when this reaches `amount`."
+    )
+    funding_lapsed: bool = Field(
+        default=False,
+        description="Co-funded: some funders held their share more than `funding_window_days` ago and others still "
+        "haven't. The lead funder decides: void the holds, shrink the tranche (payee accepts) or cover the gap.",
+    )
+    proposed_amount: Decimal | None = Field(
+        default=None,
+        description="Co-funded: the lead funder proposed shrinking the tranche to what was funded; waits for the "
+        "payee to accept or decline.",
+    )
     payer_assignee_id: str | None = Field(default=None, description="Payer-side user the tranche is assigned to.")
     payee_assignee_id: str | None = Field(default=None, description="Payee-side user the tranche is assigned to.")
-    funded_at: datetime | None = Field(default=None, description="When the original hold was placed.")
+    funded_at: datetime | None = Field(default=None, description="When the tranche became fully held.")
     payout_route: PayoutRoute | None = Field(
         default=None, description="direct: paid into the payee's connected PayPal; platform: via PayPal Payouts."
     )
@@ -230,6 +296,14 @@ class AgreementBase(SQLModel):
         "the rest is met (the hold keeps the remainder; the final capture settles the tranche). Off: a tranche pays "
         "in full when every criterion is met, and nothing before. Part of the criteria hash when on.",
     )
+    funding_window_days: int = Field(
+        default=14,
+        ge=1,
+        le=28,
+        description="Co-funded grants: days after the first funder holds its share of a tranche for the others to hold "
+        "theirs. Past it, the lead funder can void the holds, shrink the tranche to what was funded (the payee "
+        "accepts) or ask the funders who agree to cover the gap. PayPal holds last 29 days.",
+    )
     min_evidence_visibility: EvidenceVisibility = Field(
         default=EvidenceVisibility.hash_only,
         sa_type=enum_type(EvidenceVisibility, 16),
@@ -270,13 +344,27 @@ class AgreementCreate(AgreementBase):
     reviewer_emails: list[str] = Field(
         default_factory=list, description="Optional third-party reviewers to invite (criteria and evidence)."
     )
+    co_funder_emails: list[str] = Field(
+        default_factory=list,
+        description="Co-funded grants: other funders to invite. Each joins as a payer with its own organization and "
+        "funds the share each tranche's `shares` give it; your organization is the lead funder.",
+    )
     milestones: list[MilestoneCreate] = Field(min_length=1, description="Tranches in payment order.")
 
     @model_validator(mode="after")
     def _distinct_invitees(self) -> "AgreementCreate":
-        emails = [self.counterparty_email.lower(), *(e.lower() for e in self.reviewer_emails)]
+        emails = [
+            self.counterparty_email.lower(),
+            *(e.lower() for e in self.reviewer_emails),
+            *(e.lower() for e in self.co_funder_emails),
+        ]
         if len(set(emails)) != len(emails):
-            raise ValueError("the counterparty and reviewers must be different people")
+            raise ValueError("the counterparty, reviewers and co-funders must be different people")
+        funders = {e.lower() for e in self.co_funder_emails}
+        for i, m in enumerate(self.milestones):
+            for sh in m.shares:
+                if sh.email.lower() not in funders:
+                    raise ValueError(f"milestones[{i}].shares names {sh.email}, who isn't in co_funder_emails")
         return self
 
 

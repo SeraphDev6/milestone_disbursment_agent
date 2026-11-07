@@ -90,6 +90,17 @@ def milestone_section(session: Session, m: Milestone, role: Role | str | None = 
         "amount": str(m.amount),
         "amount_released": str(settlement.released(m) - settlement.refunded(m)),
         "criteria_paid": sorted(settlement.paid_criteria(m)),
+        "shares": [{"email": sh.email, "amount": str(sh.amount)} for sh in m.shares],
+        "holds": [
+            {
+                "funder": h.party.display_name if h.party else None,
+                "lead": bool(h.party and h.party.lead),
+                "amount": str(h.amount),
+                "paypal_authorization_id": h.paypal_authorization_id,
+                "funded_at": _iso(h.funded_at),
+            }
+            for h in m.holds
+        ],
         "due_date": m.due_date.isoformat() if m.due_date else None,
         "status": m.status,
         "revealed_at": _iso(m.revealed_at),
@@ -168,6 +179,7 @@ def milestone_section(session: Session, m: Milestone, role: Role | str | None = 
                 "amount": str(s.amount),
                 "final": s.final,
                 "criterion_ids": s.criterion_ids,
+                "funder": s.hold.party.display_name if s.hold is not None and s.hold.party else None,
                 "idempotency_key": s.idempotency_key,
                 "paypal_ref": s.paypal_ref,
                 "status": s.status,
@@ -233,6 +245,7 @@ def build_packet(session: Session, a: Agreement, role: Role | str | None = None)
         "parties": [
             {
                 "role": p.role,
+                "lead": p.lead if p.role == Role.payer else None,
                 "name": p.display_name,
                 "paypal_email": p.paypal_email,
                 "confirmed_criteria_hash": p.confirmed_criteria_hash,
@@ -309,7 +322,12 @@ def render_pdf(packet: dict) -> bytes:
         _table(
             [["Role", "Name", "PayPal", "Confirmed"]]
             + [
-                [p["role"], p["name"], p["paypal_email"], p["confirmed_at"] or "not confirmed"]
+                [
+                    p["role"] + (" (lead)" if p.get("lead") else " (co-funder)" if p.get("lead") is False else ""),
+                    p["name"],
+                    p["paypal_email"],
+                    p["confirmed_at"] or "not confirmed",
+                ]
                 for p in packet["parties"]
             ],
             [0.9 * inch, 1.7 * inch, 2.0 * inch, 1.9 * inch],
@@ -319,7 +337,13 @@ def render_pdf(packet: dict) -> bytes:
     if packet.get("dispute"):
         flow += _dispute_flow(packet["dispute"], h2, small)
     for m in packet["milestones"]:
-        flow += [_p(f"{m['title']} ({a['currency']} {m['amount']}): {m['status']}", h2), _p("Acceptance criteria", h3)]
+        flow += [_p(f"{m['title']} ({a['currency']} {m['amount']}): {m['status']}", h2)]
+        if m.get("holds") and any(not h["lead"] for h in m["holds"]):
+            funded = ", ".join(
+                f"{h['funder']}{' (lead)' if h['lead'] else ''} {a['currency']} {h['amount']}" for h in m["holds"]
+            )
+            flow.append(_p(f"Co-funded: {funded}", small))
+        flow.append(_p("Acceptance criteria", h3))
         flow.append(
             _table(
                 [["Id", "Criterion", "Measure", "Decided by"]]
@@ -424,19 +448,20 @@ def render_pdf(packet: dict) -> bytes:
             flow += [
                 _p("Payments", h3),
                 _table(
-                    [["Attempt", "Mode", "Amount", "For", "PayPal ref", "Status"]]
+                    [["Attempt", "Mode", "Amount", "From", "For", "PayPal ref", "Status"]]
                     + [
                         [
                             s["attempt"],
                             s["mode"],
                             s["amount"],
+                            s.get("funder") or "",
                             ", ".join(s["criterion_ids"]) if not s["final"] else "all",
                             s["paypal_ref"],
                             s["status"],
                         ]
                         for s in m["settlements"]
                     ],
-                    [0.6 * inch, 1.2 * inch, 0.9 * inch, 0.9 * inch, 1.9 * inch, 1.0 * inch],
+                    [0.6 * inch, 1.1 * inch, 0.8 * inch, 1.1 * inch, 0.8 * inch, 1.3 * inch, 0.8 * inch],
                     small,
                 ),
             ]

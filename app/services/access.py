@@ -36,6 +36,8 @@ class Action(StrEnum):
     contest = "contest"
     resolve_for_payee = "resolve_for_payee"
     resolve_for_payer = "resolve_for_payer"
+    resolve_shortfall = "resolve_shortfall"  # co-funded: the lead funder decides a tranche nobody fully funded
+    accept_shortfall = "accept_shortfall"  # co-funded: the payee accepts or declines a shrunk tranche
 
 
 V, M, A = OrgRole.viewer, OrgRole.member, OrgRole.admin
@@ -65,7 +67,24 @@ RULES: dict[Action, dict[Role, OrgRole]] = {
     Action.contest: {P: A, R: M},
     Action.resolve_for_payee: {P: A, R: M},
     Action.resolve_for_payer: {E: A, R: M},
+    Action.resolve_shortfall: {P: A},
+    Action.accept_shortfall: {E: A},
 }
+
+# A co-funder (a payer that isn't the lead funder) signs, funds its share, can contest a held tranche and withdraw
+# its own contest. Drafting, reviewing, releasing and deciding a shortfall stay with the lead funder.
+CO_FUNDER_ACTIONS = frozenset(
+    {
+        Action.view,
+        Action.confirm_criteria,
+        Action.fund,
+        Action.void,
+        Action.contest,
+        Action.resolve_for_payee,
+        Action.compliance_packet,
+        Action.manage_subscriptions,
+    }
+)
 
 
 # What an MCP client acting for a person may do on an agreement: exactly the tools it was shown at consent.
@@ -140,8 +159,14 @@ class Access:
     def actor(self) -> str:
         return f"{self.principal.actor}@org:{self.party.org_id}"
 
+    @property
+    def co_funder(self) -> bool:
+        return self.party.role == Role.payer and not self.party.lead
+
     def can(self, action: Action) -> bool:
         if self.principal.via_mcp and action not in MCP_ACTIONS:
+            return False
+        if self.co_funder and action not in CO_FUNDER_ACTIONS:
             return False
         minimum = RULES[action].get(self.party.role)
         return minimum is not None and self.org_role.at_least(minimum)
@@ -151,6 +176,10 @@ class Access:
             return
         if self.principal.via_mcp and action not in MCP_ACTIONS:
             raise AccessError(f"an MCP client can't {action.replace('_', ' ')}; that step stays with a person", 403)
+        if self.co_funder and action not in CO_FUNDER_ACTIONS:
+            raise AccessError(
+                f"only the lead funder can {action.replace('_', ' ')}; a co-funder funds its share and can contest", 403
+            )
         minimum = RULES[action].get(self.party.role)
         if minimum is None:
             raise AccessError(f"a {self.party.role} on this agreement can't {action.replace('_', ' ')}", 403)

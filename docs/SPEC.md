@@ -36,7 +36,7 @@ The pitch: **an evidence-to-payment engine for funders**, not a freelance escrow
 | 7 | **Two settlement modes, one engine.** Escrow release or invoice-on-verify per agreement | Covers funders who won't pre-fund | Build (cut-list item) |
 | 8 | **Platform, not app.** Adapters in, outbound webhooks out, MCP, generated SDKs | APIMatic prize; Vestri integration | Build |
 | 9 | **Partial release.** Optional per-criterion weights release a pro-rata share when some criteria pass | Matches how grants actually pay | Built (`partial_release`, #46) |
-| 10 | **Co-funded grants.** Several funders per agreement, each with a share of each tranche | Real grant pattern; nobody models it | Later |
+| 10 | **Co-funded grants.** Several funders per agreement, each with a share of each tranche | Real grant pattern; nobody models it | Built (`shares`, `Hold` per funder, #47) |
 
 ## Prize plan
 
@@ -239,11 +239,13 @@ original per-agreement party keys.
 | Confirm (sign) criteria | admin+ | admin+ | admin+ |
 | Turn on auto-release | admin+ | | |
 | Invite counterparty / reviewer | admin+ | | |
-| Fund, void | member+ | | |
-| Approve or reject a verdict in review | admin+ | | member+ |
-| Release a verified tranche; pay a held tranche now; retry a failed payout | admin+ | | |
-| Contest a held tranche (inside the dispute window) | admin+ | | member+ |
-| Resolve a contest by paying the payee | admin+ | | member+ |
+| Fund, void | member+ (co-funders: their own share) | | |
+| Approve or reject a verdict in review | admin+ (lead funder) | | member+ |
+| Release a verified tranche; pay a held tranche now; retry a failed payout | admin+ (lead funder) | | |
+| Contest a held tranche (inside the dispute window) | admin+ (any funder) | | member+ |
+| Resolve a contest by paying the payee | admin+ (lead; a co-funder withdraws only its own contest) | | member+ |
+| Decide a funding shortfall (void, shrink, cover) | admin+ (lead funder) | | |
+| Accept or decline a shrunk tranche | | admin+ | |
 | Resolve a contest by refunding the payer | | admin+ | member+ |
 | Connect the org's PayPal account | org admin+ (any side) | | |
 | Pre-check, submit evidence, upload, connect GitHub | | member+ (GitHub: admin+) | |
@@ -319,6 +321,8 @@ FastAPI REST is the single source; the OpenAPI spec generates the MCP tools, the
 | `POST /milestones/{id}/payout` | Pay a held tranche now (waives the window) or retry a failed payout | payer | — (human step) |
 | `POST /milestones/{id}/contest` | Contest a held tranche inside its dispute window | payer, reviewer | — (human step) |
 | `POST /milestones/{id}/resolve` | End a contest: `release` (payer, reviewer) or `refund` (payee, reviewer) | see table | — (human step) |
+| `POST /milestones/{id}/shortfall` | Co-funded: the lead funder decides a tranche some funders never held: `void`, `shrink` or `cover` | lead funder | — (human step) |
+| `POST /milestones/{id}/shortfall/answer` | Co-funded: the payee accepts or declines a shrunk tranche | payee | — (human step) |
 | `POST /webhooks/paypal` | PayPal event intake (signature-verified, deduped) | PayPal | — |
 | `POST /webhooks/{adapter}` | Evidence adapter intake (GitHub, etc.) | adapter | — |
 | `POST /subscriptions` | Register an outbound webhook URL for events | any party | — |
@@ -419,7 +423,34 @@ criteria hash), the engine pays shares as criteria are met:
 - **Unverified at PayPal (#38):** reauthorizing a partially captured authorization. The mock allows it for the
   remainder; a sandbox run should confirm before relying on shares older than three days.
 
-Co-funded grants (#47) build on the same per-capture model with one hold per funder; that is the next redesign.
+## Co-funded grants (#47)
+
+Several funders pay one grant. The org that creates the agreement is the **lead funder**; other funders are invited
+(`co_funder_emails`, `InvitationKind.funder`) and join as payers with their own org and PayPal email. Each tranche
+names what each co-funder pays (`shares`, by invited email); the lead covers the rest. Decided Nov 7:
+
+- **Shares per tranche, outside the hash.** The payee signs the tranches and criteria; the split between funders is
+  the funders' business. Each funder's `criteria_confirmed` event records the shares it signed up to, and the lint
+  refuses shares that exceed a tranche (`shares_exceed_tranche`) or co-funding without escrow (`co_funding_needs_escrow`).
+- **One hold per funder (`Hold`).** Every funder places its own AUTHORIZE order for its share; the tranche is funded
+  once every share is held (`funded_amount` reaches `amount`). The first hold fixes the payout route for all of them.
+  A single-payer tranche has one hold; the old tranche columns moved into the table.
+- **One capture per hold.** A release opens a capture per live hold (its remainder, or its weighted share for a
+  partial release) and the tranche moves on when the last one completes (`capture_completed` on the way). A declined
+  capture closes the unsent siblings and the retry captures only what each hold still owes. Payouts and refunds follow
+  each capture (`capture_paid_out`, `capture_refunded`); the ledger view and the compliance packet name the funder.
+- **Who decides.** The lead funder reviews, releases and resolves. Any funder can contest a held tranche and withdraw
+  its own contest (not another funder's); the payee and a reviewer act as before. Payer-side mail goes to the lead,
+  except what concerns every funder's money (work delivered, waiting for funding).
+- **The funding window.** `funding_window_days` (default 14, max 28; PayPal holds last 29 days) runs from the first
+  hold on a tranche. When it lapses with shares still unheld, the daily job records `funding_lapsed` once and tells
+  the lead and the missing funders. The lead then decides (`POST /milestones/{id}/shortfall`): `void` releases every
+  hold (allowed any time); `shrink` proposes the tranche at the funded amount, which the payee accepts (the tranche
+  amount, agreement total and unheld shares change, and the criteria hash is re-locked with both consents recorded as
+  `tranche_shrunk`) or declines; `cover` reassigns the gap to the lead or to co-funders who have held their share, who
+  agree by funding the extra through a new hold (`shortfall_covered`).
+- **Expiry per hold.** Each hold has its own 29-day clock and honor period; one funder's expired hold sends the
+  tranche back to `pending` for that funder to hold again, and the others' holds stay.
 
 ## Open questions
 

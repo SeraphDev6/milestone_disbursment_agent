@@ -247,7 +247,7 @@ def skeptic_pass(
 
 def _settle_if_possible(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: datetime) -> None:
     a = m.agreement
-    if a.settlement_mode == SettlementMode.escrow_release and m.paypal_authorization_id is None:
+    if a.settlement_mode == SettlementMode.escrow_release and not settlement.fully_funded(m):
         record_audit(session, a.id, actor, "release_waiting", milestone_id=m.id, detail={"reason": "not funded"})
         session.commit()
         notify_side(
@@ -255,9 +255,10 @@ def _settle_if_possible(session: Session, gw: PayPalGateway, m: Milestone, actor
             m,
             Role.payer,
             tranche_subject(m, "Verified, waiting for funding"),
-            f"'{m.title}' met all its acceptance criteria but has no PayPal hold. Fund the tranche to release "
+            f"'{m.title}' met all its acceptance criteria but isn't fully held in PayPal. Fund the tranche to release "
             f"{a.currency} {m.amount} to the payee.",
             tone="review",
+            all_funders=True,
         )
         return
     try:
@@ -271,7 +272,7 @@ def _release_share(session: Session, gw: PayPalGateway, m: Milestone, actor: str
     """Partial release from the gate: pay the share the met criteria add. Without a hold, say so and wait."""
     a = m.agreement
     paying = sorted(met - settlement.paid_criteria(m))
-    if m.paypal_authorization_id is None:
+    if not settlement.fully_funded(m):
         record_audit(
             session,
             a.id,
@@ -286,9 +287,10 @@ def _release_share(session: Session, gw: PayPalGateway, m: Milestone, actor: str
             m,
             Role.payer,
             tranche_subject(m, "Partly verified, waiting for funding"),
-            f"'{m.title}' met {', '.join(paying)} but has no PayPal hold. Fund the tranche and the share those "
-            "criteria account for is released to the payee.",
+            f"'{m.title}' met {', '.join(paying)} but isn't fully held in PayPal. Fund the tranche and the share "
+            "those criteria account for is released to the payee.",
             tone="review",
+            all_funders=True,
         )
         return
     try:
@@ -618,8 +620,8 @@ def review(
         new = sorted(met - settlement.paid_criteria(m))
         if not new:
             raise VerificationError("the verdict has no newly met criteria to pay for", 409)
-        if m.paypal_authorization_id is None:
-            raise VerificationError("the tranche has no PayPal hold; fund it first", 409)
+        if not settlement.fully_funded(m):
+            raise VerificationError("the tranche isn't fully held in PayPal; fund it first", 409)
         record_audit(
             session,
             m.agreement_id,
@@ -631,7 +633,7 @@ def review(
         session.commit()
         settlement.release(session, gw, m, actor, now, criterion_ids=met)
     else:
-        back = MilestoneStatus.funded if m.paypal_authorization_id else MilestoneStatus.pending
+        back = MilestoneStatus.funded if settlement.fully_funded(m) else MilestoneStatus.pending
         unmet = [r for r in (verdict.criteria_results if verdict else []) if not r.met]
         settlement.transition(
             session,

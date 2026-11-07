@@ -63,10 +63,10 @@ function AcceptForm({ token, invitationId, hintKind, hintTitle }: { token: strin
     () => pending.find((i) => i.id === invitationId) ?? (pending.length === 1 ? pending[0] : pending.find((i) => i.agreement_title === hintTitle)),
     [pending, hintTitle, invitationId],
   );
-  const kind = (hintKind ?? guess?.kind ?? null) as "counterparty" | "reviewer" | "member" | null;
+  const kind = (hintKind ?? guess?.kind ?? null) as "counterparty" | "reviewer" | "funder" | "member" | null;
   const title = hintTitle ?? guess?.agreement_title ?? null;
   const eligible = (me.data?.memberships ?? []).filter((m) => atLeast(m.role, "admin"));
-  const needsPaypal = kind === "counterparty";
+  const needsPaypal = kind === "counterparty" || kind === "funder";
 
   if (me.isPending) return <Busy label="Loading your organizations" />;
 
@@ -98,7 +98,7 @@ function AcceptForm({ token, invitationId, hintKind, hintTitle }: { token: strin
     }
   }
 
-  const what = kind === "counterparty" ? "receive payments under" : kind === "reviewer" ? "review" : kind === "member" ? "join" : "join";
+  const what = kind === "counterparty" ? "receive payments under" : kind === "reviewer" ? "review" : kind === "funder" ? "co-fund" : "join";
   return (
     <div className={layout.stackLg}>
       <PageHeader
@@ -109,7 +109,9 @@ function AcceptForm({ token, invitationId, hintKind, hintTitle }: { token: strin
             ? "You'll be the payee: you'll review the criteria, submit evidence, and get paid through PayPal when each tranche verifies."
             : kind === "reviewer"
               ? "As a reviewer you sign off on the criteria and can approve or reject verdicts. Reviewers never move money."
-              : "Choose which of your organizations accepts it."
+              : kind === "funder"
+                ? "As a co-funder you sign the criteria and place a PayPal hold on your share of each tranche; the lead funder reviews and releases, and you can contest a payment."
+                : "Choose which of your organizations accepts it."
         }
       />
       <Sheet>

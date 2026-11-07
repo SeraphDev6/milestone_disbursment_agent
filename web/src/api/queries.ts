@@ -320,7 +320,7 @@ export function useInvitations(agreementId: string, orgId: string) {
 export function useInvite(agreementId: string, orgId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { email: string; kind: "counterparty" | "reviewer" }) =>
+    mutationFn: (body: { email: string; kind: "counterparty" | "reviewer" | "funder" }) =>
       call(api.POST("/agreements/{agreement_id}/invitations", { params: { path: { agreement_id: agreementId } }, body, ...asOrg(orgId) })),
     onSuccess: () => invalidateAgreement(qc, agreementId),
   });
@@ -562,6 +562,15 @@ export function useTrancheActions(agreementId: string, milestoneId: string, orgI
     }),
     resolve: useMutation({
       mutationFn: (body: { decision: "release" | "refund"; note?: string }) => call(api.POST("/milestones/{milestone_id}/resolve", { ...m, body, ...o })),
+      onSuccess: done,
+    }),
+    shortfall: useMutation({
+      mutationFn: (body: { decision: "void" | "shrink" | "cover"; cover?: { email: string | null; amount: string }[]; note?: string }) =>
+        call(api.POST("/milestones/{milestone_id}/shortfall", { ...m, body, ...o })),
+      onSuccess: done,
+    }),
+    answerShortfall: useMutation({
+      mutationFn: (body: { accept: boolean; note?: string }) => call(api.POST("/milestones/{milestone_id}/shortfall/answer", { ...m, body, ...o })),
       onSuccess: done,
     }),
   };

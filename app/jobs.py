@@ -1,7 +1,8 @@
 """Scheduled jobs. Run as `python -m app.jobs <job>` from Render cron or any scheduler.
 
 migrate           apply pending migrations and exit (run before starting several app instances)
-daily             drop expired PayPal holds, close invoices unpaid past the timeout, mark tranches overdue
+daily             drop expired PayPal holds, close invoices unpaid past the timeout, mark tranches overdue, tell the
+                  lead funder about co-funded tranches whose funding window lapsed
 payouts           catch up on captures, payments and invoices PayPal finished without a webhook reaching us, pay
                   tranches whose dispute window closed and follow payouts in flight (hourly)
 deliver-webhooks  send due outbound webhooks and GitHub check runs once (when the in-process loops are off)
@@ -22,7 +23,7 @@ from app.integrations import filecrypt, filestore
 from app.integrations.email import make_mailer
 from app.integrations.github_app import make_github_app
 from app.integrations.paypal import make_gateway
-from app.services import custody
+from app.services import cofunding, custody
 from app.services.github_app import publish_checks
 from app.services.handover import run as run_handovers
 from app.services.notifications import NOTIFIER, Notifier
@@ -89,7 +90,11 @@ def main(argv: list[str]) -> int:
             holds = expire_stale_holds(session, now)
             invoices = expire_stale_invoices(session, make_gateway(settings), now)
             overdue = mark_overdue(session, now)
-            print(f"expired {holds} hold(s), closed {invoices} unpaid invoice(s), marked {overdue} tranche(s) overdue")
+            lapsed = cofunding.mark_lapses(session, now)
+            print(
+                f"expired {holds} hold(s), closed {invoices} unpaid invoice(s), marked {overdue} tranche(s) overdue, "
+                f"{lapsed} funding window(s) lapsed"
+            )
             kept = custody.run(session, settings, now)
             if kept:
                 print(", ".join(f"{k}: {v}" for k, v in kept.items()))

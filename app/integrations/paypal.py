@@ -481,8 +481,14 @@ class MockPayPal:
         return Authorization(authorization_id, a["status"])
 
     def finish_capture(self, capture_id: str, status: str = "COMPLETED") -> None:
-        """Tests: PayPal finishes a PENDING capture (COMPLETED or DECLINED) without telling us."""
-        self.captures[capture_id]["status"] = status
+        """Tests: PayPal finishes a PENDING capture (COMPLETED or DECLINED) without telling us. A denied capture
+        gives the amount back to its authorization, which can be captured again."""
+        capture = self.captures[capture_id]
+        capture["status"] = status
+        if status in ("DECLINED", "FAILED"):
+            auth = self.authorizations[capture["authorization_id"]]
+            auth["captured"] = auth.get("captured", Decimal(0)) - capture["amount"]
+            auth["status"] = "PARTIALLY_CAPTURED" if auth["captured"] > 0 else "CREATED"
 
     def void_authorization(self, authorization_id, *, payee_merchant_id, request_id) -> None:
         def void():
