@@ -16,16 +16,31 @@ Money rules enforced here:
   captured authorization, so a new key can't pay twice either.
 - Holds are honored for 3 days and valid for 29. Release after day 3 reauthorizes once first;
   past day 29 the hold is gone and the payer must fund again.
+- Money is tracked per capture, not per tranche: every Settlement carries the amount it moves and every
+  Disbursement points at the capture whose money it pays out or refunds. With `partial_release` on the agreement,
+  a verdict that meets some criteria can release the share of the tranche those criteria account for by weight
+  (`final_capture=false`, so the hold keeps the remainder); the tranche returns to `funded` with the share recorded
+  and settles with a final capture once everything is met. A partial share reaches the payee when it is captured
+  (direct route) or by Payouts at once (platform route); the dispute window, contests and refunds apply to the
+  final capture. Reauthorizing a partially captured hold is modelled here but unverified against PayPal (#38).
+- Holds are per funder (`Hold`): a single-payer tranche has one; a co-funded tranche (shares on the tranche) has one
+  per funder, each funded by that funder, and is funded once every share is held. A release opens one capture per
+  hold for its part (final: the hold's remainder; partial: that hold's weighted share) and the tranche moves on when
+  the last capture completes; payouts and refunds follow each capture. The lead funder (the payer that created the
+  agreement) reviews, releases and resolves; any funder can contest, and only withdraw its own contest.
 """
 
 import uuid
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Literal
 
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
 from app.db import as_utc, record_audit, utcnow
+from app.domain.criteria import share_amount, weighted_share
 from app.integrations.paypal import CreatedOrder, PayPalError, PayPalGateway
 from app.models import (
     AgreementStatus,
@@ -33,6 +48,7 @@ from app.models import (
     DeliverableRelease,
     Disbursement,
     DisbursementKind,
+    Hold,
     LedgerEntry,
     Milestone,
     MilestoneStatus,
@@ -64,6 +80,7 @@ AFTER_CAPTURE = {
 }
 NO_LIVE_HOLD_STATES = {MilestoneStatus.settling, *AFTER_CAPTURE}
 RELEASABLE = {MilestoneStatus.verified, MilestoneStatus.settlement_failed}
+PARTIAL_FROM = {MilestoneStatus.needs_review, MilestoneStatus.disputed}  # a verdict with some criteria met stands
 OPEN = {SettlementStatus.submitted, SettlementStatus.unclaimed}  # disbursement outcome not final yet
 
 
@@ -89,21 +106,135 @@ def _note(session: Session, m: Milestone, actor: str, action: str, **detail) -> 
     record_audit(session, m.agreement_id, actor, action, milestone_id=m.id, detail=detail)
 
 
-def _ledger(session: Session, m: Milestone, kind: str, paypal_ref: str) -> None:
+def _ledger(session: Session, m: Milestone, kind: str, paypal_ref: str, amount: Decimal) -> None:
     session.add(
-        LedgerEntry(agreement_id=m.agreement_id, milestone_id=m.id, kind=kind, amount=m.amount, paypal_ref=paypal_ref)
+        LedgerEntry(agreement_id=m.agreement_id, milestone_id=m.id, kind=kind, amount=amount, paypal_ref=paypal_ref)
     )
+
+
+def _captures(m: Milestone) -> list[Settlement]:
+    return [
+        s
+        for s in m.settlements
+        if s.mode == SettlementMode.escrow_release and s.status == SettlementStatus.succeeded and s.paypal_ref
+    ]
+
+
+def _final_captures(m: Milestone) -> list[Settlement]:
+    """The captures that settle the tranche: one per funder's hold (escrow), or the paid platform invoice."""
+    return [s for s in m.settlements if s.final and s.status == SettlementStatus.succeeded and s.paypal_ref]
+
+
+def _in_flight(m: Milestone) -> list[Settlement]:
+    """Captures of the current release whose outcome isn't known yet."""
+    return [
+        s for s in m.settlements if s.mode == SettlementMode.escrow_release and s.status == SettlementStatus.submitted
+    ]
+
+
+def released(m: Milestone) -> Decimal:
+    """Captured from the funders' holds so far (partial shares and final captures)."""
+    return sum((s.amount for s in _captures(m)), start=Decimal("0.00"))
+
+
+def hold_released(h: Hold) -> Decimal:
+    return sum(
+        (s.amount for s in h.settlements if s.status == SettlementStatus.succeeded and s.paypal_ref),
+        start=Decimal("0.00"),
+    )
+
+
+def hold_remaining(h: Hold) -> Decimal:
+    """What this hold still has to cover: its share less what partial releases captured from it."""
+    return h.amount - hold_released(h)
+
+
+def live_holds(m: Milestone) -> list[Hold]:
+    return [h for h in m.holds if h.live]
+
+
+def funded_amount(m: Milestone) -> Decimal:
+    """Covered by live holds. Equal to the tranche amount once every funder has held its share."""
+    return sum((h.amount for h in live_holds(m)), start=Decimal("0.00"))
+
+
+def fully_funded(m: Milestone) -> bool:
+    return bool(m.holds) and funded_amount(m) >= m.amount
+
+
+def co_funded(m: Milestone) -> bool:
+    return bool(m.shares)
+
+
+def lead(m: Milestone) -> Party:
+    payers = [p for p in m.agreement.parties if p.role == Role.payer]
+    return next((p for p in payers if p.lead), payers[0])
+
+
+def share_of(m: Milestone, party: Party) -> Decimal:
+    """This funder's part of the tranche: a co-funder's share by invited email; the lead covers the rest."""
+    if party.role != Role.payer:
+        return Decimal("0.00")
+    shares = sum((sh.amount for sh in m.shares), start=Decimal("0.00"))
+    if party.lead:
+        return m.amount - shares
+    email = (party.invited_email or "").lower()
+    return next((sh.amount for sh in m.shares if sh.email.lower() == email), Decimal("0.00"))
+
+
+def funders(m: Milestone) -> list[tuple[Party, Decimal]]:
+    """Every payer with a share of this tranche, lead first."""
+    out = [(p, share_of(m, p)) for p in m.agreement.parties if p.role == Role.payer]
+    return sorted(((p, a) for p, a in out if a > 0), key=lambda x: not x[0].lead)
+
+
+def held_by(m: Milestone, party: Party) -> Decimal:
+    return sum((h.amount for h in live_holds(m) if h.party_id == party.id), start=Decimal("0.00"))
+
+
+def missing_funders(m: Milestone) -> list[tuple[Party, Decimal]]:
+    """Funders whose live holds don't cover their share, with what's missing."""
+    return [(p, a - held_by(m, p)) for p, a in funders(m) if held_by(m, p) < a]
+
+
+def refunded(m: Milestone) -> Decimal:
+    return sum(
+        (
+            d.amount
+            for d in m.disbursements
+            if d.kind == DisbursementKind.refund and d.status == SettlementStatus.succeeded
+        ),
+        start=Decimal("0.00"),
+    )
+
+
+def remaining(m: Milestone) -> Decimal:
+    """What the hold still has to cover: the tranche less what partial releases captured."""
+    return m.amount - released(m)
+
+
+def paid_criteria(m: Milestone) -> set[str]:
+    """Criteria whose share has been captured from every hold (one hold: from it)."""
+    if not m.holds:
+        return set()
+    sets = [
+        {
+            cid
+            for s in h.settlements
+            if s.status == SettlementStatus.succeeded and s.paypal_ref
+            for cid in s.criterion_ids
+        }
+        for h in m.holds
+    ]
+    return set.intersection(*sets) if sets else set()
 
 
 def _payee(m: Milestone) -> Party:
     return next(p for p in m.agreement.parties if p.role == Role.payee)
 
 
-def _capture(m: Milestone) -> Settlement:
-    s = next((s for s in reversed(m.settlements) if s.status == SettlementStatus.succeeded and s.paypal_ref), None)
-    if s is None:
-        raise ServiceError("tranche has no completed capture")
-    return s
+def _funder_name(h: Hold) -> str:
+    return h.party.display_name if h.party is not None else "the payer"
 
 
 def _paypal_failure(e: PayPalError) -> ServiceError:
@@ -111,34 +242,64 @@ def _paypal_failure(e: PayPalError) -> ServiceError:
     return ServiceError(f"{e}{suffix}", 502)
 
 
-def _mark_funded(session: Session, m: Milestone, authorization_id: str, actor: str, now: datetime) -> bool:
-    if m.paypal_authorization_id is not None:
+def _mark_funded(session: Session, h: Hold, authorization_id: str, actor: str, now: datetime) -> bool:
+    if h.live:
         return False  # already funded (return URL and webhook race; first one wins)
-    m.paypal_authorization_id = authorization_id
+    m = h.milestone
+    h.paypal_authorization_id = authorization_id
+    h.funded_at = now
+    h.reauthorized_at = None
+    _ledger(session, m, "authorized", authorization_id, hold_remaining(h))
+    detail = {"authorization_id": authorization_id}
+    if co_funded(m):
+        detail |= {"funder": _funder_name(h), "amount": str(h.amount), "funded": str(funded_amount(m))}
+        _note(session, m, actor, "share_held", **detail)
+    if not fully_funded(m):
+        if len(live_holds(m)) == 1:
+            _note(session, m, actor, "funding_window_opened", closes=(now + funding_window(m)).isoformat())
+        return True
     m.funded_at = now
-    m.reauthorized_at = None
-    _ledger(session, m, "authorized", authorization_id)
     if m.status == MilestoneStatus.pending:
-        transition(session, m, MilestoneStatus.funded, actor, "funded", authorization_id=authorization_id)
+        transition(session, m, MilestoneStatus.funded, actor, "funded", **detail)
     else:
         # Funded while overdue, or re-funded after an expired hold; verification state is kept.
-        _note(session, m, actor, "refunded_hold", authorization_id=authorization_id)
+        _note(session, m, actor, "refunded_hold", **detail)
     return True
 
 
-def _drop_hold(session: Session, m: Milestone, kind: str, actor: str) -> None:
-    ref = m.paypal_authorization_id or "unknown"
-    _ledger(session, m, kind, ref)
-    m.paypal_authorization_id = None
+def funding_window(m: Milestone) -> timedelta:
+    return timedelta(days=m.agreement.funding_window_days)
+
+
+def funding_lapsed(m: Milestone, now: datetime) -> bool:
+    """Co-funded, partly held, and the first hold is older than the funding window: the lead funder decides."""
+    if not co_funded(m) or fully_funded(m) or m.status in NO_LIVE_HOLD_STATES:
+        return False
+    first = min((as_utc(h.funded_at) for h in live_holds(m) if h.funded_at), default=None)
+    return first is not None and now - first > funding_window(m)
+
+
+def _drop_hold(session: Session, h: Hold, kind: str, actor: str) -> None:
+    m = h.milestone
+    ref = h.paypal_authorization_id or "unknown"
+    _ledger(session, m, kind, ref, hold_remaining(h))
+    h.paypal_authorization_id = None
+    h.funded_at = None
+    h.reauthorized_at = None
+    h.paypal_order_id = None
     m.funded_at = None
-    m.reauthorized_at = None
-    m.paypal_order_id = None
-    m.payout_route = None
-    m.payee_merchant_id = None
+    if not live_holds(m):
+        m.payout_route = None  # the next hold picks the route again
+        m.payee_merchant_id = None
+    detail = {"authorization_id": ref}
+    if co_funded(m):
+        detail |= {"funder": _funder_name(h), "amount": str(h.amount)}
+    if hold_released(h):
+        detail["released"] = str(hold_released(h))  # partial shares already paid stay paid; the rest needs a new hold
     if m.status == MilestoneStatus.funded:
-        transition(session, m, MilestoneStatus.pending, actor, f"hold_{kind}", authorization_id=ref)
+        transition(session, m, MilestoneStatus.pending, actor, f"hold_{kind}", **detail)
     else:
-        _note(session, m, actor, f"hold_{kind}", authorization_id=ref)
+        _note(session, m, actor, f"hold_{kind}", **detail)
 
 
 # --- funding ---------------------------------------------------------------------------
@@ -168,56 +329,93 @@ def _route(
     return PayoutRoute.platform, None
 
 
+def _hold_to_fund(session: Session, m: Milestone, party: Party) -> Hold:
+    """The hold this funder places next: a new one for the part of its share no hold covers yet (its first, or a
+    top-up after covering a shortfall), else an expired or voided one to fund again."""
+    share = share_of(m, party)
+    if share <= 0:
+        raise ServiceError(f"{party.display_name} has no share of this tranche", 409)
+    mine = [h for h in m.holds if h.party_id == party.id]
+    covered = sum((h.amount for h in mine), start=Decimal("0.00"))
+    if covered < share:
+        h = Hold(milestone=m, party=party, amount=share - covered)
+        session.add(h)
+        return h
+    dropped = [h for h in mine if not h.live and hold_remaining(h) > 0]
+    if dropped:
+        return dropped[-1]
+    if any(h.live for h in mine):
+        raise ServiceError("tranche already has a live hold" if not co_funded(m) else "your share is already held")
+    raise ServiceError("every part of this funder's share has been captured already", 409)
+
+
 def start_funding(
-    session: Session, gw: PayPalGateway, m: Milestone, actor: str, base_url: str, now: datetime | None = None
+    session: Session,
+    gw: PayPalGateway,
+    m: Milestone,
+    actor: str,
+    base_url: str,
+    now: datetime | None = None,
+    party: Party | None = None,
 ) -> CreatedOrder:
+    """Open a PayPal AUTHORIZE order for this funder's share (`party`: the caller's seat; the lead funder when None)."""
     a = m.agreement
     if a.status != AgreementStatus.active:
         raise ServiceError(f"agreement is {a.status}; both parties must confirm criteria before funding")
     if a.settlement_mode != SettlementMode.escrow_release:
         raise ServiceError("this agreement settles by invoice; there is nothing to fund")
-    if m.paypal_authorization_id is not None:
-        raise ServiceError("tranche already has a live hold")
     if m.status in NO_LIVE_HOLD_STATES:
         raise ServiceError(f"tranche is {m.status}")
-    route, merchant_id = _route(session, gw, m, actor, now or datetime.now(UTC))
+    party = party or lead(m)
+    h = _hold_to_fund(session, m, party)
+    if m.payout_route is None:  # the first hold fixes the route for every hold on the tranche
+        m.payout_route, m.payee_merchant_id = _route(session, gw, m, actor, now or datetime.now(UTC))
     try:
         order = gw.create_authorize_order(
             reference_id=m.id,
-            description=f"{a.title}: {m.title}",
-            amount=m.amount,
+            description=f"{a.title}: {m.title}" + (f" ({party.display_name}'s share)" if co_funded(m) else ""),
+            amount=hold_remaining(h),  # after an expired hold, only what partial releases haven't paid yet
             currency=a.currency,
-            payee_merchant_id=merchant_id,
+            payee_merchant_id=m.payee_merchant_id,
             return_url=f"{base_url}/paypal/return",
             cancel_url=f"{base_url}/paypal/cancel",
             request_id=f"{m.id}-order-{uuid.uuid4().hex[:12]}",
         )
     except PayPalError as e:
+        session.rollback()
         raise _paypal_failure(e) from e
-    m.paypal_order_id = order.order_id
-    m.payout_route, m.payee_merchant_id = route, merchant_id
-    _note(session, m, actor, "funding_started", order_id=order.order_id, payout_route=route)
+    h.paypal_order_id = order.order_id
+    detail = {"order_id": order.order_id, "payout_route": m.payout_route}
+    if co_funded(m):
+        detail |= {"funder": party.display_name, "amount": str(hold_remaining(h))}
+    _note(session, m, actor, "funding_started", **detail)
     session.commit()
     return order
 
 
+def _hold_by_order(session: Session, order_id: str) -> Hold | None:
+    return session.exec(select(Hold).where(Hold.paypal_order_id == order_id)).first()
+
+
 def cancel_funding(session: Session, order_id: str, actor: str) -> Milestone | None:
     """The payer backed out of PayPal approval: forget the order so the tranche stops waiting on it."""
-    m = session.exec(select(Milestone).where(Milestone.paypal_order_id == order_id)).first()
-    if m is None or m.paypal_authorization_id is not None:
+    h = _hold_by_order(session, order_id)
+    if h is None or h.live:
         return None
+    m = h.milestone
     _note(session, m, actor, "funding_cancelled", order_id=order_id)
-    m.paypal_order_id = None
+    h.paypal_order_id = None
     session.commit()
     return m
 
 
 def complete_funding(session: Session, gw: PayPalGateway, order_id: str, actor: str, now: datetime) -> Milestone:
     """Called when the payer returns from PayPal approval. Idempotent."""
-    m = session.exec(select(Milestone).where(Milestone.paypal_order_id == order_id)).first()
-    if m is None:
+    h = _hold_by_order(session, order_id)
+    if h is None:
         raise ServiceError("unknown or superseded funding order", 404)
-    if m.paypal_authorization_id is not None:
+    m = h.milestone
+    if h.live:
         return m
     try:
         auth = gw.authorize_order(order_id, request_id=f"{order_id}-authorize")
@@ -227,32 +425,42 @@ def complete_funding(session: Session, gw: PayPalGateway, order_id: str, actor: 
         _note(session, m, actor, "authorization_refused", order_id=order_id, status=auth.status)
         session.commit()
         raise ServiceError(f"PayPal did not place the hold (status {auth.status})", 402)
-    _mark_funded(session, m, auth.authorization_id, actor, now)
+    _mark_funded(session, h, auth.authorization_id, actor, now)
     session.commit()
     return m
 
 
-def void(session: Session, gw: PayPalGateway, m: Milestone, actor: str) -> None:
-    if m.status not in (MilestoneStatus.funded, MilestoneStatus.overdue) or m.paypal_authorization_id is None:
+def void(session: Session, gw: PayPalGateway, m: Milestone, actor: str, party: Party | None = None) -> None:
+    """Release the holds back to the funders before evidence arrives. The lead funder (or the sole payer) voids every
+    live hold; a co-funder voids its own."""
+    if m.status not in (MilestoneStatus.pending, MilestoneStatus.funded, MilestoneStatus.overdue):
         raise ServiceError("only a funded tranche with no evidence submitted can be voided")
-    try:
-        gw.void_authorization(
-            m.paypal_authorization_id,
-            payee_merchant_id=m.payee_merchant_id,
-            request_id=f"{m.paypal_authorization_id}-void",
-        )
-    except PayPalError as e:
-        raise _paypal_failure(e) from e
-    _drop_hold(session, m, "voided", actor)
+    holds = live_holds(m)
+    if party is not None and not party.lead:
+        holds = [h for h in holds if h.party_id == party.id]
+    if not holds:
+        raise ServiceError("there is no live hold to cancel")
+    for h in holds:
+        try:
+            gw.void_authorization(
+                h.paypal_authorization_id,
+                payee_merchant_id=m.payee_merchant_id,
+                request_id=f"{h.paypal_authorization_id}-void",
+            )
+        except PayPalError as e:
+            session.commit()  # holds voided so far stay recorded
+            raise _paypal_failure(e) from e
+        _drop_hold(session, h, "voided", actor)
     session.commit()
 
 
 def expire_stale_holds(session: Session, now: datetime, actor: str = "system:expiry") -> int:
     """Drop holds past PayPal's 29-day validity. Run daily (cron) and before every release."""
     count = 0
-    for m in session.exec(select(Milestone).where(col(Milestone.paypal_authorization_id).is_not(None))):
-        if m.status not in NO_LIVE_HOLD_STATES and m.funded_at and now - as_utc(m.funded_at) > AUTH_VALIDITY:
-            _drop_hold(session, m, "expired", actor)
+    for h in session.exec(select(Hold).where(col(Hold.paypal_authorization_id).is_not(None))):
+        m = h.milestone
+        if m.status not in NO_LIVE_HOLD_STATES and h.funded_at and now - as_utc(h.funded_at) > AUTH_VALIDITY:
+            _drop_hold(session, h, "expired", actor)
             count += 1
     session.commit()
     return count
@@ -261,29 +469,36 @@ def expire_stale_holds(session: Session, now: datetime, actor: str = "system:exp
 # --- release ---------------------------------------------------------------------------
 
 
-def _ensure_live_hold(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: datetime) -> None:
-    if m.paypal_authorization_id is None or m.funded_at is None:
-        raise ServiceError("tranche isn't funded; the payer must fund it first")
-    if now - as_utc(m.funded_at) > AUTH_VALIDITY:
-        _drop_hold(session, m, "expired", actor)
-        session.commit()
-        raise ServiceError("the PayPal hold expired after 29 days; the payer must fund this tranche again")
-    if m.reauthorized_at is None and now - as_utc(m.funded_at) > HONOR_PERIOD:
-        old = m.paypal_authorization_id
-        try:
-            auth = gw.reauthorize(
-                old,
-                amount=m.amount,
-                currency=m.agreement.currency,
-                payee_merchant_id=m.payee_merchant_id,
-                request_id=f"{old}-reauth",
-            )
-        except PayPalError as e:
-            raise _paypal_failure(e) from e
-        m.paypal_authorization_id = auth.authorization_id
-        m.reauthorized_at = now
-        _note(session, m, actor, "reauthorized", old_authorization_id=old, authorization_id=auth.authorization_id)
-        session.commit()
+def _ensure_live_holds(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: datetime) -> None:
+    """Every share held, no hold expired, and holds past the honor period reauthorized (once each)."""
+    for h in live_holds(m):
+        if h.funded_at and now - as_utc(h.funded_at) > AUTH_VALIDITY:
+            _drop_hold(session, h, "expired", actor)
+            session.commit()
+            who = f"{_funder_name(h)}'s" if co_funded(m) else "the"
+            raise ServiceError(f"{who} PayPal hold expired after 29 days; it must be funded again")
+    if not fully_funded(m):
+        if not co_funded(m) or not live_holds(m):
+            raise ServiceError("tranche isn't funded; the payer must fund it first")
+        waiting = ", ".join(f"{p.display_name} ({m.agreement.currency} {a})" for p, a in missing_funders(m))
+        raise ServiceError(f"tranche isn't fully funded; waiting on {waiting}")
+    for h in live_holds(m):
+        if h.reauthorized_at is None and h.funded_at and now - as_utc(h.funded_at) > HONOR_PERIOD:
+            old = h.paypal_authorization_id
+            try:
+                auth = gw.reauthorize(
+                    old,
+                    amount=hold_remaining(h),
+                    currency=m.agreement.currency,
+                    payee_merchant_id=m.payee_merchant_id,
+                    request_id=f"{old}-reauth",
+                )
+            except PayPalError as e:
+                raise _paypal_failure(e) from e
+            h.paypal_authorization_id = auth.authorization_id
+            h.reauthorized_at = now
+            _note(session, m, actor, "reauthorized", old_authorization_id=old, authorization_id=auth.authorization_id)
+            session.commit()
 
 
 def _reveal(session: Session, m: Milestone, actor: str, now: datetime) -> None:
@@ -320,11 +535,47 @@ def _reveal(session: Session, m: Milestone, actor: str, now: datetime) -> None:
         f"'{m.title}' is paid for, so the payee's work is now open to you: {len(commitment)} evidence item(s), each "
         f"checked against the hash that was verified when you download it.{window}",
         tone="review",
+        all_funders=True,
     )
 
 
 def _paid_at_capture(m: Milestone) -> bool:
     return m.payout_route == PayoutRoute.direct and m.agreement.dispute_window_days == 0
+
+
+def _batch(s: Settlement) -> list[Settlement]:
+    """The completed captures of the release `s` belongs to: one per hold, for the same criteria."""
+    return [x for x in _captures(s.milestone) if x.final == s.final and x.criterion_ids == s.criterion_ids]
+
+
+def _partial_released(session: Session, s: Settlement, actor: str, now: datetime) -> None:
+    """The last non-final capture of a share completed: the tranche goes back to `funded` with the remainder still
+    on hold for the criteria not yet met. The money moved as each capture completed (`_apply_capture_status`)."""
+    m = s.milestone
+    batch = _batch(s)
+    amount = sum((x.amount for x in batch), start=Decimal("0.00"))
+    detail = {
+        "capture_ids": [x.paypal_ref for x in batch],
+        "amount": str(amount),
+        "criteria": s.criterion_ids,
+        "share": weighted_share(m.criteria, paid_criteria(m)),
+        "released": str(released(m)),
+        "remaining": str(remaining(m)),
+    }
+    if m.payout_route == PayoutRoute.direct:
+        detail["paid"] = True
+    transition(session, m, MilestoneStatus.funded, actor, "partially_released", **detail)
+    a = m.agreement
+    notify_side(
+        session,
+        m,
+        Role.payee,
+        tranche_subject(m, "Share released"),
+        f"{a.currency} {amount} of '{m.title}' was released for {', '.join(s.criterion_ids)}. "
+        f"{a.currency} {remaining(m)} stays on hold until the remaining criteria are met; the tranche's page lists "
+        "what's missing.",
+        tone="review",
+    )
 
 
 def _apply_capture_status(session: Session, s: Settlement, status: str, actor: str, now: datetime) -> None:
@@ -334,11 +585,31 @@ def _apply_capture_status(session: Session, s: Settlement, status: str, actor: s
             return
         s.status = SettlementStatus.succeeded
         ref = s.paypal_ref or "unknown"
+        _ledger(session, m, "captured", ref, s.amount)
+        if m.payout_route == PayoutRoute.direct and (not s.final or _paid_at_capture(m)):
+            _ledger(session, m, "disbursed", ref, s.amount)  # not delayed: the connected payee has it at once
+        elif not s.final:
+            session.info.setdefault("partial_payout_due", set()).add(s.id)  # pay it with Payouts (pay_due_partials)
+        if _in_flight(m):  # co-funded: the other funders' captures of this release are still out
+            _note(session, m, actor, "capture_completed", capture_id=ref, attempt=s.attempt, amount=str(s.amount))
+            return
+        if not s.final:
+            _partial_released(session, s, actor, now)
+            return
         m.captured_at = now
-        _ledger(session, m, "captured", ref)
+        ids = [x.paypal_ref for x in _batch(s)]
+        capture_id = ids[0] if len(ids) == 1 else None
         if _paid_at_capture(m):
-            _ledger(session, m, "disbursed", ref)
-            transition(session, m, MilestoneStatus.settled, actor, "settled", capture_id=ref, attempt=s.attempt)
+            transition(
+                session,
+                m,
+                MilestoneStatus.settled,
+                actor,
+                "settled",
+                capture_id=capture_id,
+                capture_ids=ids,
+                attempt=s.attempt,
+            )
             _reveal(session, m, actor, now)
             return
         m.release_due_at = now + timedelta(days=m.agreement.dispute_window_days)
@@ -348,7 +619,8 @@ def _apply_capture_status(session: Session, s: Settlement, status: str, actor: s
             MilestoneStatus.held,
             actor,
             "captured",
-            capture_id=ref,
+            capture_id=capture_id,
+            capture_ids=ids,
             attempt=s.attempt,
             payout_route=m.payout_route,
             release_due_at=m.release_due_at.isoformat(),
@@ -361,89 +633,254 @@ def _apply_capture_status(session: Session, s: Settlement, status: str, actor: s
             return
         s.status = SettlementStatus.failed
         s.error = f"capture {status}"
+        _capture_failed(session, s, actor, status=status)
+
+
+def _capture_failed(session: Session, s: Settlement, actor: str, **detail) -> None:
+    """A definitive capture failure. A whole-tranche release lands in `settlement_failed` (release retries); a
+    partial share goes back to review, where the verdict still stands and the share can be released again. Sibling
+    captures of the same release not yet sent are closed too; the retry opens them again for what is still due."""
+    m = s.milestone
+    for x in _in_flight(m):
+        if x is not s and not x.paypal_ref:
+            x.status = SettlementStatus.failed
+            x.error = f"not sent: attempt {s.attempt} failed"
+    if m.status != MilestoneStatus.settling:
+        return  # a sibling already moved the tranche
+    if s.final:
         transition(
-            session,
-            m,
-            MilestoneStatus.settlement_failed,
-            actor,
-            "settlement_failed",
-            capture_id=s.paypal_ref,
-            status=status,
-            attempt=s.attempt,
+            session, m, MilestoneStatus.settlement_failed, actor, "settlement_failed", attempt=s.attempt, **detail
         )
+        return
+    transition(
+        session,
+        m,
+        MilestoneStatus.needs_review,
+        actor,
+        "partial_release_failed",
+        attempt=s.attempt,
+        amount=str(s.amount),
+        criteria=s.criterion_ids,
+        **detail,
+    )
+    notify_side(
+        session,
+        m,
+        Role.payer,
+        tranche_subject(m, "Share not released"),
+        f"PayPal didn't capture {m.agreement.currency} {s.amount} of '{m.title}' for {', '.join(s.criterion_ids)} "
+        f"({s.error}). The verdict stands; release the met share again from the tranche once the cause is fixed.",
+        tone="alert",
+    )
 
 
-def release(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: datetime) -> Settlement:
-    """Settle a verified tranche: capture its hold (escrow) or send a PayPal invoice (invoice mode)."""
+def _new_settlement(m: Milestone, hold: Hold, amount: Decimal, final: bool, criterion_ids: list[str]) -> Settlement:
+    last = m.settlements[-1] if m.settlements else None
+    attempt = last.attempt + 1 if last else 1
+    return Settlement(
+        milestone=m,
+        hold=hold,
+        attempt=attempt,
+        mode=SettlementMode.escrow_release,
+        idempotency_key=f"{m.id}-{attempt}",
+        status=SettlementStatus.submitted,
+        amount=amount,
+        final=final,
+        criterion_ids=criterion_ids,
+    )
+
+
+def _dues(m: Milestone, met: set[str] | None) -> list[tuple[Hold, Decimal]]:
+    """What each live hold owes this release: its remainder (final; `met` None) or the weighted share of `met` less
+    what it has paid. A hold that already paid (a retry after a sibling failed) owes nothing and gets no capture."""
+    out = []
+    for h in live_holds(m):
+        target = h.amount if met is None else share_amount(m.criteria, met, h.amount)
+        due = target - hold_released(h)
+        if due > 0:
+            out.append((h, due))
+    return out
+
+
+def _open_captures(
+    session: Session,
+    m: Milestone,
+    actor: str,
+    dues: list[tuple[Hold, Decimal]],
+    final: bool,
+    criterion_ids: list[str],
+    **detail,
+) -> list[Settlement]:
+    out = []
+    for h, due in dues:
+        s = _new_settlement(m, h, due, final, criterion_ids)
+        session.add(s)
+        session.flush()  # attempt numbers follow one another
+        out.append(s)
+    total = sum((x.amount for x in out), start=Decimal("0.00"))
+    if co_funded(m):
+        detail["captures"] = [{"funder": _funder_name(x.hold), "amount": str(x.amount)} for x in out]
+    transition(
+        session,
+        m,
+        MilestoneStatus.settling,
+        actor,
+        "release_requested" if final else "partial_release_requested",
+        attempt=out[0].attempt,
+        amount=str(total),
+        **detail,
+    )
+    session.commit()  # record intent before money moves
+    return out
+
+
+def _start_partial(
+    session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: datetime, met: set[str]
+) -> list[Settlement]:
+    """Open a capture per hold for the share the newly met criteria add (or the final captures, when they complete
+    the set)."""
+    a = m.agreement
+    if not a.partial_release:
+        raise ServiceError(
+            "this agreement pays each tranche in full once every criterion is met; partial release is off", 409
+        )
+    if m.status not in PARTIAL_FROM:
+        raise ServiceError(f"a tranche that is {m.status} can't release a share")
+    known = {c.id for c in m.criteria}
+    if unknown := sorted(met - known):
+        raise ServiceError(f"unknown criteria: {', '.join(unknown)}", 422)
+    paid = paid_criteria(m)
+    new = sorted(met - paid)
+    if not new:
+        raise ServiceError("every one of those criteria has been paid for already", 409)
+    _ensure_live_holds(session, gw, m, actor, now)
+    final = known <= paid | met
+    dues = _dues(m, None if final else paid | met)
+    if not dues:
+        raise ServiceError("the share those criteria add rounds to nothing", 409)
+    return _open_captures(
+        session, m, actor, dues, final, new, criteria=new, share=weighted_share(m.criteria, paid | met)
+    )
+
+
+def release(
+    session: Session,
+    gw: PayPalGateway,
+    m: Milestone,
+    actor: str,
+    now: datetime,
+    criterion_ids: Iterable[str] | None = None,
+) -> Settlement:
+    """Settle a verified tranche: capture its holds (escrow) or send a PayPal invoice (invoice mode). With
+    `criterion_ids` (partial release), capture only the share those met criteria add and leave the rest on hold.
+    Co-funded: one capture per funder's hold; returns the last one sent (the tranche's status says where the release
+    stands as a whole)."""
     if m.agreement.settlement_mode == SettlementMode.invoice_on_verify:
+        if criterion_ids is not None:
+            raise ServiceError("partial release needs escrow; this agreement settles by invoice", 409)
         return _release_by_invoice(session, gw, m, actor, now)
 
-    last = m.settlements[-1] if m.settlements else None
-    if m.status == MilestoneStatus.settling and last and last.status == SettlementStatus.submitted:
-        if last.paypal_ref:
+    in_flight = _in_flight(m)
+    if m.status == MilestoneStatus.settling and in_flight:
+        todo = [s for s in in_flight if not s.paypal_ref]  # outcome unknown: resume with the same idempotency key
+        if not todo:
             raise ServiceError("capture is pending at PayPal; its webhook or the hourly follow-up settles it", 409)
-        s = last  # previous attempt's outcome unknown: resume with the same idempotency key
+    elif criterion_ids is not None:
+        todo = _start_partial(session, gw, m, actor, now, set(criterion_ids))
     elif m.status in RELEASABLE:
-        _ensure_live_hold(session, gw, m, actor, now)
-        attempt = last.attempt + 1 if last else 1
-        s = Settlement(
-            milestone=m,
-            attempt=attempt,
-            mode=SettlementMode.escrow_release,
-            idempotency_key=f"{m.id}-{attempt}",
-            status=SettlementStatus.submitted,
-        )
-        session.add(s)
-        transition(session, m, MilestoneStatus.settling, actor, "release_requested", attempt=attempt)
-        session.commit()  # record intent before money moves
+        _ensure_live_holds(session, gw, m, actor, now)
+        unpaid = sorted({c.id for c in m.criteria} - paid_criteria(m))
+        dues = _dues(m, None)
+        if not dues:
+            raise ServiceError("every hold on this tranche has been captured in full already", 409)
+        todo = _open_captures(session, m, actor, dues, True, unpaid)
     else:
         raise ServiceError(f"a tranche that is {m.status} can't be released")
 
-    try:
-        capture = gw.capture_authorization(
-            m.paypal_authorization_id,
-            amount=m.amount,
-            currency=m.agreement.currency,
-            payee_merchant_id=m.payee_merchant_id,
-            delayed=m.payout_route == PayoutRoute.direct and not _paid_at_capture(m),
-            request_id=s.idempotency_key,
-        )
-    except PayPalError as e:
-        s.error = str(e)[:500]
-        if e.ambiguous:
-            _note(session, m, actor, "capture_outcome_unknown", attempt=s.attempt, error=s.error)
+    for s in todo:
+        try:
+            capture = gw.capture_authorization(
+                s.hold.paypal_authorization_id,
+                amount=s.amount,
+                currency=m.agreement.currency,
+                payee_merchant_id=m.payee_merchant_id,
+                # A partial share is paid at once; the final capture waits out the dispute window when there is one.
+                delayed=s.final and m.payout_route == PayoutRoute.direct and not _paid_at_capture(m),
+                request_id=s.idempotency_key,
+                final=s.final,
+            )
+        except PayPalError as e:
+            s.error = str(e)[:500]
+            if e.ambiguous:
+                _note(session, m, actor, "capture_outcome_unknown", attempt=s.attempt, error=s.error)
+                session.commit()
+                raise ServiceError(
+                    "PayPal didn't confirm the capture; release again to resume with the same idempotency key", 502
+                ) from e
+            s.status = SettlementStatus.failed
+            _capture_failed(session, s, actor, error=s.error)
             session.commit()
-            raise ServiceError(
-                "PayPal didn't confirm the capture; release again to resume with the same idempotency key", 502
-            ) from e
-        s.status = SettlementStatus.failed
-        transition(
-            session, m, MilestoneStatus.settlement_failed, actor, "settlement_failed", attempt=s.attempt, error=s.error
-        )
+            raise _paypal_failure(e) from e
+        s.paypal_ref = capture.capture_id
+        _apply_capture_status(session, s, capture.status, actor, now)
         session.commit()
-        raise _paypal_failure(e) from e
-
-    s.paypal_ref = capture.capture_id
-    _apply_capture_status(session, s, capture.status, actor, now)
-    session.commit()
+    pay_due_partials(session, gw, actor, now)
     if m.status == MilestoneStatus.held and m.release_due_at is not None and as_utc(m.release_due_at) <= now:
         try:
             pay_out(session, gw, m, actor, now)  # no dispute window: pay the payee now
         except ServiceError:
             pass  # recorded on the tranche (payout_failed or outcome unknown); release/pay-out retries
-    return s
+    return todo[-1]
 
 
 # --- after capture: pay the payee, contest, refund ---------------------------------------
 
 
-def _open(m: Milestone, kinds: set[DisbursementKind]) -> Disbursement | None:
-    last = next((d for d in reversed(m.disbursements) if d.kind in kinds), None)
+def _open(m: Milestone, kinds: set[DisbursementKind], capture: Settlement | None = None) -> Disbursement | None:
+    """The latest disbursement of these kinds on this capture (any capture when None), if its outcome isn't final."""
+    last = next(
+        (
+            d
+            for d in reversed(m.disbursements)
+            if d.kind in kinds and (capture is None or d.settlement_id == capture.id)
+        ),
+        None,
+    )
     return last if last is not None and last.status in OPEN else None
+
+
+def _partial(d: Disbursement) -> bool:
+    return d.settlement is not None and not d.settlement.final
 
 
 def _payout_kind(m: Milestone) -> DisbursementKind:
     return DisbursementKind.referenced_payout if m.payout_route == PayoutRoute.direct else DisbursementKind.payout
+
+
+PAYOUTS = {DisbursementKind.referenced_payout, DisbursementKind.payout}
+
+
+def _paid_out(m: Milestone, capture: Settlement) -> bool:
+    return any(
+        d.kind in PAYOUTS and d.settlement_id == capture.id and d.status == SettlementStatus.succeeded
+        for d in m.disbursements
+    )
+
+
+def _all_paid_out(m: Milestone) -> bool:
+    return all(_paid_out(m, c) for c in _final_captures(m))
+
+
+def _refunded(m: Milestone, capture: Settlement) -> bool:
+    return any(
+        d.kind == DisbursementKind.refund and d.settlement_id == capture.id and d.status == SettlementStatus.succeeded
+        for d in m.disbursements
+    )
+
+
+def _open_on_final(m: Milestone, kinds: set[DisbursementKind]) -> Disbursement | None:
+    """An open disbursement of these kinds on any of the tranche's final captures."""
+    return next((d for c in _final_captures(m) if (d := _open(m, kinds, c)) is not None), None)
 
 
 def _apply_payout_status(session: Session, d: Disbursement, status: str, actor: str) -> None:
@@ -452,7 +889,15 @@ def _apply_payout_status(session: Session, d: Disbursement, status: str, actor: 
         return  # final
     if status == "SUCCESS":
         d.status = SettlementStatus.succeeded
-        _ledger(session, m, "disbursed", d.paypal_ref or "unknown")
+        _ledger(session, m, "disbursed", d.paypal_ref or "unknown", d.amount)
+        if _partial(d):  # a share of a tranche still on hold for the rest: the tranche stays funded
+            _note(session, m, actor, "share_paid_out", payout_ref=d.paypal_ref, attempt=d.attempt, amount=str(d.amount))
+            return
+        if not _all_paid_out(m):  # co-funded: the other funders' captures are still to be paid out
+            _note(
+                session, m, actor, "capture_paid_out", payout_ref=d.paypal_ref, attempt=d.attempt, amount=str(d.amount)
+            )
+            return
         transition(session, m, MilestoneStatus.settled, actor, "settled", payout_ref=d.paypal_ref, attempt=d.attempt)
     elif status == "UNCLAIMED":
         if d.status != SettlementStatus.unclaimed:
@@ -472,7 +917,7 @@ def _apply_payout_status(session: Session, d: Disbursement, status: str, actor: 
                 m,
                 Role.payee,
                 tranche_subject(m, "Claim your payment"),
-                f"{m.agreement.currency} {m.amount} for '{m.title}' was sent to {email}, but that address has no "
+                f"{m.agreement.currency} {d.amount} for '{m.title}' was sent to {email}, but that address has no "
                 "PayPal account yet. Open the PayPal email to claim it or create a PayPal account with that "
                 "address. PayPal returns the money after 30 days if it isn't claimed.",
                 tone="review",
@@ -482,27 +927,72 @@ def _apply_payout_status(session: Session, d: Disbursement, status: str, actor: 
     else:
         d.status = SettlementStatus.failed
         d.error = d.error or f"payout {status}"
-        transition(
-            session, m, MilestoneStatus.payout_failed, actor, "payout_failed", payout_ref=d.paypal_ref, status=status
-        )
+        if _partial(d):
+            _note(
+                session, m, actor, "share_payout_failed", payout_ref=d.paypal_ref, status=status, amount=str(d.amount)
+            )
+        else:
+            transition(
+                session,
+                m,
+                MilestoneStatus.payout_failed,
+                actor,
+                "payout_failed",
+                payout_ref=d.paypal_ref,
+                status=status,
+            )
         notify_side(
             session,
             m,
             Role.payer,
             tranche_subject(m, "Payout failed"),
-            f"Paying the payee for '{m.title}' failed at PayPal ({d.error}). The money was captured and is not lost; "
-            "retry the payout from the tranche once the cause is fixed (for example the payee's PayPal email).",
+            f"Paying the payee {m.agreement.currency} {d.amount} for '{m.title}' failed at PayPal ({d.error}). The "
+            "money was captured and is not lost; retry the payout from the tranche once the cause is fixed (for "
+            "example the payee's PayPal email).",
             tone="alert",
         )
 
 
-def pay_out(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: datetime) -> Disbursement:
+def pay_out(
+    session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: datetime, capture: Settlement | None = None
+) -> Disbursement:
     """Pay a captured tranche to the payee: when the dispute window closes, when the payer waives it, after a
-    contest is resolved for the payee, or to retry a failed payout. Idempotent per attempt."""
-    kinds = {DisbursementKind.referenced_payout, DisbursementKind.payout}
-    if _open(m, {DisbursementKind.refund}) is not None:
+    contest is resolved for the payee, or to retry a failed payout. Pays every final capture (one per funder) that
+    isn't paid out yet; with `capture`, that capture only (a partial share, or one funder's). Idempotent per attempt;
+    returns the last disbursement touched."""
+    if capture is not None:
+        return _pay_out_capture(session, gw, m, actor, now, capture)
+    finals = _final_captures(m)
+    if not finals:  # nothing final yet: retry the partial shares whose payout failed
+        shares = [c for c in _captures(m) if not c.final and not _paid_out(m, c)]
+        if not shares:
+            raise ServiceError("tranche has no completed capture")
+        last = None
+        for c in shares:
+            last = _pay_out_capture(session, gw, m, actor, now, c)
+        return last  # type: ignore[return-value]
+    if m.status not in (MilestoneStatus.held, MilestoneStatus.payout_failed) and not any(
+        _open(m, PAYOUTS, c) for c in finals
+    ):
+        raise ServiceError(f"a tranche that is {m.status} can't be paid out")
+    last = None
+    for c in finals:
+        if _paid_out(m, c):
+            continue
+        last = _pay_out_capture(session, gw, m, actor, now, c)
+    if last is None:
+        raise ServiceError("every capture of this tranche has been paid out already", 409)
+    return last
+
+
+def _pay_out_capture(
+    session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: datetime, capture: Settlement
+) -> Disbursement:
+    kinds = PAYOUTS
+    partial = not capture.final
+    if not partial and _open(m, {DisbursementKind.refund}, capture) is not None:
         raise ServiceError("a refund to the payer is pending at PayPal; the payee can't be paid as well", 409)
-    d = _open(m, kinds)
+    d = _open(m, kinds, capture)
     if d is not None and d.paypal_ref:
         if d.kind == DisbursementKind.payout:  # Payouts settle asynchronously: ask PayPal where it is
             try:
@@ -513,32 +1003,51 @@ def pay_out(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: 
             session.commit()
         return d
     if d is None:
-        if m.status not in (MilestoneStatus.held, MilestoneStatus.payout_failed):
+        if _paid_out(m, capture):
+            raise ServiceError(
+                "that share has been paid out already" if partial else "that capture has been paid out already", 409
+            )
+        if not partial and m.status not in (MilestoneStatus.held, MilestoneStatus.payout_failed):
             raise ServiceError(f"a tranche that is {m.status} can't be paid out")
         attempt = sum(1 for x in m.disbursements if x.kind in kinds) + 1
         d = Disbursement(
             milestone=m,
+            settlement=capture,
             kind=_payout_kind(m),
             attempt=attempt,
             idempotency_key=f"{m.id}-payout-{attempt}",
             status=SettlementStatus.submitted,
+            amount=capture.amount,
         )
         session.add(d)
         if m.status == MilestoneStatus.payout_failed:
             transition(session, m, MilestoneStatus.held, actor, "payout_retried", attempt=attempt)
-        _note(session, m, actor, "payout_requested", kind=d.kind, attempt=attempt)
+        _note(
+            session,
+            m,
+            actor,
+            "payout_requested",
+            kind=d.kind,
+            attempt=attempt,
+            amount=str(d.amount),
+            capture_id=capture.paypal_ref,
+        )
         session.commit()  # record intent before money moves
 
-    capture = _capture(m)
     try:
         if d.kind == DisbursementKind.referenced_payout:
             result = gw.release_delayed(capture.paypal_ref, request_id=d.idempotency_key)
         else:
+            what = (
+                f"share for {', '.join(capture.criterion_ids)}"
+                if partial
+                else f"met all {len(m.criteria)} acceptance criteria"
+            )
             result = gw.send_payout(
                 email=_payee(m).paypal_email,
-                amount=m.amount,
+                amount=d.amount,
                 currency=m.agreement.currency,
-                note=f"{m.agreement.title}: '{m.title}' met all {len(m.criteria)} acceptance criteria.",
+                note=f"{m.agreement.title}: '{m.title}' {what}.",
                 request_id=d.idempotency_key,
             )
     except PayPalError as e:
@@ -564,13 +1073,48 @@ def pay_out(session: Session, gw: PayPalGateway, m: Milestone, actor: str, now: 
     return d
 
 
+def pay_due_partials(session: Session, gw: PayPalGateway, actor: str, now: datetime) -> int:
+    """Platform-route shares captured since the last call (`_partial_captured` queued them): send each by Payouts.
+    A failure is recorded on the tranche; the payouts job and the pay-out endpoint retry it."""
+    paid = 0
+    for sid in session.info.pop("partial_payout_due", set()):
+        s = session.get(Settlement, sid)
+        if s is None:
+            continue
+        try:
+            pay_out(session, gw, s.milestone, actor, now, capture=s)
+            paid += 1
+        except ServiceError:
+            pass
+    return paid
+
+
+def follow_partials(session: Session, gw: PayPalGateway, now: datetime, actor: str) -> int:
+    """Shares whose Payouts outcome isn't final yet (PENDING, UNCLAIMED): ask PayPal where they stand."""
+    count = 0
+    waiting = session.exec(
+        select(Disbursement).where(
+            Disbursement.kind == DisbursementKind.payout, col(Disbursement.status).in_(tuple(OPEN))
+        )
+    ).all()
+    for d in waiting:
+        if d.settlement is None or d.settlement.final:
+            continue  # the tranche-level loop in disburse_due follows these
+        try:
+            pay_out(session, gw, d.milestone, actor, now, capture=d.settlement)
+            count += 1
+        except ServiceError:
+            pass
+    return count
+
+
 def contest(session: Session, m: Milestone, actor: str, reason: str, now: datetime) -> None:
     """Payer or reviewer objects while the tranche is held: the payout waits until the contest is resolved."""
     if m.status != MilestoneStatus.held:
         raise ServiceError(f"tranche is {m.status}; only a tranche held in its dispute window can be contested")
     if m.release_due_at is None or as_utc(m.release_due_at) <= now:
         raise ServiceError("the dispute window has closed")
-    if _open(m, {DisbursementKind.referenced_payout, DisbursementKind.payout}) is not None:
+    if _open_on_final(m, PAYOUTS) is not None:
         raise ServiceError("the payout is already under way")
     detail = {"reason": reason}
     if m.payout_route == PayoutRoute.direct and m.captured_at is not None:
@@ -580,24 +1124,39 @@ def contest(session: Session, m: Milestone, actor: str, reason: str, now: dateti
 
 
 def _refund(session: Session, gw: PayPalGateway, m: Milestone, actor: str) -> Disbursement:
-    d = _open(m, {DisbursementKind.refund})
+    """Return the final captures to the funders they came from (one refund per capture). Shares paid before them were
+    accepted as paid; they stay with the payee. Returns the last refund sent."""
+    last = None
+    for capture in _final_captures(m):
+        if _refunded(m, capture):
+            continue
+        last = _refund_capture(session, gw, m, actor, capture)
+    if last is None:
+        raise ServiceError("every capture of this tranche has been refunded already", 409)
+    return last
+
+
+def _refund_capture(session: Session, gw: PayPalGateway, m: Milestone, actor: str, capture: Settlement) -> Disbursement:
+    d = _open(m, {DisbursementKind.refund}, capture)
     if d is not None and d.paypal_ref:
         raise ServiceError("the refund is pending at PayPal; its webhook will finish it", 409)
     if d is None:
         attempt = sum(1 for x in m.disbursements if x.kind == DisbursementKind.refund) + 1
         d = Disbursement(
             milestone=m,
+            settlement=capture,
             kind=DisbursementKind.refund,
             attempt=attempt,
             idempotency_key=f"{m.id}-refund-{attempt}",
             status=SettlementStatus.submitted,
+            amount=capture.amount,
         )
         session.add(d)
         session.commit()
     try:
         refund = gw.refund_capture(
-            _capture(m).paypal_ref,
-            amount=m.amount,
+            capture.paypal_ref,
+            amount=d.amount,
             currency=m.agreement.currency,
             payee_merchant_id=m.payee_merchant_id,
             request_id=d.idempotency_key,
@@ -620,8 +1179,13 @@ def _apply_refund_status(session: Session, d: Disbursement, status: str, actor: 
         return
     if status == "COMPLETED":
         d.status = SettlementStatus.succeeded
-        _ledger(session, m, "refunded", d.paypal_ref or "unknown")
-        transition(session, m, MilestoneStatus.refunded, actor, "refunded", refund_id=d.paypal_ref)
+        _ledger(session, m, "refunded", d.paypal_ref or "unknown", d.amount)
+        if not all(_refunded(m, c) for c in _final_captures(m)):  # co-funded: other funders' refunds still out
+            _note(session, m, actor, "capture_refunded", refund_id=d.paypal_ref, amount=str(d.amount))
+            return
+        transition(
+            session, m, MilestoneStatus.refunded, actor, "refunded", refund_id=d.paypal_ref, amount=str(d.amount)
+        )
     elif status in ("FAILED", "CANCELLED"):
         d.status = SettlementStatus.failed
         _note(session, m, actor, "refund_failed", refund_id=d.paypal_ref, status=status)
@@ -637,11 +1201,22 @@ def resolve(
     decision: Literal["release", "refund"],
     note: str,
     now: datetime,
+    party: Party | None = None,
 ) -> Disbursement:
-    """End a contest: pay the payee, or refund the payer. Who may choose which is decided by the caller's rights."""
+    """End a contest: pay the payee, or refund the funders. Who may choose which is decided by the caller's rights;
+    a co-funder (`party`, a payer that isn't the lead) can only withdraw a contest its own org raised."""
     if m.status != MilestoneStatus.contested:
         raise ServiceError(f"tranche is {m.status}; only a contested tranche can be resolved")
-    pending_refund = _open(m, {DisbursementKind.refund})
+    if party is not None and party.role == Role.payer and not party.lead:
+        raised = session.exec(
+            select(AuditEvent)
+            .where(AuditEvent.milestone_id == m.id, AuditEvent.action == "contested")
+            .order_by(col(AuditEvent.at).desc())
+            .limit(1)
+        ).first()
+        if raised is None or not raised.actor.endswith(f"@org:{party.org_id}"):
+            raise ServiceError("a co-funder can only withdraw a contest its own organization raised", 403)
+    pending_refund = _open_on_final(m, {DisbursementKind.refund})
     if decision == "refund":
         if pending_refund is not None and pending_refund.paypal_ref:
             raise ServiceError("a refund to the payer is pending at PayPal; its webhook will finish it", 409)
@@ -693,6 +1268,7 @@ def follow_pending(session: Session, gw: PayPalGateway, now: datetime, actor: st
         except PayPalError:
             session.rollback()  # PayPal unreachable or the object is gone: try again next run
     session.info.pop("payout_due", None)  # a paid platform invoice leaves the tranche held and due now; paid below
+    counts["shares_paid"] = pay_due_partials(session, gw, actor, now)  # platform-route shares whose capture completed
     return counts
 
 
@@ -703,6 +1279,7 @@ def disburse_due(session: Session, gw: PayPalGateway, now: datetime, actor: str 
     counts = {"paid_out": 0, "checked": 0, "auto_released": 0, "errors": 0}
     counts.update(follow_pending(session, gw, now, actor))
     counts.update(poll_disputes(session, gw, now))  # before paying, so a dispute PayPal didn't announce pauses it
+    counts["shares_followed"] = follow_partials(session, gw, now, actor)
     for m in session.exec(
         select(Milestone).where(col(Milestone.status).in_((MilestoneStatus.held, MilestoneStatus.contested)))
     ).all():
@@ -711,11 +1288,12 @@ def disburse_due(session: Session, gw: PayPalGateway, now: datetime, actor: str 
                 if not m.captured_at or now - as_utc(m.captured_at) <= PAYPAL_AUTO_DISBURSE:
                     continue
                 if m.payout_route == PayoutRoute.direct:
-                    _ledger(session, m, "disbursed", _capture(m).paypal_ref)
+                    for c in _final_captures(m):
+                        _ledger(session, m, "disbursed", c.paypal_ref, c.amount)
                     transition(session, m, MilestoneStatus.settled, actor, "paypal_auto_released")
                     session.commit()
                     counts["auto_released"] += 1
-                elif _open(m, {DisbursementKind.refund}) is None:
+                elif _open_on_final(m, {DisbursementKind.refund}) is None:
                     # Platform route: nobody resolved the contest within the same period PayPal allows a direct
                     # capture, so it ends the same way, paid to the payee. A refund under way is left alone.
                     transition(
@@ -730,7 +1308,7 @@ def disburse_due(session: Session, gw: PayPalGateway, now: datetime, actor: str 
                     pay_out(session, gw, m, actor, now)
                     counts["auto_released"] += 1
                 continue
-            open_payout = _open(m, {DisbursementKind.referenced_payout, DisbursementKind.payout})
+            open_payout = _open_on_final(m, PAYOUTS)
             if open_payout is not None:
                 pay_out(session, gw, m, actor, now)
                 counts["checked"] += 1
@@ -752,10 +1330,6 @@ def disburse_due(session: Session, gw: PayPalGateway, now: datetime, actor: str 
 #   self-serve (sandbox: FEATURES_UNAUTHORIZED).
 
 INVOICE_TIMEOUT = timedelta(days=30)
-
-
-def _party(m: Milestone, role: Role) -> Party:
-    return next(p for p in m.agreement.parties if p.role == role)
 
 
 def pay_path(s: Settlement, now: datetime | None = None) -> str | None:
@@ -784,6 +1358,8 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor
             mode=SettlementMode.invoice_on_verify,
             idempotency_key=f"{m.id}-{attempt}",
             status=SettlementStatus.submitted,
+            amount=m.amount,
+            criterion_ids=[c.id for c in m.criteria if c.id],
         )
         session.add(s)
         m.payout_route, m.payee_merchant_id = route, merchant_id
@@ -792,7 +1368,7 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor
         )
         session.commit()
         if route == PayoutRoute.direct:
-            _ledger(session, m, "invoiced", f"request:{s.id}")
+            _ledger(session, m, "invoiced", f"request:{s.id}", s.amount)
             _note(session, m, actor, "payment_requested", settlement_id=s.id, pay_path=f"/pay/{s.id}")
             session.commit()
             _notify_payment_due(session, m, pay_path(s))
@@ -801,7 +1377,7 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor
         raise ServiceError(f"a tranche that is {m.status} can't be invoiced")
 
     a = m.agreement
-    payer_email = _party(m, Role.payer).paypal_email
+    payer_email = lead(m).paypal_email
     if not payer_email:
         raise ServiceError("the payer has no PayPal email to invoice")
     try:
@@ -832,7 +1408,7 @@ def _release_by_invoice(session: Session, gw: PayPalGateway, m: Milestone, actor
 
     s.paypal_ref = invoice.invoice_id
     s.payer_url = invoice.payer_view_url
-    _ledger(session, m, "invoiced", invoice.invoice_id)
+    _ledger(session, m, "invoiced", invoice.invoice_id, s.amount)
     _note(session, m, actor, "invoice_sent", invoice_id=invoice.invoice_id, payer_view_url=invoice.payer_view_url)
     session.commit()
     _notify_payment_due(session, m, pay_path(s))
@@ -962,19 +1538,19 @@ def _close_invoice(
         # Paid into the platform account: pay the payee with Payouts now.
         s.status = SettlementStatus.succeeded
         m.captured_at = m.release_due_at = now
-        _ledger(session, m, "collected", ref)
+        _ledger(session, m, "collected", ref, s.amount)
         transition(session, m, MilestoneStatus.held, actor, "invoice_paid", invoice_id=s.paypal_ref, attempt=s.attempt)
         _reveal(session, m, actor, now)
         session.info.setdefault("payout_due", set()).add(m.id)
         return "invoice paid"
     if paid:
         s.status = SettlementStatus.succeeded
-        _ledger(session, m, "paid", ref)
+        _ledger(session, m, "paid", ref, s.amount)
         transition(session, m, MilestoneStatus.settled, actor, "settled", paypal_ref=ref, attempt=s.attempt)
         _reveal(session, m, actor, now)
         return "invoice paid"
     s.status = status or SettlementStatus.failed
-    _ledger(session, m, "invoice_cancelled", s.paypal_ref or f"request:{s.id}")
+    _ledger(session, m, "invoice_cancelled", s.paypal_ref or f"request:{s.id}", s.amount)
     transition(
         session,
         m,
@@ -1182,18 +1758,18 @@ def _dispatch(session: Session, event_type: str, res: dict, now: datetime, gw: P
 
     if event_type == "PAYMENT.AUTHORIZATION.CREATED":
         order_id = _related(res, "order_id")
-        m = session.exec(select(Milestone).where(Milestone.paypal_order_id == order_id)).first() if order_id else None
-        if m is None and rid:  # PayPal's v2 sample has no related_ids; we may already hold this authorization
-            m = session.exec(select(Milestone).where(Milestone.paypal_authorization_id == rid)).first()
-        if m is None:
+        h = _hold_by_order(session, order_id) if order_id else None
+        if h is None and rid:  # PayPal's v2 sample has no related_ids; we may already hold this authorization
+            h = session.exec(select(Hold).where(Hold.paypal_authorization_id == rid)).first()
+        if h is None:
             return "ignored: no tranche for this order"
-        return "funded" if _mark_funded(session, m, rid, actor, now) else "already funded"
+        return "funded" if _mark_funded(session, h, rid, actor, now) else "already funded"
 
     if event_type == "PAYMENT.AUTHORIZATION.VOIDED":
-        m = session.exec(select(Milestone).where(Milestone.paypal_authorization_id == rid)).first()
-        if m is None:
+        h = session.exec(select(Hold).where(Hold.paypal_authorization_id == rid)).first()
+        if h is None:
             return "ignored: hold already released"
-        _drop_hold(session, m, "voided", actor)
+        _drop_hold(session, h, "voided", actor)
         return "hold voided"
 
     if event_type in CAPTURE_EVENTS:
@@ -1213,9 +1789,16 @@ def _dispatch(session: Session, event_type: str, res: dict, now: datetime, gw: P
         if s is None:
             # Capture response was lost (ambiguous failure): match through the authorization.
             auth_id = _related(res, "authorization_id")
-            m = session.exec(select(Milestone).where(Milestone.paypal_authorization_id == auth_id)).first()
-            s = m.settlements[-1] if m and m.settlements else None
-            if s is None or s.status != SettlementStatus.submitted:
+            h = session.exec(select(Hold).where(Hold.paypal_authorization_id == auth_id)).first() if auth_id else None
+            s = (
+                next(
+                    (x for x in reversed(h.settlements) if x.status == SettlementStatus.submitted and not x.paypal_ref),
+                    None,
+                )
+                if h
+                else None
+            )
+            if s is None:
                 return "ignored: no open settlement for this capture"
             s.paypal_ref = rid
         _apply_capture_status(session, s, CAPTURE_EVENTS[event_type], actor, now)
@@ -1236,7 +1819,7 @@ def _dispatch(session: Session, event_type: str, res: dict, now: datetime, gw: P
         d = session.exec(select(Disbursement).where(Disbursement.paypal_ref == (res.get("item_id") or rid))).first()
         if d is None:  # response was lost: match through the capture it releases
             s = session.exec(select(Settlement).where(Settlement.paypal_ref == res.get("reference_id"))).first()
-            d = _open(s.milestone, {DisbursementKind.referenced_payout}) if s else None
+            d = _open(s.milestone, {DisbursementKind.referenced_payout}, s) if s else None
             if d is None:
                 return "ignored: no payout for this capture"
             d.paypal_ref = res.get("item_id") or rid
@@ -1290,4 +1873,8 @@ def handle_webhook(session: Session, event: dict, now: datetime, gw: PayPalGatew
                 pay_out(session, gw, m, "webhook:paypal", now)
             except ServiceError:
                 pass  # recorded on the tranche; the payouts job retries
+    if gw is not None:
+        pay_due_partials(session, gw, "webhook:paypal", now)  # a share's capture completed: Payouts (platform route)
+    else:
+        session.info.pop("partial_payout_due", None)
     return outcome

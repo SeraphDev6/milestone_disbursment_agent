@@ -147,10 +147,11 @@ class OrgRole(StrEnum):
 
 
 class InvitationKind(StrEnum):
-    """counterparty (join as the payee), reviewer (join as a reviewer), member (join an organization)."""
+    """counterparty (join as the payee), reviewer (join as a reviewer), funder (join as a co-funder), member (join an organization)."""
 
     counterparty = "counterparty"  # join an agreement as its payee
     reviewer = "reviewer"  # join an agreement as a third-party reviewer
+    funder = "funder"  # join a co-funded agreement as another payer, funding the share each tranche names
     member = "member"  # join an organization
 
 

@@ -99,7 +99,7 @@ export function VerdictSummary({ v, threshold }: { v: VerdictRead; threshold: nu
           ["Model", <code key="m">{v.model}</code>],
           ["Prompt", <code key="p">{v.prompt_version}</code>],
           ["Confidence", percent(v.model_confidence)],
-          ...(v.weighted_share !== null && v.weighted_share !== undefined && v.weighted_share < 1 ? [["Met by weight", `${percent(v.weighted_share)} of the tranche's criteria weight is met; release is all-or-nothing, so nothing pays yet`] as [string, string]] : []),
+          ...(v.weighted_share !== null && v.weighted_share !== undefined && v.weighted_share < 1 ? [["Met by weight", `${percent(v.weighted_share)} of the tranche's criteria weight is met`] as [string, string]] : []),
         ]}
       />
     </div>

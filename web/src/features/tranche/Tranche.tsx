@@ -16,10 +16,11 @@ import { HandedOver, latestHandovers } from "./Handover";
 import { StateTrack } from "./StateTrack";
 import { Timeline } from "./Timeline";
 import { Results, VerdictSummary } from "./Verdict";
+import s from "./Tranche.module.css";
 
 export function Tranche() {
   const { milestoneId = "" } = useParams();
-  const { agreement: a, seat, base } = useAgreementCtx();
+  const { agreement: a, seat, base, party } = useAgreementCtx();
   const org = useOrgCtx();
   const health = useHealth();
   const demo = hasDemo(health.data);
@@ -56,7 +57,11 @@ export function Tranche() {
   const rejected = lastReview?.action === "review_rejected";
   const rejectNote = rejected ? ((lastReview?.detail?.note as string | undefined) ?? null) : null;
   const v = verdict.data ?? null;
-  const submit = canOnTranche(seat, "submit_evidence", { status: m.status, mode: a.settlement_mode, agreementActive: a.status === "active", hasHold: !!m.paypal_authorization_id });
+  const submit = canOnTranche(seat, "submit_evidence", { status: m.status, mode: a.settlement_mode, agreementActive: a.status === "active", hasHold: m.holds.some((x) => x.paypal_authorization_id) });
+  const coFunded = m.shares.length > 0;
+  const funders = coFunded ? a.parties.filter((p) => p.role === "payer").sort((x, y) => Number(y.lead) - Number(x.lead)) : [];
+  const shareOf = (p: (typeof funders)[number]) => (p.lead ? Number(m.amount) - m.shares.reduce((n, sh) => n + Number(sh.amount), 0) : Number(m.shares.find((sh) => sh.email.toLowerCase() === (p.invited_email ?? "").toLowerCase())?.amount ?? 0));
+  const heldBy = (p: (typeof funders)[number]) => m.holds.filter((x) => x.party_id === p.id && x.paypal_authorization_id).reduce((n, x) => n + Number(x.amount), 0);
   const isPayee = seat.role === "payee";
   const working = IN_FLIGHT.has(m.status);
   const payeeName = a.parties.find((p) => p.role === "payee")?.display_name ?? "the payee";
@@ -75,8 +80,10 @@ export function Tranche() {
           <>
             <span className="figures">{money(m.amount, a.currency)}</span>
             {m.due_date && <span>Due {date(m.due_date)}</span>}
-            {m.funded_at && !m.captured_at && <span>Hold placed {date(m.funded_at)}</span>}
+            {m.funded_at && !m.captured_at && <span>{coFunded ? "Fully held" : "Hold placed"} {date(m.funded_at)}</span>}
+            {coFunded && !m.funded_at && Number(m.funded_amount) > 0 && <span>Held {money(m.funded_amount, a.currency)} of {money(m.amount, a.currency)}</span>}
             {m.captured_at && <span>Captured {date(m.captured_at)}</span>}
+            {m.amount_released && Number(m.amount_released) > 0 && Number(m.amount_released) < Number(m.amount) && <span>Released so far {money(m.amount_released, a.currency)} for {(m.criteria_paid ?? []).join(", ")}</span>}
             {a.deliverable_release === "on_capture" && <span>{m.revealed_at ? `Work opened to the payer ${date(m.revealed_at)}` : "Work opens to the payer once paid"}</span>}
             {m.payout_route && <span>{m.payout_route === "direct" ? `Paid straight to ${payeeName}'s PayPal` : `Paid through the platform to ${payeeName}`}</span>}
           </>
@@ -95,6 +102,16 @@ export function Tranche() {
         <Callout tone="warning" title="This payment is contested">
           {typeof contestEvent?.detail?.reason === "string" && <p>“{contestEvent.detail.reason}”</p>}
           <p>The payout is paused. The payer can withdraw the contest and pay, {payeeName} can accept it and refund the payer, or a reviewer can decide. Unresolved, PayPal pays {payeeName} 28 days after capture.</p>
+        </Callout>
+      )}
+      {m.funding_lapsed && !m.proposed_amount && (
+        <Callout tone="warning" title="The funding window has passed">
+          <p>{funders.filter((p) => heldBy(p) < shareOf(p)).map((p) => p.display_name).join(", ")} {funders.filter((p) => heldBy(p) < shareOf(p)).length === 1 ? "hasn't" : "haven't"} held their share, and PayPal holds last 29 days. The lead funder can cancel the holds, propose the funded amount to {payeeName}, or ask the funders who agree to cover the gap.</p>
+        </Callout>
+      )}
+      {m.proposed_amount != null && (
+        <Callout tone="info" title={`Proposed: ${money(m.proposed_amount, a.currency)} instead of ${money(m.amount, a.currency)}`}>
+          <p>The lead funder proposes the tranche at what was funded. {isPayee ? "Accept and it is funded at once with the holds in place; decline and nothing changes." : `Waiting for ${payeeName} to accept or decline.`}</p>
         </Callout>
       )}
       {m.status === "payout_failed" && (
@@ -154,7 +171,28 @@ export function Tranche() {
           )}
         </div>
         <div className={layout.stack}>
-          <Actions a={a} m={m} seat={seat} verdict={v} acts={acts} rejected={rejected} />
+          <Actions a={a} m={m} seat={seat} verdict={v} acts={acts} rejected={rejected} myPartyId={party.id} />
+          {coFunded && (
+            <Sheet title="Funders" titleLevel={2} tight>
+              <table className={s.funders}>
+                <thead><tr><th scope="col">Funder</th><th scope="col">Share</th><th scope="col">Held</th></tr></thead>
+                <tbody>
+                  {funders.map((p) => {
+                    const share = shareOf(p);
+                    const held = heldBy(p);
+                    const waiting = m.holds.some((x) => x.party_id === p.id && x.awaiting_approval);
+                    return (
+                      <tr key={p.id}>
+                        <td>{p.display_name}{p.lead ? " (lead)" : ""}</td>
+                        <td className="figures">{money(share, a.currency)}</td>
+                        <td>{share <= 0 ? "No part of this tranche" : held >= share ? `Held${m.captured_at ? ", captured" : ""}` : waiting ? "Approving in PayPal" : held > 0 ? `${money(held, a.currency)} of ${money(share, a.currency)}` : "Not yet"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </Sheet>
+          )}
           <Sheet title="History" titleLevel={2} tight>
             {audit.isPending ? <Busy label="Loading history" /> : <Timeline events={events.filter((e) => !ACCESS_ACTIONS.has(e.action))} names={names} />}
           </Sheet>

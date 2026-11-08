@@ -1,6 +1,7 @@
 """Money movement: fund a tranche's hold, release it, void it, and PayPal's callbacks."""
 
 import json
+from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -11,7 +12,7 @@ from app.api.deps import MilestoneAccessDep, SessionDep, client_ip, gateway, rat
 from app.api.views import agreement_read, html_page
 from app.db import utcnow
 from app.models import AgreementRead, DisbursementRead, MilestoneStatus, SettlementRead
-from app.services import ServiceError, settlement
+from app.services import ServiceError, cofunding, settlement
 from app.services.access import Action
 
 router = APIRouter(tags=["settlement"])
@@ -25,13 +26,19 @@ class FundingStarted(SQLModel):
 @router.post(
     "/milestones/{milestone_id}/fund",
     openapi_extra={"x-sdk-core": "fundMilestone"},
-    summary="Payer starts a PayPal hold for one tranche",
+    summary="Payer starts a PayPal hold for one tranche (co-funded: for this funder's share of it)",
 )
 def fund(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep, request: Request) -> FundingStarted:
     access, m = auth
     access.require(Action.fund)
     order = settlement.start_funding(
-        session, gateway(request), m, access.actor, request.app.state.settings.api_base_url, utcnow()
+        session,
+        gateway(request),
+        m,
+        access.actor,
+        request.app.state.settings.api_base_url,
+        utcnow(),
+        party=access.party,
     )
     return FundingStarted(order_id=order.order_id, approve_url=order.approve_url)
 
@@ -42,9 +49,12 @@ def paypal_return(token: str, session: SessionDep, request: Request) -> HTMLResp
         m = settlement.complete_funding(session, gateway(request), token, "payer:paypal_return", utcnow())
     except ServiceError as e:
         return html_page("Funding didn't complete", e.message, e.status_code)
-    return html_page(
-        "Tranche funded", f"{m.agreement.currency} {m.amount} for '{m.title}' is on hold. You can close this tab."
-    )
+    if settlement.fully_funded(m):
+        text = f"{m.agreement.currency} {m.amount} for '{m.title}' is on hold. You can close this tab."
+    else:
+        waiting = ", ".join(p.display_name for p, _ in settlement.missing_funders(m))
+        text = f"Your share of '{m.title}' is on hold; the tranche is funded once {waiting} hold theirs. You can close this tab."
+    return html_page("Tranche funded" if settlement.fully_funded(m) else "Share held", text)
 
 
 @router.get("/paypal/cancel", include_in_schema=False)
@@ -133,7 +143,8 @@ def _disbursement_read(d, m) -> DisbursementRead:
 @router.post(
     "/milestones/{milestone_id}/payout",
     openapi_extra={"x-sdk-core": "payoutMilestone"},
-    summary="Pay a captured tranche to the payee now (waives the rest of the dispute window; retries a failed payout)",
+    summary="Pay a captured tranche to the payee now (waives the rest of the dispute window; retries a failed "
+    "payout, including a partial share's)",
 )
 def payout(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep, request: Request) -> DisbursementRead:
     access, m = auth
@@ -158,15 +169,72 @@ def resolve(
 ) -> DisbursementRead:
     access, m = auth
     access.require(Action.resolve_for_payee if body.decision == "release" else Action.resolve_for_payer)
-    d = settlement.resolve(session, gateway(request), m, access.actor, body.decision, body.note, utcnow())
+    d = settlement.resolve(
+        session, gateway(request), m, access.actor, body.decision, body.note, utcnow(), party=access.party
+    )
     return _disbursement_read(d, m)
 
 
-@router.post("/milestones/{milestone_id}/void", summary="Payer cancels a tranche's hold before evidence arrives")
+@router.post(
+    "/milestones/{milestone_id}/void",
+    summary="Payer cancels a tranche's hold before evidence arrives (co-funded: the lead cancels every hold, a "
+    "co-funder its own)",
+)
 def void(milestone_id: str, auth: MilestoneAccessDep, session: SessionDep, request: Request) -> AgreementRead:
     access, m = auth
     access.require(Action.void)
-    settlement.void(session, gateway(request), m, access.actor)
+    settlement.void(session, gateway(request), m, access.actor, party=access.party)
+    return agreement_read(m.agreement)
+
+
+class CoverShare(SQLModel):
+    email: str | None = Field(
+        default=None, description="The co-funder (by invited email) taking on this part of the gap; null for the lead."
+    )
+    amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2, description="How much of the gap they take on.")
+
+
+class ShortfallIn(SQLModel):
+    decision: Literal["void", "shrink", "cover"] = Field(
+        description="void releases every hold placed so far (the tranche goes back to pending); shrink proposes the "
+        "tranche at what was funded, for the payee to accept; cover reassigns the unfunded part to the funders named "
+        "in `cover`, who agree by funding it."
+    )
+    cover: list[CoverShare] = Field(default_factory=list, description="cover: who takes how much of the gap.")
+    note: str = Field(default="", max_length=2000, description="Kept in the audit record and sent with the notices.")
+
+
+class ShortfallAnswer(SQLModel):
+    accept: bool = Field(description="true: the tranche shrinks to the funded amount; false: the proposal is dropped.")
+    note: str = Field(default="", max_length=2000, description="Kept in the audit record and sent to the lead funder.")
+
+
+@router.post(
+    "/milestones/{milestone_id}/shortfall",
+    openapi_extra={"x-sdk-core": "resolveShortfall"},
+    summary="Co-funded: the lead funder decides a tranche some funders never held (after the funding window)",
+)
+def shortfall(
+    milestone_id: str, body: ShortfallIn, auth: MilestoneAccessDep, session: SessionDep, request: Request
+) -> AgreementRead:
+    access, m = auth
+    access.require(Action.resolve_shortfall)
+    cover = [(c.email, c.amount) for c in body.cover]
+    cofunding.resolve_shortfall(session, gateway(request), m, access.actor, body.decision, cover, body.note, utcnow())
+    return agreement_read(m.agreement)
+
+
+@router.post(
+    "/milestones/{milestone_id}/shortfall/answer",
+    openapi_extra={"x-sdk-core": "answerShortfall"},
+    summary="Co-funded: the payee accepts or declines the lead funder's proposal to shrink a tranche",
+)
+def answer_shortfall(
+    milestone_id: str, body: ShortfallAnswer, auth: MilestoneAccessDep, session: SessionDep
+) -> AgreementRead:
+    access, m = auth
+    access.require(Action.accept_shortfall)
+    cofunding.answer_shrink(session, m, access.actor, body.accept, body.note, utcnow())
     return agreement_read(m.agreement)
 
 

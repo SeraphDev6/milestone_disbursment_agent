@@ -205,5 +205,5 @@ class VerdictRead(VerdictBase):
     weighted_share: float | None = Field(
         default=None,
         description="The share of the tranche the met criteria account for, by criterion weight (1.0 when all are "
-        "met). Reported for partial release; the release itself is still all-or-nothing.",
+        "met). With partial_release on, this share of the tranche can be paid now.",
     )

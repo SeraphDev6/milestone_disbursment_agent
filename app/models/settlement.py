@@ -2,16 +2,42 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime
+from sqlalchemy import JSON, DateTime
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.columns import enum_type, fk, id_field, timestamp, utcnow
 from app.models.enums import DisbursementKind, MilestoneStatus, SettlementMode, SettlementStatus
 
 if TYPE_CHECKING:
-    from app.models.agreements import Milestone
+    from app.models.agreements import Milestone, Party
+
+
+class Hold(SQLModel, table=True):
+    """One funder's PayPal authorization on one tranche. A single-payer tranche has one; a co-funded tranche has one
+    per funder (and another when a funder covers part of a shortfall). The row outlives the authorization: an expired
+    or voided hold keeps its share and is funded again through the same row."""
+
+    __tablename__ = "holds"
+
+    id: str = id_field()
+    milestone_id: str | None = fk("milestones.id")
+    party_id: str | None = fk("parties.id")  # the funder
+    amount: Decimal = Field(max_digits=14, decimal_places=2)  # the share this hold covers
+    paypal_order_id: str | None = Field(default=None, max_length=64, index=True)  # latest funding order
+    paypal_authorization_id: str | None = Field(default=None, max_length=64, index=True)  # current live hold
+    funded_at: datetime | None = timestamp(optional=True)  # when this authorization was placed
+    reauthorized_at: datetime | None = timestamp(optional=True)
+    created_at: datetime = timestamp()
+
+    milestone: "Milestone" = Relationship(back_populates="holds")
+    party: "Party" = Relationship()
+    settlements: list["Settlement"] = Relationship(back_populates="hold")
+
+    @property
+    def live(self) -> bool:
+        return self.paypal_authorization_id is not None
 
 
 class SettlementBase(SQLModel):
@@ -26,6 +52,22 @@ class SettlementBase(SQLModel):
     status: SettlementStatus = Field(
         sa_type=enum_type(SettlementStatus, 16), description="Mirrored from PayPal responses and webhooks."
     )
+    amount: Decimal = Field(
+        max_digits=14,
+        decimal_places=2,
+        description="What this attempt captures or invoices: the whole tranche, or (partial release) the share of "
+        "it the newly met criteria account for by weight.",
+    )
+    final: bool = Field(
+        default=True,
+        description="Escrow: this capture closes the hold (final_capture). False for a partial release, which leaves "
+        "the remainder on hold for the criteria still to be met.",
+    )
+    criterion_ids: list[str] = Field(
+        default_factory=list,
+        sa_type=JSON,
+        description="Partial release: the criteria this capture pays for. Empty for a whole-tranche release.",
+    )
 
 
 class Settlement(SettlementBase, table=True):
@@ -33,6 +75,7 @@ class Settlement(SettlementBase, table=True):
 
     id: str = id_field()
     milestone_id: str | None = fk("milestones.id")
+    hold_id: str | None = fk("holds.id", optional=True)  # escrow: the funder's hold this capture takes from
     error: str | None = Field(default=None, max_length=500)
     payer_url: str | None = Field(default=None, max_length=500)  # invoice mode: PayPal's invoice page for the payer
     created_at: datetime = timestamp()
@@ -41,6 +84,8 @@ class Settlement(SettlementBase, table=True):
     )
 
     milestone: "Milestone" = Relationship(back_populates="settlements")
+    hold: Optional["Hold"] = Relationship(back_populates="settlements")
+    disbursements: list["Disbursement"] = Relationship(back_populates="settlement")
 
 
 class SettlementRead(SettlementBase):
@@ -61,6 +106,9 @@ class DisbursementBase(SQLModel):
         default=None, max_length=128, index=True, description="Payout item, payout batch or refund id."
     )
     status: SettlementStatus = Field(sa_type=enum_type(SettlementStatus, 16))
+    amount: Decimal = Field(
+        max_digits=14, decimal_places=2, description="The captured amount this pays out or refunds."
+    )
 
 
 class Disbursement(DisbursementBase, table=True):
@@ -68,6 +116,7 @@ class Disbursement(DisbursementBase, table=True):
 
     id: str = id_field()
     milestone_id: str | None = fk("milestones.id")
+    settlement_id: str | None = fk("settlements.id", optional=True)  # the capture whose money moves
     error: str | None = Field(default=None, max_length=500)
     created_at: datetime = timestamp()
     updated_at: datetime = Field(
@@ -75,6 +124,7 @@ class Disbursement(DisbursementBase, table=True):
     )
 
     milestone: "Milestone" = Relationship(back_populates="disbursements")
+    settlement: Optional["Settlement"] = Relationship(back_populates="disbursements")
 
 
 class DisbursementRead(DisbursementBase):

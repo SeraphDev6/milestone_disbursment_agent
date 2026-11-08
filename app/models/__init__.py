@@ -9,7 +9,9 @@ from app.models.agreements import (
     AgreementBase,
     AgreementCreate,
     AgreementRead,
+    FunderShare,
     FundingSummary,
+    HoldRead,
     Milestone,
     MilestoneBase,
     MilestoneCreate,
@@ -72,7 +74,7 @@ from app.models.identity import (
 )
 from app.models.oauth import OAuthClient, OAuthCode, OAuthPendingAuthorization
 from app.models.paypal import PayPalAccount, PayPalAccountRead, PayPalConnectStarted
-from app.models.settlement import Disbursement, DisbursementRead, LedgerEntry, Settlement, SettlementRead
+from app.models.settlement import Disbursement, DisbursementRead, Hold, LedgerEntry, Settlement, SettlementRead
 from app.models.sso import SSOConnection, SSOConnectionRead, SSOConnectionWrite, SSODomain, SSOLoginState
 
 __all__ = [
@@ -99,12 +101,15 @@ __all__ = [
     "EvidenceRead",
     "EvidenceType",
     "EvidenceVisibility",
+    "FunderShare",
     "FundingSummary",
     "GitHubCheck",
     "GitHubHandover",
     "GitHubHandoverRead",
     "GitHubInstallation",
     "GitHubInstallationRead",
+    "Hold",
+    "HoldRead",
     "Integration",
     "Invitation",
     "InvitationKind",

@@ -8,8 +8,9 @@ import s from "./Agreement.module.css";
 /** One line per party, like the signature block at the end of a contract. */
 export function SignatureBlock({ a }: { a: AgreementRead }) {
   const order = { payer: 0, payee: 1, reviewer: 2 } as const;
-  const parties = [...a.parties].sort((x, y) => order[x.role] - order[y.role]);
+  const parties = [...a.parties].sort((x, y) => order[x.role] - order[y.role] || Number(y.lead) - Number(x.lead));
   const pending = a.pending_invitations ?? [];
+  const coFunded = a.parties.filter((p) => p.role === "payer").length > 1;
   return (
     <ul className={s.signatures} aria-label="Signatures">
       {parties.map((p) => (
@@ -18,7 +19,7 @@ export function SignatureBlock({ a }: { a: AgreementRead }) {
           <div>
             <div className={s.sigLine}>
               <span className={`${s.sigName} ${p.confirmed_current ? "" : s.unsigned}`}>{p.confirmed_current ? p.display_name : `${p.display_name}: not signed`}</span>
-              <span className={s.sigRole}>{ROLE_LABEL[p.role]}</span>
+              <span className={s.sigRole}>{p.role === "payer" && coFunded ? (p.lead ? "Lead funder" : "Co-funder") : ROLE_LABEL[p.role]}</span>
             </div>
             <span className="sr-only">{p.confirmed_current ? `${p.display_name} has signed the current criteria.` : `${p.display_name} hasn't signed the current criteria.`}</span>
             {(p.paypal_email || p.role === "payee") && (

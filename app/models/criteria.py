@@ -42,7 +42,8 @@ class Measure(SQLModel):
 
 
 class Criterion(SQLModel):
-    """One checkable condition of a tranche. A tranche releases only when every criterion is met."""
+    """One checkable condition of a tranche. A tranche settles only when every criterion is met; with partial
+    release on, each criterion's weighted share can pay as soon as it is met."""
 
     id: str | None = Field(
         default=None,
@@ -73,7 +74,8 @@ class Criterion(SQLModel):
     weight: Decimal = Field(
         default=Decimal(1),
         gt=0,
-        description="Relative weight for future partial release; unused while release is all-or-nothing.",
+        description="Relative weight within the tranche. With partial_release on, a tranche pays the share of its "
+        "amount its met criteria account for by weight; otherwise weights only show the met share on the verdict.",
     )
 
 

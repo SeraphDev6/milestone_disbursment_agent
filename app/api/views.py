@@ -60,12 +60,46 @@ def pay_path(s) -> str | None:
     return path(s)
 
 
+def _money_so_far(m, now) -> dict:
+    from app.models import HoldRead
+    from app.services.settlement import (
+        funded_amount,
+        funding_lapsed,
+        hold_remaining,
+        live_holds,
+        paid_criteria,
+        refunded,
+        released,
+    )
+
+    live = live_holds(m)
+    return {
+        "amount_released": released(m) - refunded(m),
+        "criteria_paid": sorted(paid_criteria(m)),
+        "paypal_authorization_id": live[0].paypal_authorization_id if len(live) == 1 else None,
+        "holds": [
+            HoldRead(
+                id=h.id,
+                party_id=h.party_id or "",
+                funder=h.party.display_name if h.party else "the payer",
+                lead=bool(h.party and h.party.lead),
+                amount=h.amount,
+                remaining=hold_remaining(h),
+                paypal_authorization_id=h.paypal_authorization_id,
+                funded_at=h.funded_at,
+                awaiting_approval=_awaiting_approval(m) and h.paypal_order_id is not None and not h.live,
+            )
+            for h in m.holds
+        ],
+        "funded_amount": funded_amount(m),
+        "funding_lapsed": funding_lapsed(m, now),
+    }
+
+
 def _awaiting_approval(m) -> bool:
-    """Funding started (an order exists) but the payer hasn't approved it in PayPal yet."""
-    return (
-        m.status in (MilestoneStatus.pending, MilestoneStatus.overdue)
-        and m.paypal_order_id is not None
-        and m.paypal_authorization_id is None
+    """Funding started (an order exists) but a funder hasn't approved it in PayPal yet."""
+    return m.status in (MilestoneStatus.pending, MilestoneStatus.overdue) and any(
+        h.paypal_order_id is not None and not h.live for h in m.holds
     )
 
 
@@ -104,7 +138,10 @@ def _reviewer_invited(row: Agreement) -> bool:
 
 
 def agreement_read(row: Agreement) -> AgreementRead:
-    current = criteria_hash(row.milestones, row.deliverable_release, row.min_evidence_visibility)
+    from app.db import utcnow
+
+    now = utcnow()
+    current = criteria_hash(row.milestones, row.deliverable_release, row.min_evidence_visibility, row.partial_release)
     return AgreementRead.model_validate(
         row,
         update={
@@ -127,6 +164,7 @@ def agreement_read(row: Agreement) -> AgreementRead:
                         "pay_path": pay_path(m.settlements[-1]) if m.settlements else None,
                         "refund_failed": _refund_failed(m),
                         "awaiting_approval": _awaiting_approval(m),
+                        **_money_so_far(m, now),
                     },
                 )
                 for m in row.milestones

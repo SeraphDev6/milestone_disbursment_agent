@@ -38,7 +38,7 @@ from app.models import (
     UserRead,
 )
 from app.models.identity import EMAIL_PATTERN
-from app.services import disclosure, identity
+from app.services import disclosure, identity, settlement
 from app.services.access import AccessError
 
 router = APIRouter(tags=["organizations"])
@@ -504,7 +504,7 @@ def open_work(org_id: str, principal: PrincipalDep, session: SessionDep) -> list
                     currency=a.currency,
                     due_date=m.due_date,
                     status=m.status,
-                    funded=m.paypal_authorization_id is not None,
+                    funded=settlement.fully_funded(m),
                     settlement_mode=a.settlement_mode,
                     criteria=list(m.criteria),
                     last_rejection=rejection,

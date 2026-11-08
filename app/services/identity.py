@@ -175,7 +175,9 @@ def invite(
     session.add(inv)
     link = f"{(app_url or base_url).rstrip('/')}/invitations/accept?token={raw}"
     if agreement is not None:
-        what = "receive payments under" if kind == InvitationKind.counterparty else "review"
+        what = {InvitationKind.counterparty: "receive payments under", InvitationKind.funder: "co-fund"}.get(
+            kind, "review"
+        )
         subject = f"Invitation to {what}: '{agreement.title}'"
         record_audit(session, agreement.id, actor, "invited", detail={"email": email, "kind": kind})
     else:
@@ -267,6 +269,10 @@ def _accept(
         if not org.paypal_email:  # type: ignore[union-attr]
             raise IdentityError("set your organization's PayPal email before accepting payments", 422)
         role = Role.payee
+    elif inv.kind == InvitationKind.funder:
+        if not org.paypal_email:  # type: ignore[union-attr]
+            raise IdentityError("set your organization's PayPal email before joining as a funder", 422)
+        role = Role.payer
     else:
         role = Role.reviewer
 
@@ -275,7 +281,9 @@ def _accept(
             role=role,
             org_id=org.id,
             display_name=org.name,  # type: ignore[union-attr]
-            paypal_email=org.paypal_email if role == Role.payee else None,
+            paypal_email=org.paypal_email if role != Role.reviewer else None,
+            lead=False,
+            invited_email=inv.email if inv.kind == InvitationKind.funder else None,
         )  # type: ignore[union-attr]
     )
     inv.accepted_at, inv.accepted_org_id = utcnow(), org.id  # type: ignore[union-attr]

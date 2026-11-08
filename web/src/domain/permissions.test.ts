@@ -21,7 +21,25 @@ const SPEC: Record<string, [string | null, string | null, string | null]> = {
   contest: ["admin", null, "member"],
   resolve_for_payee: ["admin", null, "member"],
   resolve_for_payer: [null, "admin", "member"],
+  resolve_shortfall: ["admin", null, null],
+  accept_shortfall: [null, "admin", null],
 };
+
+test("a co-funder funds and contests; the lead funder does the rest", () => {
+  const co: Seat = { ...seat("payer", "admin"), lead: false };
+  expect(can(co, "fund").ok).toBe(true);
+  expect(can(co, "contest").ok).toBe(true);
+  expect(can(co, "resolve_for_payee").ok).toBe(true);
+  expect(can(co, "review")).toEqual({ ok: false, reason: expect.stringContaining("Only the lead funder") });
+  expect(can(co, "release").ok).toBe(false);
+  expect(can(co, "resolve_shortfall").ok).toBe(false);
+  const lead: Seat = { ...seat("payer", "admin"), lead: true };
+  expect(can(lead, "review").ok).toBe(true);
+  const ctx = { status: "pending" as const, mode: "escrow_release" as const, agreementActive: true, hasHold: false, anyHold: true };
+  expect(canOnTranche(lead, "shortfall", ctx).ok).toBe(true);
+  expect(canOnTranche(co, "fund", ctx).ok).toBe(true);
+  expect(canOnTranche(co, "fund", { ...ctx, hasHold: true }).ok).toBe(false);
+});
 
 test.each(Object.entries(SPEC))("%s matches the spec", (action, [payer, payee, reviewer]) => {
   const rule = RULES[action as keyof typeof RULES];

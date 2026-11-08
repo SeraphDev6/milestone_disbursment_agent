@@ -11,7 +11,7 @@ import hashlib
 import json
 import re
 from collections.abc import Sequence
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 
 from app.domain.checks import CHECKS
 from app.models import (
@@ -269,8 +269,45 @@ def lint_criterion(c: Criterion, path: str, milestone: MilestoneBase) -> list[Li
 def lint_agreement(agreement: AgreementBase, *, reviewer_invited: bool = False) -> LintReport:
     """Works on a request body (AgreementCreate) or a stored Agreement: both carry total_amount and milestones.
     `reviewer_invited`: a reviewer is invited but hasn't joined yet (stored agreements only)."""
-    report = lint_tranches(agreement.total_amount, agreement.milestones)  # type: ignore[attr-defined]
+    partial = bool(getattr(agreement, "partial_release", False))
+    report = lint_tranches(agreement.total_amount, agreement.milestones, partial_release=partial)  # type: ignore[attr-defined]
     on_capture = getattr(agreement, "deliverable_release", None) == DeliverableRelease.on_capture
+    mode = getattr(agreement, "settlement_mode", None)
+    co_funded = any(getattr(m, "shares", None) for m in agreement.milestones)  # type: ignore[attr-defined]
+    if co_funded and mode == SettlementMode.invoice_on_verify:
+        report.issues.append(
+            _issue(
+                LintLevel.error,
+                "co_funding_needs_escrow",
+                "settlement_mode",
+                "Co-funders each place a PayPal hold on their share; invoice mode has nothing to hold.",
+                "Use escrow, or remove the shares so one payer is invoiced.",
+            )
+        )
+        report.ok = False
+    if partial and mode == SettlementMode.invoice_on_verify:
+        report.issues.append(
+            _issue(
+                LintLevel.error,
+                "partial_release_needs_escrow",
+                "partial_release",
+                "Partial release pays shares out of a PayPal hold; invoice mode has no hold to capture from.",
+                "Use escrow, or turn partial release off.",
+            )
+        )
+        report.ok = False
+    if partial and mode == SettlementMode.escrow_release and getattr(agreement, "dispute_window_days", 0):
+        report.issues.append(
+            _issue(
+                LintLevel.warning,
+                "partial_shares_skip_window",
+                "partial_release",
+                "A share paid before the tranche is complete reaches the payee when it is captured; the dispute "
+                "window applies to the final capture only.",
+                "Keep partial release if paying met criteria early is the point; otherwise turn it off so the whole "
+                "tranche waits out the window.",
+            )
+        )
     if on_capture and getattr(agreement, "settlement_mode", None) == SettlementMode.escrow_release:
         if getattr(agreement, "dispute_window_days", 0) < 1:
             report.issues.insert(
@@ -330,7 +367,7 @@ def lint_agreement(agreement: AgreementBase, *, reviewer_invited: bool = False) 
 
 def weighted_share(criteria: Sequence[Criterion], met_ids: set[str]) -> float:
     """The share of a tranche its met criteria account for, by weight (1.0 when every criterion is met). What a
-    partial release would pay; today's release is still all-or-nothing, so this is reported, not paid."""
+    partial release pays (see `share_amount`); reported on every verdict either way."""
     total = sum((Decimal(str(c.weight)) for c in criteria), start=Decimal(0))
     if total <= 0:
         return 0.0
@@ -338,22 +375,53 @@ def weighted_share(criteria: Sequence[Criterion], met_ids: set[str]) -> float:
     return float(round(met / total, 4))
 
 
-def lint_tranches(total_amount: Decimal, milestones: Sequence[MilestoneBase]) -> LintReport:
+def share_amount(criteria: Sequence[Criterion], met_ids: set[str], amount: Decimal) -> Decimal:
+    """The money the met criteria account for: `amount` × their weight ÷ all weights, rounded down to the cent so
+    partial captures never overshoot. Exactly `amount` when every criterion is met, so the final capture settles
+    the remainder to the cent."""
+    ids = {c.id for c in criteria}
+    if ids <= set(met_ids):
+        return amount
+    total = sum((Decimal(str(c.weight)) for c in criteria), start=Decimal(0))
+    met = sum((Decimal(str(c.weight)) for c in criteria if c.id in met_ids), start=Decimal(0))
+    return (amount * met / total).quantize(Decimal("0.01"), rounding=ROUND_DOWN) if total > 0 else Decimal("0.00")
+
+
+def lint_tranches(
+    total_amount: Decimal, milestones: Sequence[MilestoneBase], *, partial_release: bool = False
+) -> LintReport:
     """Lint tranches on their own, e.g. extraction output before parties are known."""
     E, W = LintLevel.error, LintLevel.warning
     issues: list[LintIssue] = []
 
     for mi, m in enumerate(milestones):
+        shares = list(getattr(m, "shares", None) or [])
+        share_sum = sum((sh.amount for sh in shares), start=Decimal(0))
+        if share_sum > m.amount:
+            issues.append(
+                _issue(
+                    E,
+                    "shares_exceed_tranche",
+                    f"milestones[{mi}].shares",
+                    f"Co-funders' shares add up to {share_sum}, more than the tranche's {m.amount}.",
+                    "Lower a share or raise the tranche; the lead funder covers whatever the shares leave.",
+                )
+            )
+        emails = [sh.email.lower() for sh in shares]
+        for dup in sorted({e for e in emails if emails.count(e) > 1}):
+            issues.append(
+                _issue(E, "share_funder_repeated", f"milestones[{mi}].shares", f"{dup} has two shares of this tranche.")
+            )
         weights = {Decimal(str(c.weight)) for c in m.criteria}
-        if len(weights) > 1:
+        if len(weights) > 1 and not partial_release:
             issues.append(
                 _issue(
                     W,
-                    "weights_not_yet_paid",
+                    "weights_not_paid",
                     f"milestones[{mi}].criteria",
-                    "Criteria carry different weights, but release is all-or-nothing: a tranche pays in full when "
-                    "every criterion is met, and nothing before. The weights show the met share on the verdict.",
-                    "Keep the weights if the share is useful to see; split the tranche if parts should pay separately.",
+                    "Criteria carry different weights, but partial release is off: the tranche pays in full when "
+                    "every criterion is met, and nothing before. The weights only show the met share on the verdict.",
+                    "Turn on partial release to pay each criterion's share as it is met, or split the tranche.",
                 )
             )
 
@@ -419,25 +487,30 @@ def criteria_hash(
     milestones: Sequence[MilestoneBase],
     deliverable_release: DeliverableRelease = DeliverableRelease.on_submit,
     min_evidence_visibility: EvidenceVisibility = EvidenceVisibility.hash_only,
+    partial_release: bool = False,
 ) -> str:
     """Hash of everything a party signs off on: tranche order and MilestoneBase's fields (title, amount, due date,
-    criteria), plus deliverable_release and min_evidence_visibility when deliverable_release isn't the default. Works on request bodies and stored rows alike,
-    since both are MilestoneBase."""
+    criteria), plus deliverable_release and min_evidence_visibility when deliverable_release isn't the default, and
+    partial_release when it is on. Works on request bodies and stored rows alike, since both are MilestoneBase.
+    A tranche's funder `shares` are left out: the split between funders is their business (each signs with the share
+    shown and recorded), and covering a shortfall changes it without the payee re-signing."""
     payload: list = []
     for m in milestones:
-        data = MilestoneBase.model_validate(m).model_dump(mode="json")
+        data = MilestoneBase.model_validate(m).model_dump(mode="json", exclude={"shares"})
         data["amount"] = f"{m.amount:.2f}"  # '10000' and '10000.00' (as read back from the DB) must hash the same
         for c, raw in zip(m.criteria, data["criteria"], strict=True):
             # Weights are signed too. Shortest form, so '1', '1.0' and '1.00' hash the same and the default weight
             # keeps the hash agreements were signed with before weights were normalised.
             raw["weight"] = str(Decimal(str(c.weight)).normalize())
         payload.append(data)
-    if deliverable_release != DeliverableRelease.on_submit:
-        # Only when set, so agreements signed before the setting existed keep their hash.
+    if deliverable_release != DeliverableRelease.on_submit or partial_release:
+        # Only when set, so agreements signed before these settings existed keep their hash.
         payload = {
             "deliverable_release": str(deliverable_release),
             "min_evidence_visibility": str(min_evidence_visibility),
             "milestones": payload,
         }
+        if partial_release:
+            payload["partial_release"] = True
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()

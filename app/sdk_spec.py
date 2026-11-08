@@ -11,7 +11,7 @@ import json
 import sys
 from pathlib import Path
 
-CORE_VERSION = "0.2.0"  # 0.2.0: resendPayLink (#41); operation ids, security, error responses, examples (#14)
+CORE_VERSION = "0.3.0"  # 0.3.0: resolveShortfall, answerShortfall (#47). 0.2.0: resendPayLink (#41); operation ids, security, error responses, examples (#14)
 CORE_TAG = "x-sdk-core"  # its value is the SDK method name (operationId)
 OUTPUT = Path(__file__).resolve().parent.parent / "sdk" / "openapi-core.json"
 SERVERS = [{"url": "https://app.milestone-ledger.com/api", "description": "Hosted sandbox (PayPal sandbox, demo on)"}]
@@ -97,6 +97,12 @@ EXAMPLES: dict[str, dict] = {
     },
     "ConfirmRequest": {"criteria_hash": "3f1c…e9a2", "auto_release_enabled": False},
     "InviteToAgreement": {"email": "auditor@sponsor.example.org", "kind": "reviewer"},
+    "ShortfallIn": {
+        "decision": "cover",
+        "cover": [{"email": "grants@second.example.org", "amount": "6000.00"}],
+        "note": "Harbor can't fund this tranche this quarter; Second Foundation agreed to cover it.",
+    },
+    "ShortfallAnswer": {"accept": True, "note": "Fine at the funded amount."},
     "EvidenceCreate": {
         "evidence_type": "spreadsheet",
         "title": "Spring workshop sign-in sheets (register).csv",

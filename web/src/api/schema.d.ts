@@ -707,7 +707,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Payer starts a PayPal hold for one tranche */
+        /** Payer starts a PayPal hold for one tranche (co-funded: for this funder's share of it) */
         post: operations["fund_milestones__milestone_id__fund_post"];
         delete?: never;
         options?: never;
@@ -758,7 +758,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Pay a captured tranche to the payee now (waives the rest of the dispute window; retries a failed payout) */
+        /** Pay a captured tranche to the payee now (waives the rest of the dispute window; retries a failed payout, including a partial share's) */
         post: operations["payout_milestones__milestone_id__payout_post"];
         delete?: never;
         options?: never;
@@ -809,8 +809,42 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Payer cancels a tranche's hold before evidence arrives */
+        /** Payer cancels a tranche's hold before evidence arrives (co-funded: the lead cancels every hold, a co-funder its own) */
         post: operations["void_milestones__milestone_id__void_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/milestones/{milestone_id}/shortfall": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Co-funded: the lead funder decides a tranche some funders never held (after the funding window) */
+        post: operations["shortfall_milestones__milestone_id__shortfall_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/milestones/{milestone_id}/shortfall/answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Co-funded: the payee accepts or declines the lead funder's proposal to shrink a tranche */
+        post: operations["answer_shortfall_milestones__milestone_id__shortfall_answer_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1080,7 +1114,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Payer (admin) or reviewer approves or rejects a verdict in review */
+        /** Payer (admin) or reviewer approves, rejects, or pays the met share of a verdict in review */
         post: operations["review_milestones__milestone_id__review_post"];
         delete?: never;
         options?: never;
@@ -1549,6 +1583,18 @@ export interface components {
              */
             deliverable_release?: components["schemas"]["DeliverableRelease"];
             /**
+             * Partial Release
+             * @description Escrow: pay the share of a tranche its met criteria account for, by criterion weight, before the rest is met (the hold keeps the remainder; the final capture settles the tranche). Off: a tranche pays in full when every criterion is met, and nothing before. Part of the criteria hash when on.
+             * @default false
+             */
+            partial_release?: boolean;
+            /**
+             * Funding Window Days
+             * @description Co-funded grants: days after the first funder holds its share of a tranche for the others to hold theirs. Past it, the lead funder can void the holds, shrink the tranche to what was funded (the payee accepts) or ask the funders who agree to cover the gap. PayPal holds last 29 days.
+             * @default 14
+             */
+            funding_window_days?: number;
+            /**
              * @description on_capture only: the least the payee may show the payer of each evidence item before capture. hash_only (pass/fail and the pinned hash), verdict_only (+ observed values), excerpt (+ the verifier's quotes and rationale) or preview. The payee picks a level at or above it per item. Signed with the criteria.
              * @default hash_only
              */
@@ -1563,6 +1609,11 @@ export interface components {
              * @description Optional third-party reviewers to invite (criteria and evidence).
              */
             reviewer_emails?: string[];
+            /**
+             * Co Funder Emails
+             * @description Co-funded grants: other funders to invite. Each joins as a payer with its own organization and funds the share each tranche's `shares` give it; your organization is the lead funder.
+             */
+            co_funder_emails?: string[];
             /**
              * Milestones
              * @description Tranches in payment order.
@@ -1633,6 +1684,18 @@ export interface components {
              * @default on_submit
              */
             deliverable_release?: components["schemas"]["DeliverableRelease"];
+            /**
+             * Partial Release
+             * @description Escrow: pay the share of a tranche its met criteria account for, by criterion weight, before the rest is met (the hold keeps the remainder; the final capture settles the tranche). Off: a tranche pays in full when every criterion is met, and nothing before. Part of the criteria hash when on.
+             * @default false
+             */
+            partial_release?: boolean;
+            /**
+             * Funding Window Days
+             * @description Co-funded grants: days after the first funder holds its share of a tranche for the others to hold theirs. Past it, the lead funder can void the holds, shrink the tranche to what was funded (the payee accepts) or ask the funders who agree to cover the gap. PayPal holds last 29 days.
+             * @default 14
+             */
+            funding_window_days?: number;
             /**
              * @description on_capture only: the least the payee may show the payer of each evidence item before capture. hash_only (pass/fail and the pinned hash), verdict_only (+ observed values), excerpt (+ the verifier's quotes and rationale) or preview. The payee picks a level at or above it per item. Signed with the criteria.
              * @default hash_only
@@ -1891,9 +1954,23 @@ export interface components {
              */
             reason: string;
         };
+        /** CoverShare */
+        CoverShare: {
+            /**
+             * Email
+             * @description The co-funder (by invited email) taking on this part of the gap; null for the lead.
+             */
+            email?: string | null;
+            /**
+             * Amount
+             * @description How much of the gap they take on.
+             */
+            amount: number | string;
+        };
         /**
          * Criterion
-         * @description One checkable condition of a tranche. A tranche releases only when every criterion is met.
+         * @description One checkable condition of a tranche. A tranche settles only when every criterion is met; with partial
+         *     release on, each criterion's weighted share can pay as soon as it is met.
          */
         "Criterion-Input": {
             /**
@@ -1935,14 +2012,15 @@ export interface components {
             due_by?: string | null;
             /**
              * Weight
-             * @description Relative weight for future partial release; unused while release is all-or-nothing.
+             * @description Relative weight within the tranche. With partial_release on, a tranche pays the share of its amount its met criteria account for by weight; otherwise weights only show the met share on the verdict.
              * @default 1
              */
             weight?: number | string;
         };
         /**
          * Criterion
-         * @description One checkable condition of a tranche. A tranche releases only when every criterion is met.
+         * @description One checkable condition of a tranche. A tranche settles only when every criterion is met; with partial
+         *     release on, each criterion's weighted share can pay as soon as it is met.
          */
         "Criterion-Output": {
             /**
@@ -1984,7 +2062,7 @@ export interface components {
             due_by?: string | null;
             /**
              * Weight
-             * @description Relative weight for future partial release; unused while release is all-or-nothing.
+             * @description Relative weight within the tranche. With partial_release on, a tranche pays the share of its amount its met criteria account for by weight; otherwise weights only show the met share on the verdict.
              * @default 1
              */
             weight?: string;
@@ -2129,6 +2207,16 @@ export interface components {
             /** @description submitted, succeeded, failed or unclaimed. */
             status: components["schemas"]["SettlementStatus"];
             /**
+             * Amount
+             * @description The captured amount this pays out or refunds.
+             */
+            amount: string;
+            /**
+             * Settlement Id
+             * @description The capture whose money this moves.
+             */
+            settlement_id: string | null;
+            /**
              * Error
              * @description PayPal's error when the attempt failed.
              */
@@ -2171,6 +2259,11 @@ export interface components {
              */
             paypal_ref?: string | null;
             status: components["schemas"]["SettlementStatus"];
+            /**
+             * Amount
+             * @description The captured amount this pays out or refunds.
+             */
+            amount: string;
             /**
              * Id
              * @description Disbursement attempt id.
@@ -2409,6 +2502,38 @@ export interface components {
              * @description Which model produced it ('mock' on a stand-in).
              */
             model: string;
+        };
+        /**
+         * FunderShare
+         * @description A co-funder's part of one tranche, named by the email its invitation went to.
+         */
+        "FunderShare-Input": {
+            /**
+             * Email
+             * @description The co-funder's invited email.
+             */
+            email: string;
+            /**
+             * Amount
+             * @description What this funder holds and pays of the tranche.
+             */
+            amount: number | string;
+        };
+        /**
+         * FunderShare
+         * @description A co-funder's part of one tranche, named by the email its invitation went to.
+         */
+        "FunderShare-Output": {
+            /**
+             * Email
+             * @description The co-funder's invited email.
+             */
+            email: string;
+            /**
+             * Amount
+             * @description What this funder holds and pays of the tranche.
+             */
+            amount: string;
         };
         /** FundingStarted */
         FundingStarted: {
@@ -2688,6 +2813,58 @@ export interface components {
              */
             how: string;
         };
+        /**
+         * HoldRead
+         * @description One funder's PayPal hold on a tranche.
+         */
+        HoldRead: {
+            /**
+             * Id
+             * @description Hold id.
+             */
+            id: string;
+            /**
+             * Party Id
+             * @description The funder's party on the agreement.
+             */
+            party_id: string;
+            /**
+             * Funder
+             * @description The funder's organization name.
+             */
+            funder: string;
+            /**
+             * Lead
+             * @description Whether this is the lead funder's hold.
+             */
+            lead: boolean;
+            /**
+             * Amount
+             * @description The share this hold covers.
+             */
+            amount: string;
+            /**
+             * Remaining
+             * @description What the hold still has to cover: the share less what partial releases captured.
+             */
+            remaining: string;
+            /**
+             * Paypal Authorization Id
+             * @description The live authorization, when held.
+             */
+            paypal_authorization_id?: string | null;
+            /**
+             * Funded At
+             * @description When this hold was placed.
+             */
+            funded_at?: string | null;
+            /**
+             * Awaiting Approval
+             * @description A funding order exists and PayPal is waiting for this funder to approve it.
+             * @default false
+             */
+            awaiting_approval?: boolean;
+        };
         /** InstallStarted */
         InstallStarted: {
             /**
@@ -2703,10 +2880,10 @@ export interface components {
         };
         /**
          * InvitationKind
-         * @description counterparty (join as the payee), reviewer (join as a reviewer), member (join an organization).
+         * @description counterparty (join as the payee), reviewer (join as a reviewer), funder (join as a co-funder), member (join an organization).
          * @enum {string}
          */
-        InvitationKind: "counterparty" | "reviewer" | "member";
+        InvitationKind: "counterparty" | "reviewer" | "funder" | "member";
         /** InvitationRead */
         InvitationRead: {
             /**
@@ -2768,11 +2945,11 @@ export interface components {
             email: string;
             /**
              * Kind
-             * @description counterparty: the payee (replaces a pending payee invitation); reviewer.
+             * @description counterparty: the payee (replaces a pending payee invitation); reviewer; funder: another payer for a co-funded grant (while the agreement is still a draft, so its tranche shares can be set).
              * @default reviewer
              * @enum {string}
              */
-            kind?: "counterparty" | "reviewer";
+            kind?: "counterparty" | "reviewer" | "funder";
         };
         /** LedgerEntryRead */
         LedgerEntryRead: {
@@ -2993,6 +3170,11 @@ export interface components {
              * @description Checkable conditions; all must be met to release this tranche.
              */
             criteria: components["schemas"]["Criterion-Input"][];
+            /**
+             * Shares
+             * @description Co-funded grants: each co-funder's part of this tranche, by invited email; the lead funder covers the rest. Empty when one payer funds it all. Every funder places its own PayPal hold and the tranche is funded once every share is held; a release captures each hold's part. Not part of the criteria hash: a shortfall can be covered by the funders who agree without the payee re-signing.
+             */
+            shares?: components["schemas"]["FunderShare-Input"][];
         };
         /** MilestoneCreate */
         "MilestoneCreate-Output": {
@@ -3016,6 +3198,11 @@ export interface components {
              * @description Checkable conditions; all must be met to release this tranche.
              */
             criteria: components["schemas"]["Criterion-Output"][];
+            /**
+             * Shares
+             * @description Co-funded grants: each co-funder's part of this tranche, by invited email; the lead funder covers the rest. Empty when one payer funds it all. Every funder places its own PayPal hold and the tranche is funded once every share is held; a release captures each hold's part. Not part of the criteria hash: a shortfall can be covered by the funders who agree without the payee re-signing.
+             */
+            shares?: components["schemas"]["FunderShare-Output"][];
         };
         /** MilestoneLabel */
         MilestoneLabel: {
@@ -3052,6 +3239,11 @@ export interface components {
              */
             criteria: components["schemas"]["Criterion-Output"][];
             /**
+             * Shares
+             * @description Co-funded grants: each co-funder's part of this tranche, by invited email; the lead funder covers the rest. Empty when one payer funds it all. Every funder places its own PayPal hold and the tranche is funded once every share is held; a release captures each hold's part. Not part of the criteria hash: a shortfall can be covered by the funders who agree without the payee re-signing.
+             */
+            shares?: components["schemas"]["FunderShare-Output"][];
+            /**
              * Id
              * @description Tranche (milestone) id.
              */
@@ -3065,9 +3257,31 @@ export interface components {
             status: components["schemas"]["MilestoneStatus"];
             /**
              * Paypal Authorization Id
-             * @description Live PayPal hold for this tranche.
+             * @description The live PayPal hold, when one funder holds the tranche. Co-funded: see `holds`.
              */
             paypal_authorization_id?: string | null;
+            /**
+             * Holds
+             * @description Every funder's hold on this tranche (live or not).
+             */
+            holds?: components["schemas"]["HoldRead"][];
+            /**
+             * Funded Amount
+             * @description Covered by live holds. The tranche is funded when this reaches `amount`.
+             * @default 0.00
+             */
+            funded_amount?: string;
+            /**
+             * Funding Lapsed
+             * @description Co-funded: some funders held their share more than `funding_window_days` ago and others still haven't. The lead funder decides: void the holds, shrink the tranche (payee accepts) or cover the gap.
+             * @default false
+             */
+            funding_lapsed?: boolean;
+            /**
+             * Proposed Amount
+             * @description Co-funded: the lead funder proposed shrinking the tranche to what was funded; waits for the payee to accept or decline.
+             */
+            proposed_amount?: string | null;
             /**
              * Payer Assignee Id
              * @description Payer-side user the tranche is assigned to.
@@ -3080,7 +3294,7 @@ export interface components {
             payee_assignee_id?: string | null;
             /**
              * Funded At
-             * @description When the original hold was placed.
+             * @description When the tranche became fully held.
              */
             funded_at?: string | null;
             /** @description direct: paid into the payee's connected PayPal; platform: via PayPal Payouts. */
@@ -3100,6 +3314,17 @@ export interface components {
              * @description deliverable_release=on_capture: when the payer's money was captured and the full evidence opened to the payer side. Unset while the evidence is withheld.
              */
             revealed_at?: string | null;
+            /**
+             * Amount Released
+             * @description Captured from the payer so far, less refunds. Below `amount` while a partial release has paid some criteria and the rest is still on hold.
+             * @default 0.00
+             */
+            amount_released?: string;
+            /**
+             * Criteria Paid
+             * @description Partial release: criteria whose share has been captured. Every id once the tranche is settled.
+             */
+            criteria_paid?: string[];
             /**
              * Pay Path
              * @description Invoice mode: where the payer pays this tranche (relative to the API), while open.
@@ -3203,6 +3428,17 @@ export interface components {
              * @description Org name at joining; shown in the record.
              */
             display_name: string;
+            /**
+             * Lead
+             * @description Payer only: the lead funder (the org that created the agreement) drafts, reviews, releases and decides a funding shortfall. Other payers are co-funders: they fund their share and can contest.
+             * @default false
+             */
+            lead?: boolean;
+            /**
+             * Invited Email
+             * @description Co-funder: the email its invitation went to, which each tranche's `shares` name.
+             */
+            invited_email?: string | null;
             /**
              * Id
              * @description Party id.
@@ -3439,10 +3675,10 @@ export interface components {
         ReviewRequest: {
             /**
              * Decision
-             * @description approve releases the tranche (it settles when funded); reject sends it back with what's missing.
+             * @description approve releases the tranche (it settles when funded); reject sends it back with what's missing; release_met (agreements with partial_release) pays the share the verdict's met criteria account for and sends the rest back.
              * @enum {string}
              */
-            decision: "approve" | "reject";
+            decision: "approve" | "reject" | "release_met";
             /**
              * Note
              * @description Shown to the payee and kept in the audit log.
@@ -3594,6 +3830,26 @@ export interface components {
             /** @description submitted, succeeded, failed or expired. */
             status: components["schemas"]["SettlementStatus"];
             /**
+             * Amount
+             * @description What this attempt captures or invoices (a share, with partial release).
+             */
+            amount: string;
+            /**
+             * Final
+             * @description Escrow: whether this capture closes the hold. False for a partial share.
+             */
+            final: boolean;
+            /**
+             * Criterion Ids
+             * @description The criteria this capture pays for.
+             */
+            criterion_ids: string[];
+            /**
+             * Funder
+             * @description Escrow: whose hold this capture takes from.
+             */
+            funder?: string | null;
+            /**
              * Error
              * @description PayPal's error when the attempt failed.
              */
@@ -3639,6 +3895,22 @@ export interface components {
             /** @description Mirrored from PayPal responses and webhooks. */
             status: components["schemas"]["SettlementStatus"];
             /**
+             * Amount
+             * @description What this attempt captures or invoices: the whole tranche, or (partial release) the share of it the newly met criteria account for by weight.
+             */
+            amount: string;
+            /**
+             * Final
+             * @description Escrow: this capture closes the hold (final_capture). False for a partial release, which leaves the remainder on hold for the criteria still to be met.
+             * @default true
+             */
+            final?: boolean;
+            /**
+             * Criterion Ids
+             * @description Partial release: the criteria this capture pays for. Empty for a whole-tranche release.
+             */
+            criterion_ids?: string[];
+            /**
              * Id
              * @description Settlement attempt id.
              */
@@ -3657,6 +3929,40 @@ export interface components {
          * @enum {string}
          */
         SettlementStatus: "submitted" | "succeeded" | "failed" | "unclaimed" | "expired";
+        /** ShortfallAnswer */
+        ShortfallAnswer: {
+            /**
+             * Accept
+             * @description true: the tranche shrinks to the funded amount; false: the proposal is dropped.
+             */
+            accept: boolean;
+            /**
+             * Note
+             * @description Kept in the audit record and sent to the lead funder.
+             * @default
+             */
+            note?: string;
+        };
+        /** ShortfallIn */
+        ShortfallIn: {
+            /**
+             * Decision
+             * @description void releases every hold placed so far (the tranche goes back to pending); shrink proposes the tranche at what was funded, for the payee to accept; cover reassigns the unfunded part to the funders named in `cover`, who agree by funding it.
+             * @enum {string}
+             */
+            decision: "void" | "shrink" | "cover";
+            /**
+             * Cover
+             * @description cover: who takes how much of the gap.
+             */
+            cover?: components["schemas"]["CoverShare"][];
+            /**
+             * Note
+             * @description Kept in the audit record and sent with the notices.
+             * @default
+             */
+            note?: string;
+        };
         /**
          * SkepticPass
          * @description A second verifier run told to look for reasons each criterion is NOT met. Auto-release needs both passes
@@ -3862,7 +4168,7 @@ export interface components {
             created_at: string;
             /**
              * Weighted Share
-             * @description The share of the tranche the met criteria account for, by criterion weight (1.0 when all are met). Reported for partial release; the release itself is still all-or-nothing.
+             * @description The share of the tranche the met criteria account for, by criterion weight (1.0 when all are met). With partial_release on, this share of the tranche can be paid now.
              */
             weighted_share?: number | null;
         };
@@ -5753,6 +6059,84 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    shortfall_milestones__milestone_id__shortfall_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Which of your orgs you act for, if you belong to several. */
+                "X-Org-Id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                milestone_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShortfallIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    answer_shortfall_milestones__milestone_id__shortfall_answer_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Which of your orgs you act for, if you belong to several. */
+                "X-Org-Id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                milestone_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShortfallAnswer"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

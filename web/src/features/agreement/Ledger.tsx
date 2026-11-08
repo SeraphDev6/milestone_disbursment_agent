@@ -60,12 +60,14 @@ export function Ledger() {
       { headerName: "Tranche", valueGetter: (p) => (p.data ? titles[p.data.milestone_id] : ""), flex: 1.4, minWidth: 180 },
       { headerName: "Attempt", field: "attempt", width: 100, type: "rightAligned" },
       { headerName: "By", field: "mode", width: 130, valueFormatter: (p) => (p.value === "escrow_release" ? "Capture" : "Invoice") },
+      { headerName: "Amount", field: "amount", width: 130, type: "rightAligned", cellRenderer: (p: { data: SettlementRow }) => <AmountCell value={p.data.amount} currency={a.currency} /> },
+      ...(q.data?.settlements.some((x) => x.funder) ? [{ headerName: "From", field: "funder", width: 170 } as ColDef<SettlementRow>] : []),
       { headerName: "Status", field: "status", width: 140, cellRenderer: (p: { data: SettlementRow }) => <Stamp spec={SETTLEMENT_STAMPS[p.data.status]} flat /> },
       { headerName: "Idempotency key", field: "idempotency_key", flex: 1, minWidth: 200, cellClass: "figures" },
       { headerName: "PayPal reference", field: "paypal_ref", flex: 1, minWidth: 160, cellClass: "figures" },
       { headerName: "Error", field: "error", flex: 1, minWidth: 160 },
     ],
-    [titles],
+    [titles, a.currency, q.data],
   );
 
   const dCols = useMemo<ColDef<DisbursementRow>[]>(

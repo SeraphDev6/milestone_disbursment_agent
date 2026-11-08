@@ -35,7 +35,8 @@ export type CriterionForm = {
   due_by: string | null;
 };
 
-export type TrancheForm = { key: string; title: string; amount: string; due_date: string | null; criteria: CriterionForm[] };
+export type ShareForm = { email: string; amount: string };
+export type TrancheForm = { key: string; title: string; amount: string; due_date: string | null; criteria: CriterionForm[]; shares: ShareForm[] };
 
 export type DraftForm = {
   title: string;
@@ -45,7 +46,10 @@ export type DraftForm = {
   auto_release_threshold: number;
   require_reviewer_approval: boolean;
   reviewer_decides_withheld: boolean;
+  partial_release: boolean;
   dispute_window_days: number;
+  funding_window_days: number;
+  co_funder_emails: string[];
   deliverable_release: DeliverableRelease;
   min_evidence_visibility: EvidenceVisibility;
   counterparty_email: string;
@@ -75,7 +79,7 @@ export function blankCriterion(): CriterionForm {
 }
 
 export function blankTranche(i = 0): TrancheForm {
-  return { key: newKey(), title: `Tranche ${i + 1}`, amount: "", due_date: null, criteria: [blankCriterion()] };
+  return { key: newKey(), title: `Tranche ${i + 1}`, amount: "", due_date: null, criteria: [blankCriterion()], shares: [] };
 }
 
 export function blankDraft(): DraftForm {
@@ -87,7 +91,10 @@ export function blankDraft(): DraftForm {
     auto_release_threshold: 0.85,
     require_reviewer_approval: false,
     reviewer_decides_withheld: true,
+    partial_release: false,
     dispute_window_days: 0,
+    funding_window_days: 14,
+    co_funder_emails: [],
     deliverable_release: "on_submit",
     min_evidence_visibility: "hash_only",
     counterparty_email: "",
@@ -122,6 +129,7 @@ export function tranchesFrom(ms: (MilestoneDraft | MilestoneRead)[]): TrancheFor
     amount: String(m.amount),
     due_date: m.due_date ?? null,
     criteria: m.criteria.map((c) => criterionFrom(c as CriterionDraft)),
+    shares: (m.shares ?? []).map((s) => ({ email: s.email, amount: String(s.amount) })),
   }));
 }
 
@@ -157,8 +165,18 @@ export function criterionOut(c: CriterionForm): CriterionDraft {
 }
 
 export function tranchesOut(ms: TrancheForm[]): MilestoneDraft[] {
-  return ms.map((m) => ({ title: m.title.trim(), amount: m.amount.trim() || "0", due_date: m.due_date || null, criteria: m.criteria.map(criterionOut) }));
+  return ms.map((m) => ({
+    title: m.title.trim(),
+    amount: m.amount.trim() || "0",
+    due_date: m.due_date || null,
+    criteria: m.criteria.map(criterionOut),
+    // A co-funder with no amount on this tranche simply isn't in it: the lead funds the whole tranche.
+    shares: m.shares.filter((s) => s.email.trim() && Number(s.amount) > 0).map((s) => ({ email: s.email.trim(), amount: Number(s.amount).toFixed(2) })),
+  }));
 }
+
+/** What the lead funder covers of a tranche: the amount less every co-funder's share. */
+export const leadShare = (m: TrancheForm) => (Number(m.amount) || 0) - m.shares.reduce((n, s) => n + (Number(s.amount) || 0), 0);
 
 export function agreementOut(d: DraftForm): AgreementCreate {
   return {
@@ -169,7 +187,10 @@ export function agreementOut(d: DraftForm): AgreementCreate {
     auto_release_threshold: d.auto_release_threshold,
     require_reviewer_approval: d.require_reviewer_approval,
     reviewer_decides_withheld: d.reviewer_decides_withheld,
+    partial_release: d.partial_release,
     dispute_window_days: d.dispute_window_days,
+    funding_window_days: d.funding_window_days,
+    co_funder_emails: d.co_funder_emails.map((e) => e.trim()).filter(Boolean),
     deliverable_release: d.deliverable_release ?? "on_submit",
     min_evidence_visibility: d.min_evidence_visibility ?? "hash_only",
     source_document_uri: d.source_document_uri,
@@ -196,6 +217,7 @@ export function tranchesProblems(ms: TrancheForm[]): Problem[] {
     const base = `milestones[${i}]`;
     if (!m.title.trim()) add(`${base}.title`, "Give the tranche a name");
     if (!isNum(m.amount) || Number(m.amount) <= 0) add(`${base}.amount`, "Enter an amount greater than zero");
+    if (leadShare(m) < 0) add(`${base}.shares`, "Co-funders' shares add up to more than the tranche");
     if (!m.criteria.length) add(`${base}.title`, "Add at least one criterion");
     m.criteria.forEach((c, j) => {
       const cb = `${base}.criteria[${j}]`;
@@ -226,11 +248,15 @@ export function agreementProblems(d: DraftForm, step: "terms" | "parties" | "all
   }
   if (step !== "terms") {
     if (!EMAIL.test(d.counterparty_email.trim())) add("ag-counterparty", "Enter the payee's email like name@example.org");
-    const emails = [d.counterparty_email, ...d.reviewer_emails].map((e) => e.trim().toLowerCase()).filter(Boolean);
+    const emails = [d.counterparty_email, ...d.reviewer_emails, ...d.co_funder_emails].map((e) => e.trim().toLowerCase()).filter(Boolean);
     d.reviewer_emails.forEach((e, i) => {
       if (e.trim() && !EMAIL.test(e.trim())) add(`ag-reviewer-${i}`, `Reviewer ${i + 1}: enter an email like name@example.org`);
     });
-    if (new Set(emails).size !== emails.length) add("ag-counterparty", "The payee and reviewers must be different people");
+    d.co_funder_emails.forEach((e, i) => {
+      if (e.trim() && !EMAIL.test(e.trim())) add(`ag-funder-${i}`, `Co-funder ${i + 1}: enter an email like name@example.org`);
+    });
+    if (new Set(emails).size !== emails.length) add("ag-counterparty", "The payee, reviewers and co-funders must be different people");
+    if (d.co_funder_emails.some(Boolean) && d.settlement_mode !== "escrow_release") add("ag-funder-0", "Co-funding needs escrow: each funder places a PayPal hold on its share");
   }
   return p;
 }

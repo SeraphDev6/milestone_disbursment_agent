@@ -26,7 +26,7 @@ export function Parties() {
   const columns = useMemo<ColDef<InvitationRead>[]>(
     () => [
       { headerName: "Email", field: "email", flex: 1.5, minWidth: 200 },
-      { headerName: "As", field: "kind", width: 120, valueFormatter: (p) => (p.value === "counterparty" ? "Payee" : "Reviewer") },
+      { headerName: "As", field: "kind", width: 120, valueFormatter: (p) => ({ counterparty: "Payee", reviewer: "Reviewer", funder: "Co-funder" })[p.value as string] ?? p.value },
       { headerName: "Status", width: 140, cellRenderer: (p: { data: InvitationRead }) => <Stamp spec={INVITATION_STAMPS[invitationState(p.data)]} flat /> },
       { headerName: "Expires", field: "expires_at", width: 140, valueFormatter: (p) => date(p.value) },
       {
@@ -68,7 +68,7 @@ export function Parties() {
         )}
         <Callout tone="note" title="Roles on this agreement">
           <ul style={{ margin: 0 }}>
-            <li><strong>{ROLE_LABEL.payer}</strong> drafts the criteria, funds, reviews and releases.</li>
+            <li><strong>{ROLE_LABEL.payer}</strong> drafts the criteria, funds, reviews and releases. Co-funders fund their share of each tranche and can contest a payment; the lead funder does the rest.</li>
             <li><strong>{ROLE_LABEL.payee}</strong> submits evidence and gets paid; can never approve their own tranche.</li>
             <li><strong>{ROLE_LABEL.reviewer}</strong> signs the criteria and reviews verdicts; never moves money.</li>
           </ul>
@@ -102,8 +102,9 @@ function InviteForm() {
   const org = useOrgCtx();
   const invite = useInvite(a.id, org.orgId);
   const hasPayee = a.parties.some((p) => p.role === "payee");
+  const canAddFunder = (a.status === "draft" || a.status === "awaiting_confirmation") && a.settlement_mode === "escrow_release";
   const [email, setEmail] = useState("");
-  const [kind, setKind] = useState<"reviewer" | "counterparty">("reviewer");
+  const [kind, setKind] = useState<"reviewer" | "counterparty" | "funder">("reviewer");
   const [error, setError] = useState<string | null>(null);
 
   async function submit(e: FormEvent) {
@@ -129,6 +130,7 @@ function InviteForm() {
           options={[
             { id: "reviewer", label: "Reviewer", description: "Signs the criteria; can approve or reject verdicts." },
             { id: "counterparty", label: "Payee", description: hasPayee ? "This agreement already has a payee." : "Accepts for the organization that gets paid.", isDisabled: hasPayee },
+            { id: "funder", label: "Co-funder", description: canAddFunder ? "Another payer; set its share of each tranche in the criteria editor before anyone signs." : "Co-funders join while the agreement is an escrow draft.", isDisabled: !canAddFunder },
           ]}
         />
         <TextField id="invite-email" label="Email" type="email" value={email} onChange={setEmail} error={error} />

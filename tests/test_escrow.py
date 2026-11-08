@@ -53,10 +53,21 @@ def release(client, mid, keys, role="payer"):
 
 
 def age_hold(client, mid, days):
+    """Backdate every live hold on the tranche (and the tranche's own funded-at) by `days`."""
     with client.app.state.sessionmaker() as s:
         m = s.get(Milestone, mid)
         m.funded_at = utcnow() - timedelta(days=days)
+        for hold in m.holds:
+            if hold.paypal_authorization_id:
+                hold.funded_at = m.funded_at
         s.commit()
+
+
+def auth_id(client, mid) -> str | None:
+    """The tranche's live authorization (one funder)."""
+    with client.app.state.sessionmaker() as s:
+        live = [h.paypal_authorization_id for h in s.get(Milestone, mid).holds if h.paypal_authorization_id]
+        return live[0] if live else None
 
 
 def webhook(client, event, sig=MOCK_WEBHOOK_SIGNATURE):
@@ -196,12 +207,10 @@ def test_lost_capture_response_matched_by_authorization(client, active):
     verify(client, m1, keys)
     gw(client).drop_next_response = True
     release(client, m1, keys)
-    with client.app.state.sessionmaker() as s:
-        auth_id = s.get(Milestone, m1).paypal_authorization_id
     event = {
         "id": "WH-2",
         "event_type": "PAYMENT.CAPTURE.COMPLETED",
-        "resource": {"id": "CAP-X", "supplementary_data": {"related_ids": {"authorization_id": auth_id}}},
+        "resource": {"id": "CAP-X", "supplementary_data": {"related_ids": {"authorization_id": auth_id(client, m1)}}},
     }
     assert webhook(client, event).json()["outcome"] == "capture completed"
 

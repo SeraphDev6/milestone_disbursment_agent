@@ -14,7 +14,7 @@ from app.integrations.paypal import PayPalError, SandboxPayPal
 from app.models import Disbursement, Milestone
 from app.services.settlement import disburse_due
 from tests.helpers import connect_paypal, create_active, h
-from tests.test_escrow import agreement, fund, funding, gw, release, verify, webhook
+from tests.test_escrow import agreement, auth_id, fund, funding, gw, release, verify, webhook
 from tests.test_orgs import active_with_reviewer
 
 
@@ -283,9 +283,8 @@ def test_mock_refuses_void_without_acting_for_payee(client, draft):
     _aid, (m1, _), ctx = create_active(client, draft)
     connect_paypal(client, ctx)
     fund(client, m1, ctx)
-    auth_id = tranche(client, m1).paypal_authorization_id
     with pytest.raises(PayPalError, match="PERMISSION_DENIED"):
-        gw(client).void_authorization(auth_id, payee_merchant_id=None, request_id="x")
+        gw(client).void_authorization(auth_id(client, m1), payee_merchant_id=None, request_id="x")
     assert client.post(f"/milestones/{m1}/void", headers=h(ctx["payer"])).status_code == 200
 
 

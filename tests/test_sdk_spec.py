@@ -21,6 +21,8 @@ CORE = {
     ("post", "/milestones/{milestone_id}/release"),
     ("post", "/milestones/{milestone_id}/pay-link"),
     ("post", "/milestones/{milestone_id}/payout"),
+    ("post", "/milestones/{milestone_id}/shortfall"),
+    ("post", "/milestones/{milestone_id}/shortfall/answer"),
     ("get", "/agreements/{agreement_id}/ledger"),
     ("post", "/agreements/{agreement_id}/subscriptions"),
     ("get", "/agreements/{agreement_id}/subscriptions"),

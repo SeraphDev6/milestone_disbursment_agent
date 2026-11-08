@@ -30,6 +30,10 @@ class SettlementAttempt(SQLModel):
     idempotency_key: str = Field(description="Sent to PayPal as PayPal-Request-Id, so a retry can't double-charge.")
     paypal_ref: str | None = Field(description="Capture id, invoice id or pay-now order id once PayPal answered.")
     status: SettlementStatus = Field(description="submitted, succeeded, failed or expired.")
+    amount: Decimal = Field(description="What this attempt captures or invoices (a share, with partial release).")
+    final: bool = Field(description="Escrow: whether this capture closes the hold. False for a partial share.")
+    criterion_ids: list[str] = Field(description="The criteria this capture pays for.")
+    funder: str | None = Field(default=None, description="Escrow: whose hold this capture takes from.")
     error: str | None = Field(description="PayPal's error when the attempt failed.")
     created_at: datetime = Field(description="When the attempt started.")
     updated_at: datetime = Field(description="Last change.")
@@ -43,6 +47,8 @@ class DisbursementAttempt(SQLModel):
     idempotency_key: str = Field(description="Sent to PayPal as PayPal-Request-Id, so a retry can't double-pay.")
     paypal_ref: str | None = Field(description="Payout item id, referenced payout id or refund id from PayPal.")
     status: SettlementStatus = Field(description="submitted, succeeded, failed or unclaimed.")
+    amount: Decimal = Field(description="The captured amount this pays out or refunds.")
+    settlement_id: str | None = Field(description="The capture whose money this moves.")
     error: str | None = Field(description="PayPal's error when the attempt failed.")
     created_at: datetime = Field(description="When the attempt started.")
     updated_at: datetime = Field(description="Last change.")
@@ -80,6 +86,11 @@ def ledger(agreement_id: str, access: AgreementAccessDep, session: SessionDep) -
     return LedgerView(
         currency=a.currency,
         entries=[LedgerEntryRead.model_validate(e) for e in entries],
-        settlements=[SettlementAttempt.model_validate(s) for s in attempts],
+        settlements=[
+            SettlementAttempt.model_validate(
+                s, update={"funder": s.hold.party.display_name if s.hold is not None and s.hold.party else None}
+            )
+            for s in attempts
+        ],
         disbursements=[DisbursementAttempt.model_validate(d) for d in disbursements],
     )
