@@ -122,6 +122,21 @@ function criterionFrom(c: CriterionDraft): CriterionForm {
   };
 }
 
+/** A draft this browser saved under an older release may lack fields added since; fill them from the blanks so nothing downstream reads undefined. */
+export function normalizeDraft(raw: unknown): DraftForm {
+  const d = { ...blankDraft(), ...((raw ?? {}) as Partial<DraftForm>) };
+  const milestones = Array.isArray(d.milestones) && d.milestones.length ? d.milestones : [blankTranche()];
+  d.milestones = milestones.map((m, i) => {
+    const t = { ...blankTranche(i), ...m };
+    t.criteria = (Array.isArray(t.criteria) && t.criteria.length ? t.criteria : [blankCriterion()]).map((c) => ({ ...blankCriterion(), ...c }));
+    t.shares = Array.isArray(t.shares) ? t.shares : [];
+    return t;
+  });
+  d.reviewer_emails = Array.isArray(d.reviewer_emails) ? d.reviewer_emails : [];
+  d.co_funder_emails = Array.isArray(d.co_funder_emails) ? d.co_funder_emails : [];
+  return d;
+}
+
 export function tranchesFrom(ms: (MilestoneDraft | MilestoneRead)[]): TrancheForm[] {
   return ms.map((m) => ({
     key: newKey(),

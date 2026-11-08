@@ -29,7 +29,7 @@ import {
   type Problem,
 } from "@/design/components";
 import { DEMO_GRANT, fetchDemoFile } from "@/features/demo/seed";
-import { agreementOut, agreementProblems, blankDraft, draftFromExtraction, tranchesFrom, type DraftForm } from "./model";
+import { agreementOut, agreementProblems, blankDraft, draftFromExtraction, normalizeDraft, tranchesFrom, type DraftForm } from "./model";
 import { Steps } from "./Steps";
 import { TranchesEditor } from "./TranchesEditor";
 import { useLiveLint } from "./useLiveLint";
@@ -44,7 +44,9 @@ type Saved = { draft: DraftForm; step: number; extraction: ExtractionResult | nu
 function loadSaved(orgId: string): Saved | null {
   try {
     const raw = localStorage.getItem(`mde.draft.${orgId}`);
-    return raw ? (JSON.parse(raw) as Saved) : null;
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as Saved;
+    return { ...saved, draft: normalizeDraft(saved.draft) };
   } catch {
     return null;
   }
