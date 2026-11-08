@@ -1,5 +1,5 @@
 import { DEMO_GRANT } from "@/features/demo/seed";
-import { agreementOut, agreementProblems, blankDraft, criterionOut, leadShare, tranchesFrom, tranchesOut, tranchesProblems, type CriterionForm } from "./model";
+import { agreementOut, agreementProblems, blankDraft, criterionOut, leadShare, normalizeDraft, tranchesFrom, tranchesOut, tranchesProblems, type CriterionForm } from "./model";
 
 const base: CriterionForm = {
   key: "k",
@@ -52,4 +52,18 @@ test("co-funders' shares leave the lead the rest, and are dropped when empty", (
   expect(tranchesOut([shared])[0]!.shares).toEqual([{ email: "b@x.org", amount: "4000.00" }]);
   const over = { ...shared, shares: [{ email: "b@x.org", amount: "12000" }] };
   expect(tranchesProblems([over]).map((p) => p.path)).toContain("milestones[0].shares");
+});
+
+test("a draft saved by an older release gets the fields added since", () => {
+  // Shape a browser saved before co-funding shipped: no shares on tranches, no co-funder fields on the draft.
+  const old = { ...blankDraft(), milestones: [{ key: "k1", title: "T1", amount: "100", due_date: null, criteria: [{ key: "c1", statement: "s" }] }] } as unknown as Record<string, unknown>;
+  delete old.co_funder_emails;
+  delete old.funding_window_days;
+  const d = normalizeDraft(old);
+  expect(d.co_funder_emails).toEqual([]);
+  expect(d.funding_window_days).toBe(14);
+  expect(d.milestones[0]?.shares).toEqual([]);
+  expect(d.milestones[0]?.criteria[0]?.comparator).toBe("at_least");
+  expect(() => agreementOut(d)).not.toThrow();
+  expect(normalizeDraft(null).milestones).toHaveLength(1);
 });
